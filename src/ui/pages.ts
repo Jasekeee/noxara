@@ -210,7 +210,7 @@ export class Pages {
           "div",
           "pf-id",
           undefined,
-          h("div", "pf-name", fresh.name, fresh.generation > 0 ? h("span", "fc-rookie inline", fresh.status === "retired" ? "RETIRED" : "ROOKIE") : fresh.status === "retired" ? h("span", "fc-rookie inline gone", "RETIRED") : null),
+          h("div", "pf-name", fresh.name, fresh.generation > 0 && (fresh.record.matches < 5 || fresh.status === "retired") ? h("span", "fc-rookie inline", fresh.status === "retired" ? "RETIRED" : "ROOKIE") : fresh.status === "retired" ? h("span", "fc-rookie inline gone", "RETIRED") : null),
           h("div", "fc-pers big", undefined, icon(PERSONALITY_ICON[fresh.personality] ?? PERSONALITY_ICON.balanced), h("span", "", fresh.personality)),
           h("p", "pf-story", backstory(fresh)),
         ),

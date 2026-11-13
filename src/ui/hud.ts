@@ -148,7 +148,7 @@ export class Hud {
       wn.classList.toggle("hidden", w.idx === me.idx);
       wn.textContent = `${w.name}'s`;
     });
-    this.set("wname", w.weapon, () => {
+    this.set("wname", w.weapon + (this.icons[w.weapon] ? "+" : ""), () => {
       this.wName.textContent = WEAPON_LABEL[w.weapon];
       const ic = this.icons[w.weapon];
       if (ic) this.wIcon.src = ic;
@@ -334,11 +334,22 @@ export class Hud {
     }
     for (const ch of st.chests) if (!ch.open) { c.fillStyle = "#ffc93c"; c.fillRect(ch.x * s - 2.5, ch.y * s - 2.5, 5, 5); }
     for (const f of st.fighters) {
-      if (!f.alive || f.idx === me) continue;
-      if (!visible(f.idx) && !f.bounty) continue;
-      c.fillStyle = f.bounty ? "#ffc93c" : "#ff5a5f";
-      c.beginPath(); c.arc(f.x * s, f.y * s, f.bounty ? 4.5 : 3, 0, Math.PI * 2); c.fill();
-      if (f.bounty) { c.strokeStyle = "#15112b"; c.lineWidth = 1.5; c.stroke(); }
+      if (!f.alive || f.idx === me || f.bounty) continue;
+      if (!visible(f.idx)) continue;
+      c.fillStyle = "#ff5a5f";
+      c.beginPath(); c.arc(f.x * s, f.y * s, 3, 0, Math.PI * 2); c.fill();
+    }
+    // the bounty carrier is always on the map: a pulsing gold crown
+    const b = st.fighters.find((f) => f.bounty && f.alive);
+    if (b) {
+      const k = 1 + Math.sin(performance.now() * 0.008) * 0.18;
+      const x = b.x * s, y = b.y * s, r = 7 * k;
+      c.fillStyle = "rgba(255,201,60,.3)";
+      c.beginPath(); c.arc(x, y, r * 1.6, 0, Math.PI * 2); c.fill();
+      c.beginPath();
+      c.moveTo(x - r, y + r * 0.6); c.lineTo(x - r, y - r * 0.4); c.lineTo(x - r * 0.5, y); c.lineTo(x, y - r * 0.8);
+      c.lineTo(x + r * 0.5, y); c.lineTo(x + r, y - r * 0.4); c.lineTo(x + r, y + r * 0.6); c.closePath();
+      c.fillStyle = "#ffc93c"; c.strokeStyle = "#15112b"; c.lineWidth = 1.5; c.fill(); c.stroke();
     }
     const p = st.fighters[me];
     if (p.alive) {
