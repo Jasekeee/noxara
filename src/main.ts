@@ -271,6 +271,8 @@ async function startMatch() {
   else hud.banner("READY…", "gold");
   $("title").classList.add("hidden");
   $("hud").classList.remove("hidden");
+  $("pot-chip").classList.toggle("hidden", !(current.pot > 0));
+  $("pot").textContent = fmt(current.pot);
   hud.reset();
   controls.setEnabled(true);
   if (!AUTOPLAY) hud.showHints(controls.touchMode);
@@ -800,7 +802,7 @@ function updateBountyArrow(f: { idx: number } | null) {
       const W = innerWidth, H = innerHeight, mob = W < 720;
       const cx = W / 2, cy = H / 2;
       const dx = x * cx, dy = -y * cy;
-      const left = 34, right = W - (mob ? 34 : 34), top = mob ? 150 : 80, bot = H - (mob ? 210 : 110);
+      const left = 34, right = W - (mob ? 34 : 34), top = mob ? 150 : 80, bot = H - (mob ? 240 : 110);
       let t = 1e9;
       if (dx > 0) t = Math.min(t, (right - cx) / dx);
       if (dx < 0) t = Math.min(t, (left - cx) / dx);

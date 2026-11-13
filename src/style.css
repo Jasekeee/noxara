@@ -102,6 +102,9 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
 .chip b { font: 900 20px/1 var(--display); }
 .chip span { opacity: .7; font-size: 11px; }
 #kills-chip svg { fill: var(--hot); }
+.chip.pot { border-color: rgba(255,201,60,.5); }
+.chip.pot svg { fill: var(--gold); }
+.chip.pot b { color: var(--gold); }
 
 .hud-tc { position: absolute; left: 50%; top: calc(14px + var(--safe-t)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .storm-chip {
@@ -427,7 +430,10 @@ kbd {
   .ammo i { width: 5px; height: 7px; }
   .ammo .rlbar { width: 44px; }
   .hp { padding: 4px 8px; border-radius: 10px; }
-  .hp-bar { width: 84px; height: 10px; }
+  .hp-bar { width: 64px; height: 10px; }
+  .hud-bc { max-width: calc(100% - 124px); }
+  .weapon-card { min-width: 0; }
+  .chip.pot span { display: none; }
   #hp-text { font-size: 15px; min-width: 2.5ch; }
   .hint { bottom: calc(220px + var(--safe-b)); font-size: 13px; flex-direction: column; align-items: center; gap: 6px; }
   .popup { font-size: 38px; }

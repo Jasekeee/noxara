@@ -67,3 +67,16 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
 ## Dev URL params (in addition to ?e2e / ?autoplay / ?seed=N / ?bots=1)
 `?speed=N` sim speed multiplier · `?cam=N` camera distance · `?q=0..4` force a quality level ·
 `?debugcol` draw sim collision circles. With `?e2e`, `__br.match()`, `__br.gl()` and `__br.tris()` are debug extras.
+
+## Economy UI (T2)
+- **Lobby cards** (title): portrait (rendered from the in-game model), name, personality glyph + colour, wallet in
+  $BOUNTY (gold coin), weapon/armor pips (mint), W·K·M record, gold crown badge with the bounty value on the carrier
+  (card glows gold), mint ROOKIE tag for generation > 0. Mobile: swipeable strip.
+- **Drop-in**: PLAY shows "DROPPING IN — sealing the match seed on NEAR…" over the orbiting island (never frozen);
+  ≤20 s, then offline fallback.
+- **In match**: crown badge with the bounty value over the carrier's name tag; bounty claim = gold banner + feed line.
+- **Ledger** (end): winner portrait (cheering bob), pot → winner, bounty line, upgrades bought, retirements, rookies,
+  house/burn line, mint "Verified" badge, "On NEAR" drawer with explorer links. Guests get a one-line sign-in nudge;
+  offline shows placements without amounts.
+- Chests are gold + emissive + hex pad + light beam; solid crates are dull grey-brown (terrain).
+- Storm: red/pink edge vignette, white ground arrow toward the safe zone, big pink self-damage numbers, tick each second.
