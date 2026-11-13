@@ -118,6 +118,10 @@ export interface GameClientT3 extends GameClient {
   unsponsor(bot: string): Promise<{ tx: string | null; returned: number }>;
   leaderboard(kind: "bots" | "players"): Promise<LeaderRow[]>;
   history(account: string): Promise<FighterEvent[]>;
+  /** Remaining one-time welcome entry credit (real accounts only; never transferable). */
+  welcomeCredit(): Promise<number>;
+  /** Claim the welcome credit later if the daily cap was full at registration; returns the credit granted. */
+  claimWelcome(): Promise<number>;
 }
 
 /** Implemented by Agent C in src/net/client.ts. */
