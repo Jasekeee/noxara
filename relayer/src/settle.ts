@@ -1,7 +1,7 @@
 // The match server's judgement: re-run a recorded match with the shared simulation and turn the
 // result into `settle_match` arguments. Pure (no network): unit-tested in test/settle.test.ts.
 import type { Input, MatchConfig, MatchRecord } from "../../src/sim/types.ts";
-import { FIGHTERS, MATCH_TICKS } from "../../src/sim/types.ts";
+import { FIGHTERS, MATCH_TICKS, SIM_VERSION } from "../../src/sim/types.ts";
 import { replayRecord } from "../../src/sim/record.ts";
 import { createMatch } from "../../src/sim/match.ts";
 import { configDiff, matchConfigFromChain, type ChainMatch } from "./roster.ts";
@@ -21,7 +21,20 @@ export type Replayer = (cfg: MatchConfig, inputs: MatchRecord["inputs"]) => Repl
 
 export type Verdict =
   | { ok: true; args: SettleArgs; winner: number | null; ms: number; killsFrom: "replay" | "detailed" | "none" }
-  | { ok: false; status: number; reason: string };
+  | { ok: false; status: number; reason: string; code?: string };
+
+export { SIM_VERSION };
+
+/** The client's simulation must be the server's, else the replay can't match. */
+export function checkSimVersion(clientVersion: unknown): { ok: true } | { ok: false; status: number; code: string; reason: string } {
+  if (clientVersion === SIM_VERSION) return { ok: true };
+  return {
+    ok: false,
+    status: 409,
+    code: "sim_version_mismatch",
+    reason: `this match was played with simulation ${String(clientVersion ?? "unknown")}, the server runs ${SIM_VERSION}`,
+  };
+}
 
 export { inputLogHash, settleMessage };
 
@@ -83,10 +96,10 @@ export function judge(chain: ChainMatch, record: MatchRecord, replay: Replayer =
     return { ok: false, status: 409, reason: (e as Error).message };
   }
   const diff = record.cfg ? configDiff(cfg, record.cfg) : "cfg";
-  if (diff) return { ok: false, status: 409, reason: `record does not match the on-chain match (${diff})` };
+  if (diff) return { ok: false, status: 409, code: "config_mismatch", reason: `record does not match the on-chain match (${diff})` };
 
   const r = replay(cfg, record.inputs);
-  if (r.hash !== record.hash) return { ok: false, status: 409, reason: "replay mismatch: the server's simulation disagrees with this record" };
+  if (r.hash !== record.hash) return { ok: false, status: 409, code: "replay_mismatch", reason: "replay mismatch: the server's simulation disagrees with this record" };
   if (!Array.isArray(r.placements) || r.placements.length !== FIGHTERS) return { ok: false, status: 500, reason: "simulation returned bad placements" };
 
   let kills: number[] = new Array(FIGHTERS).fill(0);

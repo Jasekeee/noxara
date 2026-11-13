@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ed25519 } from "@noble/curves/ed25519.js";
 import { base58 } from "@scure/base";
-import { checkInputs, inputLogHash, judge, settleMessage, type ReplayResult } from "../src/settle.ts";
+import { checkInputs, checkSimVersion, inputLogHash, judge, settleMessage, SIM_VERSION, type ReplayResult } from "../src/settle.ts";
 import { configDiff, matchConfigFromChain, type ChainMatch } from "../src/roster.ts";
 import { settleSignatureOk } from "../src/verify.ts";
 import type { MatchRecord } from "../../src/sim/types.ts";
@@ -112,4 +112,22 @@ test("settle signatures: only the signed (match, log) pair verifies", () => {
   assert.equal(settleSignatureOk(settleMessage("7", "abd"), pk, sig), false);
   assert.equal(settleSignatureOk(msg, "ed25519:xyz", sig), false);
   assert.equal(settleSignatureOk(msg, pk, "!!"), false);
+});
+
+test("sim version guard: only the server's own version is accepted", () => {
+  assert.deepEqual(checkSimVersion(SIM_VERSION), { ok: true });
+  for (const v of ["r0", undefined, null, 4]) {
+    const r = checkSimVersion(v);
+    assert.equal(r.ok, false);
+    if (!r.ok) {
+      assert.equal(r.code, "sim_version_mismatch");
+      assert.equal(r.status, 409);
+    }
+  }
+});
+
+test("judge: replay mismatch carries a machine-readable code", () => {
+  const v = judge(chainMatch, record(), fake({ hash: "OTHER" }));
+  assert.equal(v.ok, false);
+  assert.equal((v as { code?: string }).code, "replay_mismatch");
 });
