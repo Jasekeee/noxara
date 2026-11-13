@@ -33,3 +33,6 @@ tmp/
 
 # relayer runtime data (records, challenges, daily boards, social secret)
 relayer/data/
+
+# local Lighthouse reports
+docs/lighthouse/
