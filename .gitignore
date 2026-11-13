@@ -18,4 +18,15 @@ playwright-report/
 test-results/
 
 # large media (delivered as files, not versioned)
-docs/screens/*.webm
+*.webm
+*.mp4
+*.mov
+*.zip
+
+# temp / logs
+*.log
+*.tmp
+tmp/
+.cache/
+.vercel/
+.lighthouseci/
