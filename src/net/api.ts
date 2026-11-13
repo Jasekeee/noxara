@@ -216,5 +216,29 @@ export interface GameClientEcon {
   buyCosmetic(id: number): Promise<{ tx: string | null }>;
 }
 
+// ------------------------------------------------------------------ Daily check-in + quests (contract daily.rs)
+export interface QuestInfo {
+  id: number;
+  title: string;
+  progress: number;
+  goal: number;
+  done: boolean;
+  claimed: boolean;
+  reward: number; // NOX at today's House multiplier
+}
+export interface DailyInfo {
+  streak: number;
+  checkedInToday: boolean;
+  canCheckIn: boolean;
+  whyNot: string | null;
+  nextReward: number;
+  quests: QuestInfo[];
+}
+export interface GameClientDaily {
+  daily(): Promise<DailyInfo>;
+  checkIn(): Promise<{ tx: string | null; paid: number }>;
+  claimQuest(id: number): Promise<{ tx: string | null; paid: number }>;
+}
+
 /** Implemented by Agent C in src/net/client.ts. */
 export type CreateGameClient = (opts?: { relayer?: string; rpc?: string; contract?: string }) => Promise<GameClient>;

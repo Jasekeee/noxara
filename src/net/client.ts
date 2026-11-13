@@ -26,7 +26,7 @@ const STORE_PENDING = "bountyroyale.signin.v1";
 const STORE_XP = "bountyroyale.localxp.v1";
 /** methods the signed-in account's function-call key may call (the relayer allow-lists the same) */
 // NOT list_shares / buy_listing: those need a full wallet signature + 1 yoctoNEAR (a leaked game key must not move shares or NOX)
-const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "cancel_listing", "buy_cosmetic", "prune_listings"];
+const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "cancel_listing", "buy_cosmetic", "prune_listings", "check_in", "claim_quest"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
 const START_GAS = 150n * 10n ** 12n; // worst case: retirements + rookie accounts at start (audit #10)
@@ -813,6 +813,27 @@ class Client implements GameClientT3, GameClientEcon {
   }
   async buyCosmetic(id: number) {
     return { tx: (await this.econCall("buy_cosmetic", { id })).tx };
+  }
+
+  // ---- daily check-in + quests (paid by the House, real accounts only)
+  async daily(): Promise<import("./api").DailyInfo> {
+    const none = { streak: 0, checkedInToday: false, canCheckIn: false, whyNot: "Sign in with a NEAR account", nextReward: 0, quests: [] };
+    if (!this.realSaved) return none;
+    type Q = { id: number; title: string; progress: number; goal: number; done: boolean; claimed: boolean; reward: string };
+    const d = await this.econView<{ streak: number; checked_in_today: boolean; can_check_in: boolean; why_not: string | null; next_reward: string; quests: Q[] } | null>("get_daily", { account_id: this.realSaved.accountId }, null);
+    if (!d) return { ...none, whyNot: "Daily rewards aren't live on this contract yet" };
+    return {
+      streak: d.streak, checkedInToday: d.checked_in_today, canCheckIn: d.can_check_in, whyNot: d.why_not, nextReward: toBounty(d.next_reward),
+      quests: d.quests.map((q) => ({ id: q.id, title: q.title, progress: q.progress, goal: q.goal, done: q.done, claimed: q.claimed, reward: toBounty(q.reward) })),
+    };
+  }
+  async checkIn() {
+    const r = await this.econCall<string>("check_in", {});
+    return { tx: r.tx, paid: toBounty(r.value) };
+  }
+  async claimQuest(id: number) {
+    const r = await this.econCall<string>("claim_quest", { quest: id });
+    return { tx: r.tx, paid: toBounty(r.value) };
   }
 
   explorerTx(hash: string): string {
