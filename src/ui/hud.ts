@@ -2,6 +2,24 @@
 import type { FighterState, Match, WeaponKind } from "../sim/types";
 import { MATCH_TICKS, TICK_HZ } from "../sim/types";
 import { WEAPON_LABEL } from "../render/palette";
+import { IDLE_RELOAD, WEAPONS } from "../sim/rules";
+
+/** 0..1 reload progress (empty mag: until readyTick; partial mag: idle refill), or null when not reloading. */
+const rlStart = new Map<number, number>();
+export function reloadProgress(f: FighterState, tick: number): number | null {
+  const w = WEAPONS[f.weapon];
+  if (f.ammo === 0) {
+    if (!rlStart.has(f.idx)) rlStart.set(f.idx, Math.max(f.lastShotTick, tick - 1));
+    const s0 = rlStart.get(f.idx)!;
+    return Math.min(1, Math.max(0, (tick - s0) / Math.max(1, f.readyTick - s0)));
+  }
+  rlStart.delete(f.idx);
+  if (f.ammo < w.mag) {
+    const since = tick - f.lastShotTick;
+    if (since >= 4 && since < IDLE_RELOAD) return since / IDLE_RELOAD;
+  }
+  return null;
+}
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -37,6 +55,11 @@ export class Hud {
   private reloadStart = 0;
   private flashA = 0;
   hintsDone = false;
+  portraits: string[] = [];
+  private reloadTip = document.getElementById("reload-tip")!;
+  private reloadTipShown = false;
+  private dirEls: HTMLElement[] = [];
+  private dirI = 0;
   private lastR = Infinity;
   private shrinkTick = -99;
 
@@ -116,34 +139,47 @@ export class Hud {
     this.set("spec", w.idx === me.idx ? "" : w.name, () => {
       const el = document.getElementById("spec")!;
       el.classList.toggle("hidden", w.idx === me.idx);
-      el.textContent = "SPECTATING ";
+      const t = document.getElementById("spec-text")!;
+      t.textContent = "SPECTATING ";
       const b = document.createElement("b");
       b.textContent = w.name.toUpperCase();
-      el.appendChild(b);
+      t.appendChild(b);
+      const wn = document.getElementById("watch-name")!;
+      wn.classList.toggle("hidden", w.idx === me.idx);
+      wn.textContent = `${w.name}'s`;
     });
     this.set("wname", w.weapon, () => {
       this.wName.textContent = WEAPON_LABEL[w.weapon];
       const ic = this.icons[w.weapon];
       if (ic) this.wIcon.src = ic;
     });
-    const mx = Math.max(this.maxAmmo.get(w.weapon) ?? 0, w.ammo);
-    this.maxAmmo.set(w.weapon, mx);
-    const reloading = w.ammo === 0;
-    if (reloading) {
-      if (this.cache.get("rl") !== 1) this.reloadStart = st.tick;
-      const total = Math.max(1, w.readyTick - this.reloadStart);
-      const p = Math.min(1, Math.max(0, 1 - (w.readyTick - st.tick) / total));
+    const mx = WEAPONS[w.weapon].mag;
+    const rp = reloadProgress(w, st.tick);
+    if (w.ammo === 0) {
+      const p = rp ?? 0;
       this.set("rl", 1, () => (this.ammo.innerHTML = `<span class="rl">RELOADING</span><span class="rlbar"><i></i></span>`));
       const bar = this.ammo.querySelector<HTMLElement>(".rlbar i");
       if (bar) bar.style.transform = `scaleX(${p.toFixed(2)})`;
+      if (w.idx === me.idx && !this.reloadTipShown) {
+        this.reloadTipShown = true;
+        this.reloadTip.classList.remove("hidden");
+        setTimeout(() => this.reloadTip.classList.add("hidden"), 2600);
+      }
     } else {
       this.set("rl", 0, () => {});
       this.set("ammo", `${w.weapon}${w.ammo}/${mx}`, () => {
         let h = "";
         const n = Math.min(mx, 12);
         for (let i = 0; i < n; i++) h += i < w.ammo ? "<i></i>" : '<i class="off"></i>';
+        h += '<span class="idlebar"><i></i></span>';
         this.ammo.innerHTML = h;
       });
+      const ib = this.ammo.querySelector<HTMLElement>(".idlebar");
+      if (ib) {
+        const show = rp !== null;
+        ib.style.opacity = show ? "1" : "0";
+        if (show) (ib.firstElementChild as HTMLElement).style.transform = `scaleX(${rp!.toFixed(2)})`;
+      }
     }
     const hp = Math.max(0, Math.ceil(w.hp));
     this.set("hp", `${hp}/${w.maxHp}`, () => {
@@ -158,6 +194,30 @@ export class Hud {
       this.flashA = Math.max(0, this.flashA - 0.08);
       this.flashEl.style.opacity = String(this.flashA);
     }
+  }
+
+  /** Red wedge at the screen edge pointing toward whoever just hit you (angle: 0 = up, clockwise). */
+  damageDir(angle: number) {
+    if (!this.dirEls.length) {
+      const box = document.getElementById("dmgdir")!;
+      for (let i = 0; i < 4; i++) this.dirEls.push(box.appendChild(document.createElement("i")));
+    }
+    const el = this.dirEls[this.dirI];
+    this.dirI = (this.dirI + 1) % this.dirEls.length;
+    const r = Math.min(innerWidth, innerHeight) * 0.3;
+    el.style.transform = `rotate(${angle.toFixed(3)}rad) translateY(${-r}px)`;
+    el.animate([{ opacity: 1 }, { opacity: 1, offset: 0.3 }, { opacity: 0 }], { duration: 900, easing: "ease-out" });
+  }
+
+  feedBounty(by: string, victim: string, value: number, me: boolean) {
+    const li = document.createElement("li");
+    li.className = "bounty";
+    li.textContent = value > 0 ? `${by} claimed the ${value.toLocaleString("en-US")} $BOUNTY bounty on ${victim}!` : `${by} claimed the bounty on ${victim}!`;
+    if (me) li.classList.add("me");
+    this.feed.prepend(li);
+    while (this.feed.children.length > 5) this.feed.lastElementChild!.remove();
+    setTimeout(() => li.classList.add("out"), 6500);
+    setTimeout(() => li.remove(), 7000);
   }
 
   // ---------------------------------------------------------------- events
