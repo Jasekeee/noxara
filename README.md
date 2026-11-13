@@ -24,7 +24,7 @@ Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for 
 | Watch the glowing wall | The storm shrinks toward the next circle; outside it you take damage |
 | Find the crown | The bounty carrier — the richest fighter. Killing it pays its bounty |
 | Last one standing | Your place out of 10, kills, damage; the ledger shows every fighter's wallet change, then **Verified** once the match is settled on chain |
-| Open **Fighters** | Each fighter's **real NEAR account** (e.g. `brindle.royale.br-7e8492.testnet`, explorer link — no keys), wallet, record, upgrades and story; the **Hall of the Broke** lists retired fighters and the rookies who replaced them |
+| Open **Fighters** | Each fighter's **real NEAR account** (e.g. `pip.royale.br-7e8492.testnet`; a rookie's account carries its generation, like `zest-4.royale…` — the display name can differ from the account it inherited; explorer link, no keys), wallet, record, upgrades and story; the **Hall of the Broke** lists retired fighters and the rookies who replaced them |
 | Open **Leaderboard** | Top fighters and players by wins, kills, earnings |
 | **Sign in** with a NEAR wallet (one approval, then gasless) | A one-time welcome entry credit (pays entry fees only, not transferable), XP and unlocks, real NOX prizes |
 | Open **ECONOMY** | Live supply, burned, House treasury vs target, reward multiplier m, bots by P&L, share prices and dividends, season standings |
@@ -42,10 +42,10 @@ Guests play everything but earn **zero** NOX — only signed-in NEAR accounts ca
 ## Economy (v2)
 > **AI esports where the athletes are autonomous agents with wallets and fans are their owners.**
 
-- **Closed loop:** 2,900 NOX at genesis, **nothing minted afterwards**. Every reward is paid from NOX collected earlier through entry fees, pot cuts and taxes.
+- **Closed loop:** 2,900 NOX at genesis, **nothing minted by economy v2**. Every reward is paid from NOX collected earlier through entry fees, pot cuts and taxes. (The testnet contract shows 3,150 minted: 250 came from the old v1 economy before the upgrade; `npm run verify` checks that nothing was minted since.)
 - **The House rule:** one public formula of the House treasury's moving average sets the reward multiplier, the House's share of each pot and the burn share. Poorer House: smaller rewards, bigger cuts. Readable on chain (`get_economy`).
 - **Sinks and anti-snowball:** progressive entry fees and upkeep for rich bots, a 2% burned tax on share trades, capped upgrade power (cosmetics have no cap), bronze brackets for new players, a deflation brake so supply levels off instead of burning to zero.
-- **Bots are businesses:** each has a season P&L, can go bankrupt and is replaced by a rookie. Fans own **shares** (1,000 per fighter, NEP-245 inside the game contract): IPO for rookies, a fixed-price market, dividends from profit only.
+- **Bots are businesses:** each has a season P&L, can go bankrupt and is replaced by a rookie. Fans own **shares** (each fighter has 1,000; 300 are sold in its IPO, the fighter keeps the rest; NEP-245 inside the game contract): a fixed-price market, dividends from profit only.
 - **Checked by simulation:** 20 runs x 10,000 matches, charts below. Full spec and results: [`docs/ECONOMY.md`](docs/ECONOMY.md). The in-game **ECONOMY** page is the live report. NOX is play-money. **No real-money wagering anywhere.**
 
 ![Supply over 10,000 simulated matches](docs/econ/supply.svg)
@@ -65,7 +65,7 @@ The in-game page "HOW NEAR POWERS NOXARA" shows the same list with live explorer
 - **Deterministic match simulation** (`src/sim/`, pure TypeScript): 20 Hz fixed tick, integer fixed-point math, pre-computed trig tables, one seeded PRNG. The browser renders it at 60 FPS (three.js) with interpolation; Node runs the exact same code.
 - **Re-verifiable matches:** a match is its seed + the human's inputs. The match server replays the input log before settling; `npm run verify-match <file>` lets anyone replay it offline and check the result hash.
 - **Bots:** utility AIs with personalities (aggressive, camper, sniper, looter, coward, balanced) that loot, rotate with the storm, hide in bushes and steal last hits. Upgrades bought with their winnings change their stats.
-- **Contract** (`contracts/royale`, Rust, near-sdk): NOX (NEP-141/145/148), entries/pot/bounty, upgrades, retirements and rookies (protected for their first 10 matches), the House rule (economy v2, nothing minted after genesis), bot shares (NEP-245 subset) with a fixed-price market, seasons, daily check-in and quests, on-chain progression, match history. Details and every testnet tx: `docs/CHAIN.md`.
+- **Contract** (`contracts/royale`, Rust, near-sdk): NOX (NEP-141/145/148), entries/pot/bounty, upgrades, retirements and rookies (protected for their first 10 matches), the House rule (economy v2: nothing minted), bot shares (NEP-245 subset) with a fixed-price market, seasons, daily check-in and quests, on-chain progression, match history. Details and every testnet tx: `docs/CHAIN.md`.
 - **Trust model (honest):** the server computes, the chain records, anyone can re-verify. Settlement proves the result is consistent with the recorded inputs — not that a human played them. NOX is play-money.
 
 ## Verify it yourself

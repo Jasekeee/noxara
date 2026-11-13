@@ -33,8 +33,8 @@ export const PLAY_MONEY_NOTE = "NOX is play-money: an in-game score you can spen
 export function potBreakdown(start: StartResult): HTMLElement | null {
   if (start.entries === undefined || !(start.pot > 0)) return null;
   const top = Math.max(0, Math.round((start.pot - start.entries) * 100) / 100);
-  const li = h("li", "small pot-sum", `Entries ${fmt(start.entries)} + House top-up ${fmt(top)} = pot ${fmt(start.pot)} NOX`);
-  li.title = `The House (the game's treasury) adds a top-up to every pot, so the pot is bigger than the entry fees. ${PLAY_MONEY_NOTE}`;
+  const li = h("li", "small pot-sum", `Pot = entries ${fmt(start.entries)} + House top-up ≈${fmt(top)} (× the House multiplier); the winner gets it minus a small burn and the House cut`);
+  li.title = `The House (the game's treasury) adds a top-up to every pot, scaled by its public rule (get_economy), so the pot is bigger than the entry fees. 10% of the entries and a small share of the pot are burned. ${PLAY_MONEY_NOTE}`;
   return li;
 }
 
@@ -100,7 +100,8 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     }
     if (!s.payouts.some((x) => x.reason === "bounty") && L.start.bountyIdx !== null) {
       const carrier = L.names[L.start.bountyIdx];
-      row(ICON.crown, `${carrier} survived with the bounty`, null, "bounty");
+      // the bounty is paid only for a fighter's last hit on the carrier: say what actually happened
+      row(ICON.crown, w === L.start.bountyIdx ? `${carrier} won and kept the bounty` : `Nobody claimed ${carrier}'s bounty (no fighter landed the last hit)`, null, "bounty");
     }
     for (const u of s.upgrades) {
       const what = /^weapon/i.test(u.what) ? "a weapon upgrade" : /^armou?r/i.test(u.what) ? "an armor upgrade" : /^skin/i.test(u.what) ? "a new look" : u.what;

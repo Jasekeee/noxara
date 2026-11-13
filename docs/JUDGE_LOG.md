@@ -37,3 +37,15 @@ Top weaknesses → action:
 4. Money doesn't reconcile across screens (pot, bounty + House bonus); explorer shows the old "BOUNTY" label → end-screen breakdown (helper); explorer note in CHAIN.md (fixed).
 5. Market invisible to guests; same IPO for veterans; raw story log → "if you owned 10%" preview + story summary (helper); IPO wording fixed.
 Strengths: chain claims real and checkable (next-block seed, replay, settle, keyless bots, NEP-366); presentation; track fit.
+
+## Cold judge #4 — 2026-11-13 ~23:55 UTC (after judge #3 fixes + training island)
+| Tech | Orig | NEAR | Demo | Pack | Fit | Main | Total |
+|---|---|---|---|---|---|---|---|
+| 9 | 7 | 8 | 7 | 8 | 8 | 8 | **55/70** (46 → 53 → 55) |
+
+Weaknesses → action:
+1. Nearblocks shows "Bounty (BOUNTY)" — the explorer's cached metadata; on-chain `ft_metadata` is Nox/NOX (documented in CHAIN.md). A mainnet deploy starts clean.
+2. Storm death confusing → warning now says "OUTSIDE THE ZONE · −X HP/s · GET TO THE CIRCLE" (+ red vignette already there).
+3. Ledger contradictions → the pot estimate uses the live House top-up (get_economy), the breakdown explains burn/cut, the bounty line says what really happened ("Nobody claimed X's bounty" / "X won and kept the bounty").
+4. README vs live data → shares (1,000 per fighter, 300 in the IPO), minting (v1 legacy 250 explained, verify checks 0 since), example account fixed.
+5. Fan ownership invisible to guests; challenge link uses the play-test LAN address; og:image relative → read-only "if you owned 10%" preview exists on profiles; a public base URL needs hosting (owner decision) — `VITE_PUBLIC_URL` makes og absolute at build.

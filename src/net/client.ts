@@ -438,7 +438,8 @@ class Client implements GameClientT3, GameClientEcon {
     return {
       matchId: m.match_id,
       cfg,
-      pot: toBounty(BigInt(m.pot ?? "0") + BigInt(chainCfg?.pot_top_up ?? "0")),
+      // economy v2: the top-up is 25 x the House multiplier m (get_economy.top_up), added at settle
+      pot: toBounty(BigInt(m.pot ?? "0") + BigInt((await this.econView<{ top_up: string } | null>("get_economy", {}, null))?.top_up ?? chainCfg?.pot_top_up ?? "0")),
       entries: toBounty(m.pot ?? "0"),
       bountyIdx: m.bounty_idx ?? null,
       bountyValue,

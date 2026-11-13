@@ -133,8 +133,10 @@ export class Hud {
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
     const outside = me.alive && dx * dx + dy * dy > st.storm.r * st.storm.r;
     const low = me.alive && me.hp / Math.max(1, me.maxHp) < 0.3;
-    this.set("out", (outside ? 1 : 0) + (low ? 2 : 0), () => {
+    this.set("out", (outside ? 1 : 0) + (low ? 2 : 0) + st.storm.dps * 4, () => {
       this.stormWarn.classList.toggle("hidden", !outside);
+      // say how much it hurts and what to do (cold judge #4: storm deaths were confusing)
+      this.stormWarn.textContent = `OUTSIDE THE ZONE · −${st.storm.dps} HP/s · GET TO THE CIRCLE`;
       this.vignette.className = outside ? "on" : low ? "low" : "";
     });
 
