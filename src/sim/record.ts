@@ -2,8 +2,11 @@
 // Convention: push(match.state.tick /* read BEFORE match.step() */, idx, input) for every human input
 // you pass to step(). Only changes are stored. Replay feeds each recorded input from its tick until the
 // next change for that idx, so the replayed match is bit-identical (same hash()).
+// Packing: the "aim" column holds aim (0..4095) + 4096 * q, where q = aimDistQ(input.aimDist)
+// (0 = no aimDist). Old records (aim < 4096) replay unchanged. Proposal for the lead: a 7th column.
 import { MATCH_TICKS, type Input, type MatchConfig, type MatchRecord } from "./types";
 import { createMatch } from "./match";
+import { aimDistQ } from "./rules";
 
 const norm = (v: number) => Math.trunc(v) || 0;
 
@@ -11,7 +14,10 @@ export class Recorder {
   readonly inputs: MatchRecord["inputs"] = [];
   private last = new Map<number, string>();
   push(tick: number, idx: number, i: Input) {
-    const row: [number, number, number, number, number, number] = [norm(tick), idx, norm(i.mx), norm(i.my), norm(i.aim), i.fire ? 1 : 0];
+    const aim = ((norm(i.aim) % 4096) + 4096) % 4096;
+    const row: [number, number, number, number, number, number] = [
+      norm(tick), idx, norm(i.mx), norm(i.my), aim + 4096 * aimDistQ(i.aimDist), i.fire ? 1 : 0,
+    ];
     const k = `${row[2]},${row[3]},${row[4]},${row[5]}`;
     if (this.last.get(idx) === k) return;
     this.last.set(idx, k);
@@ -30,8 +36,11 @@ export function replayRecord(
   let k = 0;
   while (!m.state.over && m.state.tick < MATCH_TICKS) {
     while (k < rows.length && rows[k][0] <= m.state.tick) {
-      const [, idx, mx, my, aim, fire] = rows[k++];
-      cur.set(idx, { mx, my, aim, fire: fire === 1 });
+      const [, idx, mx, my, packed, fire] = rows[k++];
+      const q = Math.floor(packed / 4096);
+      const inp: Input = { mx, my, aim: packed - q * 4096, fire: fire === 1 };
+      if (q > 0) inp.aimDist = (q - 1) * 100;
+      cur.set(idx, inp);
     }
     m.step(cur);
   }

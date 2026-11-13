@@ -25,9 +25,9 @@ export const BUSH_REVEAL_SHOT = 20;
 export const BUSH_REVEAL_HURT = 10;
 
 /** Out-of-combat regen: after REGEN_DELAY ticks without being hurt or shooting, +REGEN_HP every REGEN_EVERY ticks. */
-export const REGEN_DELAY = 60;
+export const REGEN_DELAY = 50;
 export const REGEN_EVERY = 10;
-export const REGEN_HP = 4;
+export const REGEN_HP = 5;
 
 export const CRIT_PCT = 8;
 /** crit multiplier ×1.5 */
@@ -49,12 +49,25 @@ export interface WeaponStats {
 }
 
 export const WEAPONS: Record<WeaponKind, WeaponStats> = {
-  popper: { dmg: 12, cd: 6, range: 9 * FP, speed: 900, mag: 6, reload: 30, pellets: 1, spread: 0, blast: 0, fuse: 0 },
-  blaster: { dmg: 16, cd: 4, range: 11 * FP, speed: 1000, mag: 10, reload: 36, pellets: 1, spread: 0, blast: 0, fuse: 0 },
-  shotgun: { dmg: 9, cd: 16, range: 6 * FP, speed: 900, mag: 4, reload: 40, pellets: 5, spread: 150, blast: 0, fuse: 0 },
-  sniper: { dmg: 55, cd: 30, range: 22 * FP, speed: 2500, mag: 3, reload: 50, pellets: 1, spread: 0, blast: 0, fuse: 0 },
-  grenade: { dmg: 45, cd: 20, range: 9 * FP, speed: 563, mag: 3, reload: 50, pellets: 1, spread: 0, blast: 2500, fuse: 16 },
+  popper: { dmg: 10, cd: 6, range: 9 * FP, speed: 900, mag: 6, reload: 30, pellets: 1, spread: 0, blast: 0, fuse: 0 },
+  blaster: { dmg: 14, cd: 4, range: 11 * FP, speed: 1000, mag: 10, reload: 36, pellets: 1, spread: 0, blast: 0, fuse: 0 },
+  shotgun: { dmg: 8, cd: 16, range: 6 * FP, speed: 900, mag: 4, reload: 40, pellets: 5, spread: 150, blast: 0, fuse: 0 },
+  sniper: { dmg: 48, cd: 30, range: 22 * FP, speed: 2500, mag: 3, reload: 50, pellets: 1, spread: 0, blast: 0, fuse: 0 },
+  grenade: { dmg: 40, cd: 20, range: 9 * FP, speed: 563, mag: 3, reload: 50, pellets: 1, spread: 0, blast: 2500, fuse: 16 },
 };
+
+/**
+ * Input.aimDist (FP) is quantised to 0.1 u so it fits in a MatchRecord: q = 0 means "absent"
+ * (max range), otherwise q - 1 = tenths of a unit. Used identically by the sim and the recorder.
+ */
+export function aimDistQ(aimDist: number | undefined): number {
+  if (aimDist === undefined || !Number.isFinite(aimDist)) return 0;
+  return Math.max(0, Math.min(400, Math.trunc(aimDist / 100))) + 1;
+}
+/** Lob distance (FP) for a quantised aimDist, clamped to [1 u, range]. */
+export function lobDist(q: number, range: number): number {
+  return q === 0 ? range : Math.max(1000, Math.min(range, (q - 1) * 100));
+}
 
 /** Stable order (used by the hash). */
 export const WEAPON_ORDER: WeaponKind[] = ["popper", "blaster", "shotgun", "sniper", "grenade"];
@@ -89,12 +102,12 @@ export interface StormPhase {
 }
 const S = 20;
 export const STORM_PHASES: StormPhase[] = [
-  { announce: 1, shrinkStart: 20 * S, shrinkEnd: 35 * S, r: 22 * FP, dps: 4 },
-  { announce: 35 * S, shrinkStart: 50 * S, shrinkEnd: 65 * S, r: 14 * FP, dps: 6 },
-  { announce: 65 * S, shrinkStart: 80 * S, shrinkEnd: 95 * S, r: 8 * FP, dps: 9 },
-  { announce: 95 * S, shrinkStart: 108 * S, shrinkEnd: 123 * S, r: 4500, dps: 12 },
-  { announce: 123 * S, shrinkStart: 140 * S, shrinkEnd: 165 * S, r: 2500, dps: 16 },
-  { announce: 165 * S, shrinkStart: 169 * S, shrinkEnd: 177 * S, r: 0, dps: 20 },
+  { announce: 1, shrinkStart: 30 * S, shrinkEnd: 50 * S, r: 22 * FP, dps: 5 },
+  { announce: 50 * S, shrinkStart: 75 * S, shrinkEnd: 95 * S, r: 15 * FP, dps: 8 },
+  { announce: 95 * S, shrinkStart: 112 * S, shrinkEnd: 127 * S, r: 9500, dps: 11 },
+  { announce: 127 * S, shrinkStart: 137 * S, shrinkEnd: 150 * S, r: 5500, dps: 14 },
+  { announce: 150 * S, shrinkStart: 155 * S, shrinkEnd: 166 * S, r: 2500, dps: 18 },
+  { announce: 166 * S, shrinkStart: 169 * S, shrinkEnd: 177 * S, r: 0, dps: 24 },
 ];
 /** Storm damage is applied every STORM_EVERY ticks (= dps / 2, rounded up). */
 export const STORM_EVERY = 10;
