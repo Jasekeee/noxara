@@ -38,7 +38,7 @@ const lastLines = (s: string, n = 4) => s.trim().split("\n").slice(-n).join(" | 
 // strip ANSI colours from tool output
 const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "");
 
-console.log("BOUNTY ROYALE — verifying the README claims\n");
+console.log("NOXARA — verifying the README claims\n");
 
 await check("TypeScript compiles under strict mode (src, tools, tests)", () => {
   const r = run(bin("tsc"), ["--noEmit", "-p", "."]);

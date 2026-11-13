@@ -119,7 +119,7 @@ const summary = {
   fails,
 };
 
-console.log(`\nBOUNTY ROYALE balance sim — ${N} bot-only matches, seeds ${from}..${from + N - 1}, idx0 = ${p0}`);
+console.log(`\nNOXARA balance sim — ${N} bot-only matches, seeds ${from}..${from + N - 1}, idx0 = ${p0}`);
 console.log("personality   fighters/match  wins  win share  win/fighter  avg kills");
 for (const r of rows)
   console.log(

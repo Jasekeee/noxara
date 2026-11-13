@@ -1,4 +1,6 @@
-# BOUNTY ROYALE — project rules for Claude
+# NOXARA — project rules for Claude
+
+*Only one walks out.* (Renamed from BOUNTY ROYALE on 2026-11-13; token **Nox / NOX**, formerly $BOUNTY. The in-game bounty mechanic keeps its name.)
 
 NEAR HACKATHON entry. Primary track: **games** (memecoins optional, don't optimize for it). The owner is not a developer: Claude writes all code. Quality bar: feels like a Brawl Stars / Fortnite slice, not a web demo.
 
@@ -21,7 +23,7 @@ games: "Build NPCs with wallets, player-owned markets and economies that evolve 
 ## The game
 - 3D stylized top-down battle royale, angled camera. 3-minute matches. 10 fighters on a small island: you + 9 AI fighters.
 - Bushes hide you; chests give weapons (blaster, shotgun, sniper, grenade); heal pickups; a shrinking storm. Last one standing wins the pot.
-- The 9 AI fighters are **persistent characters** with names, personalities (aggressive, camper, sniper, looter, coward…) and their own NEAR accounts. They pay entry from their wallet, keep winnings, buy upgrades (weapon tiers, armor, skins) that change how they play. Rich bots get stronger; broke bots retire and a rookie replaces them. No dev patch.
+- The 9 AI fighters are **persistent characters** with names, personalities (aggressive, camper, sniper, looter, coward…) and their own NEAR accounts and NOX wallets. They pay entry from their wallet, keep winnings, buy upgrades (weapon tiers, armor, skins) that change how they play. Rich bots get stronger; broke bots retire and a rookie replaces them. No dev patch.
 - **Bounty:** the richest bot carries a bounty; killing it pays the bounty (map marker, kill feed).
 - **Sponsors (player-owned market):** players back a bot with stake and share its future winnings.
 - Progression like Clash Royale: unlock/upgrade weapons between matches.
@@ -49,4 +51,13 @@ Up to 4 agents, each in its own git worktree/branch, strict file ownership (see 
 ## Owner decisions (2026-11-13 ~17:50 UTC)
 - First $BOUNTY for real players: **welcome stake** — once per real NEAR account, small fixed amount, play-money only; guests get 0.
 - Multi-wallet sign-in: `@hot-labs/near-connect` pinned **exactly 0.12.0**.
-- Mainnet: **yes, but not now** — nothing on mainnet until the owner's explicit "yes". Root account: `bountyroyale.near` (free as of 2026-11-13, read-only check). Hosting: **Vercel** (frontend) + **Railway** (match server + relayer). The owner imports mainnet keys personally.
+- Hosting: **Vercel** (frontend) + **Railway** smallest plan (match server + relayer). The owner imports mainnet keys personally.
+
+## Owner decisions (2026-11-13 evening)
+- **Rename:** project NOXARA, tagline "Only one walks out.", token name "Nox", symbol NOX. Root `noxara.near` (free as of 2026-11-13, read-only check).
+- **Mainnet: YES in the cheapest safe form — prepare, then ask.** Nothing on mainnet until the owner replies **"yes, deploy"**. Plan + costs + teardown: `docs/MAINNET.md`.
+  - One contract on the root (game + token); bots = keyless sub-accounts with minimum balance; only root, relay, bots.
+  - Guest gas budget 1 NEAR on the relayer, daily guest cap, per-IP limit, clean stop → guests play offline, real accounts still work.
+  - Before any mainnet step: fresh security audit; all HIGH/MEDIUM fixed; second audit GO.
+  - Season ends 2026-11-25; teardown returns refundable storage to the owner's wallet.
+- Welcome stake = a one-time, non-transferable **entry credit** (30) per real account that registers itself or via the relayer; never guests.

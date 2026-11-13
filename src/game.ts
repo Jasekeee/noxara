@@ -1,4 +1,4 @@
-// BOUNTY ROYALE client: fixed-step simulation (TICK_HZ) + interpolated Three.js rendering + juice.
+// NOXARA client: fixed-step simulation (TICK_HZ) + interpolated Three.js rendering + juice.
 import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";

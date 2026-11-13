@@ -1,50 +1,80 @@
-# Mainnet release plan (NOT executed — needs the owner's explicit "yes")
+# NOXARA — mainnet release plan (NOT executed)
 
-Nothing here has been run on mainnet. No mainnet keys exist on this machine. Every step that touches mainnet or hosting waits for the owner.
+Owner decision (2026-11-13): **mainnet yes, in the cheapest safe form — prepare, then ask.** Nothing here
+has been run on mainnet. No mainnet keys exist on this machine. Every mainnet or hosting step waits for
+the owner's literal reply **"yes, deploy"**.
 
-## 1. What goes live
-| Piece | Where | Notes |
-|---|---|---|
-| Game contract + $BOUNTY (NEP-141) | `royale.<root>.near` | same code as testnet `royale.br-7e8492.testnet` (`contracts/royale`, 353 KB wasm) |
-| 9 bot fighters + house | `<name>.royale.<root>.near` | created by `new()` with **no access keys** |
-| Match server (only account allowed to `settle_match`) | `server.<root>.near` | key only in hosted env vars |
-| Relayer (guests, storage, gas) | `relay.<root>.near` | key only in hosted env vars |
-| Frontend | static hosting (Vercel or GitHub Pages) | `npm run build` → `dist/` |
-| Relayer + match server process | Node 24 host (Railway or Fly.io) | `npm start --prefix relayer`, needs a small persistent volume for `relayer/data/` |
-
-## 2. Cost estimate [from `scripts/deploy.ts --dry-run`, testnet-measured gas]
-| Item | NEAR |
+## 0. Gate before any mainnet step
+| Gate | Status |
 |---|---|
-| Contract account funding (code storage 3.53 + state headroom 0.96) | 4.50 |
-| Server account (settle gas) | 1.00 |
-| Relayer account (guest accounts, storage deposits, relayed gas) | 4.00 |
-| Deploy gas upper bound | 0.05 |
-| **Total from the root account** | **≈ 9.55** |
-| Ongoing: per new guest | ≈ 0.024 (0.003 account + 0.02 storage deposit + gas) |
-| Ongoing: per match | ≈ 0.001 start (relayer) + 0.001–0.007 settle (server) |
-| Example: 300 guests × 3 matches | ≈ 7.2 + 3.6 ≈ **11 NEAR** extra relayer/server budget |
-Plus the root account itself (a named `.near` account the owner creates and funds in their own wallet).
+| Independent security audit #1 of `contracts/royale` | done 2026-11-13: **NO-GO** (2 HIGH, 3 MEDIUM, 2 LOW) — fixes in progress |
+| All HIGH/MEDIUM fixed, each with a regression test (incl. the audit's PoC exploits) | pending |
+| Second fresh audit says GO | pending |
+| Full mainnet topology rehearsed on testnet (deploy → match → settle → teardown → balance returned) | pending |
+| Release wasm rebuilt from the audited commit (+ checksum recorded here) | pending |
 
-## 3. Steps (owner does the key steps; Claude never sees seed phrases)
-1. **Owner:** create/fund a mainnet root account (e.g. `bountyroyale.near`) in your own wallet with ≥ 21 NEAR (9.55 deploy + ~11 operating buffer).
-2. **Owner:** import that key into the NEAR CLI legacy keychain yourself (`near account import-account …`) — only after saying "yes" to the deploy. Tell Claude when done (Claude checks only that the file exists, never prints it).
-3. **Claude:** build the wasm (`cargo near build non-reproducible-wasm` today; a reproducible NEP-330 build needs Docker + `[package.metadata.near.reproducible_build]` in `contracts/royale/Cargo.toml` — not configured yet [verified], recommended before mainnet), then the guarded deploy: `BR_MAINNET_YES=yes node scripts/deploy.ts --network mainnet --root <root>.near` — creates the contract, bots, server and relayer accounts; writes `scripts/deployments/mainnet.json` (accounts + tx hashes, no keys); new server/relayer keys go only to a local `.env.mainnet` (gitignored) for the hosting step.
-4. **Claude:** read-only checks — `npm run verify` against mainnet (contract exists, 9 bots keyless, config), one smoke match settled by the server.
-5. **Owner "yes" for hosting:** Claude deploys the frontend (Vercel/GitHub Pages) and the relayer (Railway/Fly.io) with keys pasted by the owner into the host's secret env vars (Claude provides the exact variable names; it does not upload keys itself).
-6. **Before submission (owner decides):** optionally delete the root's full-access key from the contract account to make the rules final (no more upgrades), as the brief allows "contract keys are removed only right before submission".
+## 1. Accounts (nothing beyond these)
+| Account | Role |
+|---|---|
+| `noxara.near` | root **and** contract: game + Nox (NOX) token in one contract. Free as of 2026-11-13 (read-only `view_account` check; fallbacks `playnoxara.near`, `noxaragame.near` also free) |
+| `relay.noxara.near` | relayer (guest accounts, storage, relayed gas) **and** the only account allowed to `settle_match`. Trade-off: one hot key instead of two; whoever holds it can settle matches, but every settlement stores its input-log hash and anyone can re-verify it offline (`npm run verify-match`); the owner can rotate it with `set_server` |
+| `<bot>.noxara.near` ×10 (9 fighters + house) | created by the contract with **no access keys**, funded with exactly their storage (100 bytes ≈ 0.001 NEAR) |
 
-## 4. Risks and how they're handled
+The owner account (your wallet, e.g. `<you>.near`) is set as `owner` and as the fixed teardown beneficiary at `new()`.
+
+## 2. Cost (preliminary — final numbers after the audit fixes and the testnet rehearsal)
+| Item | NEAR | Kind |
+|---|---|---|
+| Contract code storage (wasm ≈ 353 KB → 1 NEAR per 100 KB) | ≈ 3.53 | refundable (on teardown) |
+| Contract state headroom (testnet: ≈ 56 KB after 46 matches) | ≈ 0.96 | refundable |
+| Relayer budget: guest accounts + storage deposits + relayed gas, hard-capped | 1.00 | mostly spent; unused part refundable |
+| 10 keyless bot/house accounts | 0.01 | spent (no key → can't be deleted) |
+| Deploy gas | ≤ 0.05 | spent |
+| **Total** | **≈ 5.6** (fund the root with ≥ 7) | ≈ 4.5 refundable / ≈ 1.1 spent |
+
+Ongoing: Railway smallest plan for match server + relayer (≈ $5/month [assumed — check price before launch]); Vercel static hosting free tier [assumed].
+
+**Guest budget:** when the relayer's 1 NEAR budget (or the daily guest cap / per-IP limit) is used up, the
+relayer stops cleanly (`/api/health` → `guests: "closed"`); guests then play offline (clearly labelled,
+nothing recorded) while signed-in players keep playing with their own function-call key allowance.
+
+## 3. Steps
+**Owner:**
+1. In your own wallet create `noxara.near` and fund it with ≥ 7 NEAR.
+2. Import its key without typing a seed phrase anywhere here:
+   `near account import-account using-web-wallet network-config mainnet` (approve in the wallet page).
+3. Reply **"yes, deploy"** and say whether you run the deploy commands yourself (Claude writes them out
+   verbatim) or Claude runs them via the CLI keychain (Claude never prints or opens the key file).
+
+**Claude, after "yes, deploy":**
+4. Rebuild the wasm from the audited commit; run all tests; record the checksum here.
+5. `BR_MAINNET_YES=yes node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <you>.near`
+   — deploy + `new()` in **one atomic transaction** (init can't be front-run), creates `relay.noxara.near`
+   and the 10 keyless accounts, writes `scripts/deployments/mainnet.json` (accounts + tx hashes, no keys).
+   The relayer key goes only to a local gitignored `.env.mainnet` for the hosting step.
+6. Read-only checks: contract metadata (Nox/NOX), 10 accounts with 0 keys, one smoke match settled.
+7. Hosting (needs the same "yes"): Vercel (frontend) + Railway (relayer). You paste the relayer key into
+   Railway's secret variables yourself; Claude gives the exact variable names.
+
+## 4. Teardown after 2026-11-25
+The season ends 2026-11-25 00:00 UTC. NOX is play-money. From the season end new matches are refused;
+players can unregister to get self-paid storage deposits back.
+1. Delete the game contract and return its whole balance (code + state storage) to your wallet:
+   `near account delete-account noxara.near beneficiary <you>.near network-config mainnet sign-with-legacy-keychain send`
+   If the contract's full-access key was removed before submission, call the time-locked owner method instead:
+   `near contract call-function as-transaction noxara.near teardown json-args '{}' prepaid-gas '300 Tgas' attached-deposit '0 NEAR' sign-as <you>.near network-config mainnet sign-with-legacy-keychain send`
+   (it sweeps any unsettled match first and pays the fixed beneficiary; refused before 2026-11-25).
+2. Delete the relayer account (key from `.env.mainnet` / Railway):
+   `near account delete-account relay.noxara.near beneficiary <you>.near network-config mainnet sign-with-legacy-keychain send`
+3. Delete the Railway service and the Vercel project.
+4. Not refundable: keyless bot/rookie accounts (≈ 0.001 NEAR each) and guest accounts (≈ 0.003 NEAR each).
+5. After deletion the name `noxara.near` can be registered again by anyone.
+
+## 5. Risks
 | Risk | Mitigation |
 |---|---|
-| Relayer drained by fake guests | per-IP + global hourly guest caps, gas budgets per sender, signature + key-owner checks before spending, one storage subsidy per account (refunds go back to the relayer) |
-| Server key compromise → fake settlements | server can only call `settle_match`; every settled match stores its input-log hash and anyone can re-verify offline (`npm run verify-match`); owner can rotate the server account (`set_server`) |
-| Token treated as an investment | $BOUNTY is a game token: no sale, no swap, no NEAR→$BOUNTY purchase in the app; guests earn zero |
-| Block randomness | seed is fixed by `random_seed` in a later block; documented as not validator-proof |
-| Real players' first $BOUNTY | **owner decision pending** (welcome stake vs earned qualification); `house_grant` is testnet-only tooling |
-
-## 5. Open decisions for the owner
-1. "Yes" to mainnet deploy (steps 1–4) and the root account name.
-2. "Yes" to hosting (step 5) and which hosts.
-3. First $BOUNTY for real players: welcome stake or earned qualification.
-4. Multi-wallet sign-in via `@hot-labs/near-connect` 0.12.0 (today: MyNearWallet redirect only).
-5. Whether to lock the contract (remove keys) before submission.
+| Relayer drained | 1 NEAR hard budget, daily guest cap, per-IP limit, clean stop |
+| Relay/server key compromise | can only relay and settle; settlements carry input-log hashes anyone can re-verify; `set_server` rotation |
+| Player searches offline for a winning input log (seed is public before play, sim is deterministic) | server rejects records submitted faster than real time and implausible input rates; settlement proves consistency, not human play; winnings are play-money |
+| Token treated as an investment | NOX is play-money: no sale, no swap, no NEAR→NOX purchase, guests earn 0, season ends 2026-11-25 |
+| Block randomness | seed fixed by `random_seed` of a later block; not validator-proof (documented) |

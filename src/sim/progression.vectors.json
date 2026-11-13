@@ -1,5 +1,5 @@
 {
- "description": "BOUNTY ROYALE progression test vectors (src/sim/progression.ts). Integer math only. Out-of-range placement counts as 10th; kills clamped to 0..9; level clamped to 1..10.",
+ "description": "NOXARA progression test vectors (src/sim/progression.ts). Integer math only. Out-of-range placement counts as 10th; kills clamped to 0..9; level clamped to 1..10.",
  "constants": {
   "PLACEMENT_XP": [
    100,

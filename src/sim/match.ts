@@ -1,4 +1,4 @@
-// BOUNTY ROYALE deterministic match simulation (agent B). Pure TS, no DOM, integer math only.
+// NOXARA deterministic match simulation (agent B). Pure TS, no DOM, integer math only.
 //
 // T1 tuning (tables live in rules.ts):
 //  - 20 Hz, 3600 ticks max. Island radius 32 u, spawns on a 26 u ring (±1 u, ±30 angle jitter;
