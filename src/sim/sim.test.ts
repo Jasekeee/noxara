@@ -22,6 +22,7 @@ function scriptedHuman(seed: number) {
     if (tick % 7 === 0) {
       const a = rng.below(4096);
       cur = { mx: Math.trunc((icos(a) * 1000) / 1024), my: Math.trunc((isin(a) * 1000) / 1024), aim: rng.below(4096), fire: rng.chance(60) };
+      if (rng.chance(50)) cur.aimDist = rng.range(0, 12000);
     }
     return cur;
   };
@@ -196,6 +197,24 @@ describe("rules", () => {
     expect(stormKills.length).toBeGreaterThan(0);
     expect(m.state.winner).not.toBeNull();
     expect(m.state.fighters.filter((f) => f.placement === 1).length).toBe(1);
+  });
+
+  it("grenades land at Input.aimDist (clamped to max range) and explode", () => {
+    for (const [want, expectD] of [[4000, 4600], [undefined, 9600], [50000, 9600], [200, 1600]] as const) {
+      const m = createMatch({ seed: 21, fighters: allHuman() });
+      const f = m.state.fighters[0];
+      f.x = 0; f.y = 0; f.weapon = "grenade"; f.ammo = 3;
+      for (const o of m.state.fighters) if (o.idx !== 0) { o.x = 30000; o.y = 0; }
+      m.map.obstacles.length = 0;
+      const inp: Input = { mx: 0, my: 0, aim: 0, fire: true };
+      if (want !== undefined) inp.aimDist = want;
+      let boom: SimEvent | undefined;
+      for (let i = 0; i < 30 && !boom; i++) {
+        boom = m.step(new Map([[0, i === 0 ? inp : { mx: 0, my: 0, aim: 0, fire: false }]])).find((e) => e.t === "explode");
+      }
+      expect(boom && boom.t === "explode").toBe(true);
+      if (boom && boom.t === "explode") expect(Math.abs(boom.x - expectD)).toBeLessThan(150);
+    }
   });
 
   it("walking into a chest opens it and gives its weapon with full ammo", () => {

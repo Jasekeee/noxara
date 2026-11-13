@@ -574,6 +574,7 @@ export function botInput(match: Match, idx: number): Input {
 
   // ---- 4. Aim + fire.
   let aim = me.aim;
+  let aimDist: number | undefined;
   let fire = false;
   if (t >= b.aimErrUntil) {
     const j = b.jitter;
@@ -582,9 +583,10 @@ export function botInput(match: Match, idx: number): Input {
   }
   if (T) {
     const sp = Math.max(1, w.speed);
-    const lead = Math.min(40, Math.trunc(dT / sp));
+    const lead = me.weapon === "grenade" ? w.fuse : Math.min(40, Math.trunc(dT / sp));
     const ex = T.x + Math.trunc((m.vx[T.idx] * lead * b.leadPct) / 100);
     const ey = T.y + Math.trunc((m.vy[T.idx] * lead * b.leadPct) / 100);
+    if (me.weapon === "grenade") aimDist = isqrt(dist2(me.x, me.y, ex, ey)) + b.rng.range(-400, 400);
     const want = (iatan2(ey - me.y, ex - me.x) + b.aimErr) & 4095;
     const diff = angDiff(want, aim);
     const turn = 380;
@@ -611,5 +613,7 @@ export function botInput(match: Match, idx: number): Input {
   }
 
   b.mode = mode;
-  return { mx, my, aim, fire };
+  const out: Input = { mx, my, aim, fire };
+  if (aimDist !== undefined) out.aimDist = Math.max(0, aimDist);
+  return out;
 }

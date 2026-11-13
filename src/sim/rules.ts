@@ -56,6 +56,19 @@ export const WEAPONS: Record<WeaponKind, WeaponStats> = {
   grenade: { dmg: 45, cd: 20, range: 9 * FP, speed: 563, mag: 3, reload: 50, pellets: 1, spread: 0, blast: 2500, fuse: 16 },
 };
 
+/**
+ * Input.aimDist (FP) is quantised to 0.1 u so it fits in a MatchRecord: q = 0 means "absent"
+ * (max range), otherwise q - 1 = tenths of a unit. Used identically by the sim and the recorder.
+ */
+export function aimDistQ(aimDist: number | undefined): number {
+  if (aimDist === undefined || !Number.isFinite(aimDist)) return 0;
+  return Math.max(0, Math.min(400, Math.trunc(aimDist / 100))) + 1;
+}
+/** Lob distance (FP) for a quantised aimDist, clamped to [1 u, range]. */
+export function lobDist(q: number, range: number): number {
+  return q === 0 ? range : Math.max(1000, Math.min(range, (q - 1) * 100));
+}
+
 /** Stable order (used by the hash). */
 export const WEAPON_ORDER: WeaponKind[] = ["popper", "blaster", "shotgun", "sniper", "grenade"];
 

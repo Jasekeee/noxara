@@ -12,6 +12,7 @@
 //    grenade 45 (→50 % at edge) r2.5u, lobbed 9 u over obstacles, fuse 16 t (or impact on an enemy),
 //    3 shots cd20 rl50; owners are immune to their own grenades.
 //    Crit 8 % ×1.5. Weapon tier: +10 % dmg and −10 % reload time per tier; armor −2 per hit per level (min 1).
+//  - Grenades land at Input.aimDist (clamped 1 u..9 u, quantised to 0.1 u; absent = 9 u).
 //  - Grenade proximity fuse: explodes on touching an enemy (0.65 u) or after the fuse.
 //  - Regen: after 3 s without being hurt or shooting, +4 hp every 0.5 s (8 hp/s).
 //  - Bush stealth: hidden unless viewer ≤2.5 u, target shot ≤20 ticks ago, or was hurt ≤10 ticks ago.
@@ -61,7 +62,9 @@ import {
   STORM_PHASES,
   WEAPONS,
   WEAPON_ORDER,
+  aimDistQ,
   armored,
+  lobDist,
   scaledDamage,
   type StormX,
 } from "./rules";
@@ -236,7 +239,7 @@ export function createMatch(cfg: MatchConfig): Match {
     }
   }
 
-  function fire(f: FighterState, aim: number, ev: SimEvent[]) {
+  function fire(f: FighterState, aim: number, distQ: number, ev: SimEvent[]) {
     const w = WEAPONS[f.weapon];
     const t = state.tick;
     const mx = f.x + Math.trunc((icos(aim) * (FIGHTER_R + 100)) / 1024);
@@ -245,14 +248,16 @@ export function createMatch(cfg: MatchConfig): Match {
     for (let k = 0; k < w.pellets; k++) {
       let a = aim;
       if (w.pellets > 1) a = aim - w.spread + Math.trunc((2 * w.spread * k) / (w.pellets - 1)) + rng.range(-20, 20);
+      // grenades: travel exactly the requested lob distance over the fuse time
+      const speed = f.weapon === "grenade" ? Math.trunc(lobDist(distQ, w.range) / w.fuse) : w.speed;
       state.projectiles.push({
         id: nextProj++,
         owner: f.idx,
         weapon: f.weapon,
         x: mx,
         y: my,
-        vx: Math.trunc((icos(a) * w.speed) / 1024),
-        vy: Math.trunc((isin(a) * w.speed) / 1024),
+        vx: Math.trunc((icos(a) * speed) / 1024),
+        vy: Math.trunc((isin(a) * speed) / 1024),
         ttl,
         dmg: w.dmg,
       });
@@ -453,7 +458,7 @@ export function createMatch(cfg: MatchConfig): Match {
     for (const f of fighters) {
       if (!f.alive) continue;
       if (f.ammo === 0 && t >= f.readyTick) f.ammo = WEAPONS[f.weapon].mag;
-      if (inputs[f.idx].fire && t >= f.readyTick && f.ammo > 0) fire(f, f.aim, ev);
+      if (inputs[f.idx].fire && t >= f.readyTick && f.ammo > 0) fire(f, f.aim, aimDistQ(inputs[f.idx].aimDist), ev);
     }
     stepProjectiles(ev);
     if (t % REGEN_EVERY === 0) {
