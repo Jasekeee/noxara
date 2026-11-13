@@ -16,3 +16,6 @@ dist/
 .playwright-mcp/
 playwright-report/
 test-results/
+
+# large media (delivered as files, not versioned)
+docs/screens/*.webm
