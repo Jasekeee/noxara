@@ -11,11 +11,6 @@ const GUEST: &str = "g-ab12.relay.test";
 const ALICE: &str = "alice.test";
 const BOB: &str = "bob.test";
 
-/// the House rule's top-up / bounty bonus at the settle that just happened (the EMA doesn't move after it)
-fn top_up_now(c: &Contract) -> u128 {
-    let e = c.get_economy();
-    (econ::BASE_TOP_UP * e.m_bps as u128 / 10_000).min(e.house.0.saturating_sub(HOUSE_FLOOR) + econ::BASE_TOP_UP * e.m_bps as u128 / 10_000)
-}
 fn m_now(c: &Contract) -> u128 {
     c.get_economy().m_bps as u128
 }
@@ -1914,10 +1909,12 @@ fn guests_and_overflowing_inputs_are_refused() {
     ctx(ALICE, 152, NearToken::from_yoctonear(0));
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(bot.clone(), 0); })).is_err());
     ipo(&mut c, ALICE, 0, 10, 153);
+    ctx(ALICE, 1530, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 9, U128(ONE)); })).is_err(), "at least 10 shares");
     ctx(ALICE, 154, NearToken::from_yoctonear(1));
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 5, U128(u128::MAX)); })).is_err(), "price cap");
     ctx(ALICE, 155, NearToken::from_yoctonear(1));
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 5, U128(0)); })).is_err());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 10, U128(0)); })).is_err());
     // at most 3 bots held
     ipo(&mut c, ALICE, 1, 1, 156);
     ipo(&mut c, ALICE, 2, 1, 157);
@@ -2108,4 +2105,34 @@ fn listings_expire_and_dead_ones_are_pruned_and_claims_write_nothing() {
     assert_eq!(env::storage_usage(), used, "no storage written");
     ctx(BOB, 171, NearToken::from_yoctonear(0));
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.claim_dividends(acc("random.test")); })).is_err());
+}
+
+#[test]
+fn a_full_order_book_takes_a_cheaper_offer() {
+    let mut c = setup();
+    let bot = c.slots[6].clone();
+    // 10 sellers x 2 listings fill the bot's book (20) at a high price
+    for i in 0..10 {
+        let who = format!("seller{i}.test");
+        register(&mut c, &who);
+        grant(&mut c, &who, 10 * ONE);
+        ipo(&mut c, &who, 6, 20, 150);
+        for k in 0..2 {
+            ctx(&who, 160 + k, NearToken::from_yoctonear(1));
+            c.list_shares(bot.clone(), 10, U128(5 * ONE));
+        }
+    }
+    assert_eq!(c.get_listings(Some(bot.clone())).len(), econ::MAX_LISTINGS_PER_BOT);
+    grant(&mut c, ALICE, 10 * ONE);
+    ipo(&mut c, ALICE, 6, 10, 170);
+    ctx(ALICE, 171, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 10, U128(5 * ONE)); })).is_err(), "not cheaper: refused");
+    ctx(ALICE, 172, NearToken::from_yoctonear(1));
+    c.list_shares(bot.clone(), 10, U128(ONE));
+    let book = c.get_listings(Some(bot.clone()));
+    assert_eq!(book.len(), econ::MAX_LISTINGS_PER_BOT);
+    assert!(book.iter().any(|l| l.seller == acc(ALICE)));
+    let locked: u32 = (0..10).map(|i| c.get_holdings(acc(&format!("seller{i}.test")))[0].locked).sum();
+    assert_eq!(locked, 190, "the displaced listing's shares are unlocked");
+    assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
 }

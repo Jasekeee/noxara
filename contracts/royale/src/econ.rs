@@ -46,6 +46,8 @@ pub const MAX_HOLDINGS: usize = 3;
 pub const MAX_LISTINGS_PER_SELLER: usize = 2;
 pub const MAX_LISTINGS: usize = 200;
 pub const MAX_LISTINGS_PER_BOT: usize = 20;
+/// a listing offers at least this many shares (raises the cost of filling a bot's book with dust)
+pub const MIN_LISTING_SHARES: u32 = 10;
 /// listings expire (anyone can prune expired ones, and those of bankrupt bots)
 pub const LISTING_TTL_MS: u64 = 172_800_000;
 /// a share price may not exceed this (keeps u128 math far from overflow; 1,000 NOX per share)
@@ -541,11 +543,21 @@ impl Contract {
         let b = self.active_bot(&bot);
         require!(price_per_share.0 > 0 && price_per_share.0 <= MAX_SHARE_PRICE, "price out of range");
         let mut h = self.settle_holding(&me, &bot, &b);
-        require!(shares > 0 && h.shares - h.locked >= shares, "not enough unlocked shares");
+        require!(shares >= MIN_LISTING_SHARES, "list at least 10 shares");
+        require!(h.shares - h.locked >= shares, "not enough unlocked shares");
         let mut e = self.econ();
         require!(e.listings.len() < MAX_LISTINGS, "the market is full: try again later");
+        // a full book for this bot: a cheaper offer displaces the most expensive one (its shares unlock)
         let lm0 = listing_map();
-        require!(e.listings.iter().filter(|i| lm0.get(i).is_some_and(|l| l.bot == bot)).count() < MAX_LISTINGS_PER_BOT, "this bot already has 20 open listings");
+        let book: Vec<ListingView> = e.listings.iter().filter_map(|i| lm0.get(i).cloned()).filter(|l| l.bot == bot).collect();
+        if book.len() >= MAX_LISTINGS_PER_BOT {
+            let top = book.iter().max_by_key(|l| l.price_per_share.0).cloned().unwrap();
+            require!(price_per_share.0 < top.price_per_share.0, "this bot's order book is full: offer a lower price than the most expensive listing");
+            self.drop_listing(&top);
+            event("unlisted", &near_sdk::serde_json::json!({ "id": top.id, "reason": "displaced by a cheaper offer" }));
+            e = self.econ();
+            h = self.settle_holding(&me, &bot, &self.bot_econ(&bot));
+        }
         let mut of = listings_of_map();
         let mut mine = of.get(&me).cloned().unwrap_or_default();
         require!(mine.len() < MAX_LISTINGS_PER_SELLER, "at most 2 open listings per player");
