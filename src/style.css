@@ -404,8 +404,8 @@ kbd {
 .tag3d .rl { width: 64px; height: 5px; border-radius: 3px; background: rgba(21,17,43,.7); overflow: hidden; display: none; }
 .tag3d .rl i { display: block; height: 100%; width: 100%; background: var(--gold); transform-origin: left; }
 .tag3d.reloading .rl { display: block; }
-.tag3d .bv { display: none; align-items: center; gap: 3px; font: 900 12px/1 var(--display); color: var(--ink); background: var(--gold); border: 2px solid var(--ink); border-radius: 999px; padding: 2px 6px 2px 4px; }
-.tag3d .bv svg { width: 12px; height: 12px; fill: var(--ink); }
+.tag3d .bv { display: none; align-items: center; gap: 3px; font: 900 15px/1 var(--display); color: var(--ink); background: var(--gold); border: 2px solid var(--ink); border-radius: 999px; padding: 3px 8px 3px 5px; box-shadow: 0 0 12px rgba(255,201,60,.7); }
+.tag3d .bv svg { width: 15px; height: 15px; fill: var(--ink); }
 .tag3d.bounty .bv { display: flex; }
 
 @media (max-width: 720px), (pointer: coarse) {

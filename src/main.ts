@@ -171,7 +171,9 @@ function localSeed(): number {
 
 // ------------------------------------------------------------------ chain (invisible to the player)
 let client: GameClient | null = null;
-const clientP: Promise<GameClient | null> = createGameClient().then((c) => (client = c)).catch(() => null);
+// ?seed=N is a deterministic local match (tests / replays): no network at all.
+const clientP: Promise<GameClient | null> =
+  SEED_PARAM !== null ? Promise.resolve(null) : createGameClient().then((c) => (client = c)).catch(() => null);
 let fighters: FighterInfo[] = [];
 let portraits: string[] = [];
 let current: StartResult | null = null;

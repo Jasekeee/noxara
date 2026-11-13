@@ -301,7 +301,7 @@ export class FighterView {
   setBountyValue(v: number) {
     if (!this.tagBv) return;
     const sp = this.tagBv.querySelector("span")!;
-    sp.textContent = v > 0 ? `${Math.round(v * 100) / 100}` : "BOUNTY";
+    sp.textContent = v > 0 ? `${Math.round(v * 100) / 100} $BOUNTY` : "BOUNTY";
   }
 
   update(dt: number, alpha: number, f: FighterState, tick = 0) {
