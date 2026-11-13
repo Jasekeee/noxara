@@ -81,7 +81,7 @@ const youArrowGeo = (() => {
   return g;
 })();
 /** constant cyan glow on the player's own fighter so it never reads as a dark silhouette from above */
-const ME_EMISSIVE = 0.32;
+const ME_EMISSIVE = 0.12; // a hint of the team colour without washing out the model (the ring + "YOU" label carry the highlight)
 
 type Loco = "idle" | "walk" | "sprint";
 
