@@ -2,8 +2,9 @@
 import type { WeaponKind } from "../sim/types";
 
 export const PAL = {
-  sky: 0x8fd8ea,
-  fog: 0x8fd8ea,
+  // dusk pass (2026-11-14): deep blue/violet sky + fog, cool hemisphere, low warm sun
+  sky: 0x2c2f6e,
+  fog: 0x3a3878,
   waterDeep: 0x1a6fb0,
   waterShallow: 0x34c6d3,
   foam: 0xeafcff,
@@ -17,9 +18,13 @@ export const PAL = {
   me: 0x3df2ff,
   gold: 0xffc93c,
   heal: 0x4ce06a,
-  hemiSky: 0xd8f1ff,
-  hemiGround: 0x5f8a45,
-  sun: 0xfff0d6,
+  hemiSky: 0x8088e0,
+  hemiGround: 0x3e3456,
+  sun: 0xffa463,
+  /** cool fresnel rim on fighters (separates them from the darker ground) */
+  rim: 0x9fd8ff,
+  /** warm glow along the foot of the storm wall */
+  stormEdge: 0xff9a3c,
 };
 
 /** Ring colours for the 9 bots (the local player uses PAL.me). */

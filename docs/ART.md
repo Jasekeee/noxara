@@ -12,7 +12,10 @@ into our own palette. No Brawl Stars / Fortnite assets, wording or look-alike ch
 ## Palette (`src/render/palette.ts` is the source of truth)
 | Role | Hex | Notes |
 |---|---|---|
-| Sky / fog | `#8fd8ea` | background + linear fog 48–115 u |
+| Sky / fog (dusk) | `#2c2f6e` / `#3a3878` | background + linear fog 48–115 u (day look before 2026-11-14 was `#8fd8ea`) |
+| Dusk lights | hemi sky `#8088e0` / ground `#3e3456` @1.05, sun `#ffa463` @2.15 | one shadow-casting directional only, low key (offset +22, 17, +12 from the camera target) |
+| Fighter rim | `#9fd8ff` × 0.38, fresnel pow 3.5 | `onBeforeCompile` on fighter materials, one shared program; no extra lights |
+| Storm wall foot | `#ff9a3c` | warm glow band at the base of the violet wall |
 | Water deep → shallow → foam | `#1a6fb0` → `#34c6d3` → `#eafcff` | shader: depth by distance from shore, animated foam bands |
 | Sand / wet sand | `#f4d79c` / `#d6b07a` | beach cone, vertex coloured |
 | Grass mid / dark / light | `#5fae45` / `#4a963a` / `#7cc152` | flat-shaded jittered triangle grid, 1 colour per face |
@@ -98,7 +101,8 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
 - `?mock` fills the T3 client API locally (sign-in, market, history, leaderboards) for screen work only.
 
 ## Screenshots (`docs/screens/`, JPEG q78, desktop 1440×900 + mobile 390×844, ~0.95 MB total)
-Refreshed after the NOXARA rename (2026-11-13):
+Refreshed after the NOXARA rename (2026-11-13) and the dusk lighting pass (2026-11-14; ledger-* and the
+fighters/sponsor-mobile overlays are from 11-13 — the ledger shows a verified testnet settlement):
 title-{desktop,mobile} (offline guest) · lobby-{desktop,mobile} (live wallets, NOX balances) · match-{desktop,mobile} ·
 ledger-{desktop,mobile} (testnet match, verified, NOX pot/bounty/house/burn) · fighters-{desktop,mobile} · sponsor-{desktop,mobile}.
-Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~109 KB).
+Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~99 KB, dusk lighting).
