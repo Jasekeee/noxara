@@ -4,7 +4,7 @@
 // wallet redirect (MyNearWallet's login adds our function-call key for the game contract); after that
 // it is gasless exactly like a guest. If anything chain-side is unreachable the client drops to mode
 // "offline": local seed + t1Roster(), local XP, the game stays fully playable.
-import type { BotMarket, CreateGameClient, FighterEvent, FighterInfo, GameClientT3, LeaderRow, Payout, Progress, SettleResult, Sponsorship, StartResult } from "./api";
+import type { BotMarket, CreateGameClient, EconomyInfo, FighterEvent, FighterInfo, GameClientEcon, GameClientT3, Holding, Listing, SeasonRow, ShareMarketRow, LeaderRow, Payout, Progress, SettleResult, Sponsorship, StartResult } from "./api";
 import { levelProgress, unlocksForLevel, upgradesForLevel, xpForMatch } from "../sim/progression";
 import { SIM_VERSION, type MatchConfig, type MatchRecord, type Personality } from "../sim/types";
 import { t1Roster } from "../sim/roster";
@@ -25,13 +25,16 @@ const STORE_REAL = "bountyroyale.account.v1";
 const STORE_PENDING = "bountyroyale.signin.v1";
 const STORE_XP = "bountyroyale.localxp.v1";
 /** methods the signed-in account's function-call key may call (the relayer allow-lists the same) */
-const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome"];
+const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "list_shares", "cancel_listing", "buy_listing", "buy_cosmetic"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
 const START_GAS = 150n * 10n ** 12n; // worst case: retirements + rookie accounts at start (audit #10)
 
 /** yocto-$NOX string -> display number with 2 decimals. */
 export const toBounty = (y: string | bigint | undefined | null): number => (y === undefined || y === null ? 0 : Number(BigInt(y) / YOCTO_PER_CENT) / 100);
+
+/** signed yocto difference -> display number */
+const toBountySigned = (y: bigint): number => (y < 0n ? -toBounty(-y) : toBounty(y));
 
 type Saved = { accountId: string; key: StoredKey; contract: string };
 type ChainFighter = {
@@ -93,6 +96,8 @@ function friendly(msg: string): string {
   if (m.includes("at most 3 bots")) return "You can back at most 3 bots at once.";
   if (m.includes("all the sponsors")) return "This bot already has as many sponsors as it can take.";
   if (m.includes("don't sponsor")) return "You don't sponsor this bot.";
+  if (m.includes("ipo")) return "That IPO is sold out or closed.";
+  if (m.includes("listing")) return "That listing is gone: someone else bought or cancelled it.";
   if (m.includes("register first")) return "Your account isn't registered with the game yet: sign in again.";
   return msg;
 }
@@ -101,6 +106,18 @@ type ChainHist = { match_id: string; at_ms: string; kind: string; amount: string
 type ChainMarket = { bot: string; name: string; total_stake: string; sponsors: number; sponsor_cut_bps: number };
 type ChainSponsorship = { bot: string; bot_name: string; staked: string; value: string; earned: string; pool_bps: number; cooldown_left: number; bot_active: boolean };
 type ChainTop = { account: string; name: string; bot: boolean; wins: number; kills: number; matches: number; earnings: string };
+type ChainEconomy = {
+  supply: string; genesis: string; minted: string; burned: string; house: string; house_ema: string; floor: string; target: string;
+  m_bps: number; house_bps: number; burn_bps: number; brake_bps: number; top_up: string; season: number; season_ends_ms: string;
+  season_burned: string; season_rewards: string;
+  snapshots: { match_id: string; at_ms: string; supply: string; burned: string; house: string; m_bps: number }[];
+};
+type ChainShareRow = { bot: string; name: string; status: "active" | "retired"; sold: number; ipo_left: number; ipo_price: string; last_price: string | null; dividends_paid: string; holders: number; wallet: string; season_income: string; season_costs: string };
+type ChainHolding = { bot: string; shares: number; claimable: string };
+type ChainListing = { id: string | number; seller: string; bot: string; shares: number; price_per_share: string };
+type ChainSeasonRow = { bot: string; name: string; points: number; wins: number; kills: number; income: string; costs: string };
+const bps = (n: number | undefined) => (n ?? 0) / 10_000;
+const NEUTRAL_ECONOMY: EconomyInfo = { supply: 0, genesis: 0, minted: 0, burned: 0, house: 0, houseEma: 0, floor: 0, target: 0, m: 0, houseShare: 0, burnShare: 0, brake: 0, topUp: 0, season: 0, seasonEndsAt: 0, seasonBurned: 0, seasonRewards: 0, snapshots: [] };
 type ChainProgress = { xp: number; level: number; level_xp: number; next_level_xp: number | null };
 
 async function postJson<T>(url: string, body: unknown, timeoutMs = 30_000): Promise<{ ok: boolean; status: number; json: T & { error?: string } }> {
@@ -124,7 +141,7 @@ export type OfflineReason =
   | "guests_closed" // the relayer's free budget / daily guest spots are used up (sign-in still works)
   | "chain_error"; // something failed mid-session (guest creation, relay, views)
 
-class Client implements GameClientT3 {
+class Client implements GameClientT3, GameClientEcon {
   private _mode: "chain" | "offline";
   private _offlineReason: OfflineReason | undefined;
   /** the relayer stopped paying (guest budget mode): real accounts sign their own transactions */
@@ -134,6 +151,10 @@ class Client implements GameClientT3 {
   private relayer: string;
   private rpcUrl: string;
   private contract: string;
+  /** the game contract account (for explorer links) */
+  get contractId(): string {
+    return this.contract;
+  }
   private explorer: string;
   /** the active session: the signed-in real account if any, else the guest */
   private saved: Saved | null = null;
@@ -673,6 +694,97 @@ class Client implements GameClientT3 {
     if (this._mode !== "chain") return [];
     const h = await viewCall<ChainHist[]>(this.rpcUrl, this.contract, "get_history", { account_id: account }).catch(() => [] as ChainHist[]);
     return h.map((e) => histEvent(e));
+  }
+
+  // ---------------------------------------------------------------- Economy v2 (docs/ECONOMY.md)
+  /** Views never throw into the UI: a contract without the economy (MethodNotFound) or an RPC error gives neutral data. */
+  private async econView<T>(method: string, args: Record<string, unknown>, neutral: T): Promise<T> {
+    if (this._mode !== "chain") return neutral;
+    try {
+      return await viewCall<T>(this.rpcUrl, this.contract, method, args);
+    } catch {
+      return neutral;
+    }
+  }
+
+  async economy(): Promise<EconomyInfo> {
+    const e = await this.econView<ChainEconomy | null>("get_economy", {}, null);
+    if (!e) return NEUTRAL_ECONOMY;
+    return {
+      supply: toBounty(e.supply), genesis: toBounty(e.genesis), minted: toBounty(e.minted), burned: toBounty(e.burned),
+      house: toBounty(e.house), houseEma: toBounty(e.house_ema), floor: toBounty(e.floor), target: toBounty(e.target),
+      m: bps(e.m_bps), houseShare: bps(e.house_bps), burnShare: bps(e.burn_bps), brake: bps(e.brake_bps),
+      topUp: toBounty(e.top_up), season: e.season, seasonEndsAt: Number(e.season_ends_ms), seasonBurned: toBounty(e.season_burned), seasonRewards: toBounty(e.season_rewards),
+      snapshots: (e.snapshots ?? []).map((x) => ({ match: String(x.match_id), at: Number(x.at_ms), supply: toBounty(x.supply), burned: toBounty(x.burned), house: toBounty(x.house), m: bps(x.m_bps) })),
+    };
+  }
+
+  async sharesMarket(): Promise<ShareMarketRow[]> {
+    const rows = await this.econView<ChainShareRow[]>("get_shares_market", {}, []);
+    return rows.map((r) => ({
+      bot: r.bot, name: r.name, status: r.status, sharesSold: r.sold, ipoLeft: r.ipo_left, ipoPrice: toBounty(r.ipo_price),
+      lastPrice: r.last_price === null || r.last_price === undefined ? null : toBounty(r.last_price),
+      dividendsPaid: toBounty(r.dividends_paid), holders: r.holders, wallet: toBounty(r.wallet),
+      seasonPnl: toBountySigned(BigInt(r.season_income ?? "0") - BigInt(r.season_costs ?? "0")),
+    }));
+  }
+
+  private async botNames(): Promise<Map<string, string>> {
+    const m = new Map<string, string>();
+    for (const r of await this.sharesMarket()) m.set(r.bot, r.name);
+    return m;
+  }
+
+  async myShares(): Promise<Holding[]> {
+    if (!this.realSaved) return [];
+    const [hs, mk] = await Promise.all([this.econView<ChainHolding[]>("get_holdings", { account_id: this.realSaved.accountId }, []), this.sharesMarket()]);
+    return hs.map((x) => {
+      const row = mk.find((r) => r.bot === x.bot);
+      return { bot: x.bot, name: row?.name ?? shortName(x.bot), shares: x.shares, claimable: toBounty(x.claimable), value: x.shares * ((row?.wallet ?? 0) / 1000) };
+    });
+  }
+
+  async listings(bot?: string): Promise<Listing[]> {
+    const [ls, names] = await Promise.all([this.econView<ChainListing[]>("get_listings", bot ? { bot } : {}, []), this.botNames()]);
+    return ls.map((l) => ({ id: String(l.id), seller: l.seller, bot: l.bot, name: names.get(l.bot) ?? shortName(l.bot), shares: l.shares, pricePerShare: toBounty(l.price_per_share) }));
+  }
+
+  async seasonStandings(season?: number): Promise<SeasonRow[]> {
+    const rows = await this.econView<ChainSeasonRow[]>("get_season_standings", season === undefined ? {} : { season }, []);
+    return rows.map((r) => {
+      const income = toBounty(r.income), costs = toBounty(r.costs);
+      return { bot: r.bot, name: r.name, points: r.points, wins: r.wins, kills: r.kills, income, costs, pnl: Math.round((income - costs) * 100) / 100 };
+    });
+  }
+
+  private async econCall<T>(method: string, args: unknown): Promise<{ value: T; tx: string }> {
+    if (!this.realSaved) throw new Error("Sign in with a NEAR account: guests can't hold shares.");
+    if (this._mode !== "chain") throw new Error("The NEAR network is unreachable right now: try again later.");
+    try {
+      return await this.relay<T>(method, args, true, 50n * 10n ** 12n);
+    } catch (e) {
+      throw new Error(friendly(e instanceof Error ? e.message : String(e)));
+    }
+  }
+  async buyIpo(bot: string, shares: number) {
+    return { tx: (await this.econCall("buy_ipo", { bot, shares })).tx };
+  }
+  async claimDividends(bot: string) {
+    const r = await this.econCall<string>("claim_dividends", { bot });
+    return { tx: r.tx, claimed: toBounty(r.value) };
+  }
+  async listShares(bot: string, shares: number, pricePerShare: number) {
+    const r = await this.econCall<string | number>("list_shares", { bot, shares, price_per_share: toYocto(pricePerShare) });
+    return { tx: r.tx, id: String(r.value) };
+  }
+  async cancelListing(id: string) {
+    return { tx: (await this.econCall("cancel_listing", { id })).tx };
+  }
+  async buyListing(id: string) {
+    return { tx: (await this.econCall("buy_listing", { id })).tx };
+  }
+  async buyCosmetic(id: number) {
+    return { tx: (await this.econCall("buy_cosmetic", { id })).tx };
   }
 
   explorerTx(hash: string): string {
