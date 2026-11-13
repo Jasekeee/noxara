@@ -56,7 +56,7 @@ Prerequisites: the audited `main` build; `node scripts/build-contract.ts` prints
 | 2 | Owner | `! near account import-account using-web-wallet network-config mainnet` (approve in your wallet; never type a seed phrase into the terminal) | 0 |
 | 3 | Owner | `! cd ~/Developer/bounty-royale && node scripts/build-contract.ts` — check the sha256 against docs/MAINNET.md | 0 |
 | 4 | Owner | `! cd ~/Developer/bounty-royale && node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <your-wallet>.near --dry-run` — read the plan and cost | 0 |
-| 5 | Owner | `! cd ~/Developer/bounty-royale && ENV_FILE=.env.mainnet BR_MAINNET_YES=yes node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <your-wallet>.near` | ≈ 4.92 code + 0.5 state + 1.5 relayer + 0.01 bots + gas ≈ **7.0 NEAR** (≈ 5.9 refundable) |
+| 5 | Owner | `! cd ~/Developer/bounty-royale && ENV_FILE=.env.mainnet BR_MAINNET_YES=yes node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <your-wallet>.near` | ≈ 5.05 code + 0.5 state + 1.5 relayer + 0.01 bots + gas ≈ **7.1 NEAR** (≈ 6.0 refundable) |
 | 6 | Claude (read-only) | `npm run verify` against mainnet: contract metadata Nox/NOX, 10 keyless accounts, one smoke match | 0 |
 | 7 | Owner (hosting, separate "yes") | Vercel: the frontend build. Railway: `npm start --prefix relayer` with the variables from `.env.mainnet`, which you paste yourself | Railway ≈ $5/month [assumed] |
 Teardown after 2026-11-25: docs/MAINNET.md §4.

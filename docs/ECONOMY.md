@@ -85,21 +85,21 @@ Entry fees are progressive for bots **and** players: `4 + 2%` of the wallet abov
 - **Diminishing daily rewards:** a player's first 3 paid wins in a UTC day pay 100% of the prize, the next 3 pay 50%, and later wins pay 25%. The rest goes to the House.
 
 ## 8. Simulation results
-`node scripts/econ-sim-v2.ts` runs 20 runs × 10,000 matches. Charts: `docs/econ/*.svg`; numbers: `docs/econ/summary.json`.
+`node scripts/econ-sim-v2.ts` runs 20 runs × 10,000 matches. Charts: `docs/econ/*.svg`; numbers: `docs/econ/summary.json`. The model includes rookie protection and the House-paid daily check-in and quests (§11).
 
 | Check | Result |
 |---|---|
 | Minting after genesis | 0 |
 | Supply | levels off at 79% of genesis (the brake), drift over the last 10% of matches ≈ 0 |
-| House | never below its floor; median 725 against a target of 1,000 (within ±30%) |
-| Reward multiplier m | 0.13–1.21; largest change between two matches 0.036 (smooth) |
-| Bot life | median 55 matches |
+| House | never below its floor; median 714 against a target of 1,000 (within ±30%) |
+| Reward multiplier m | 0.13–0.94; largest change between two matches 0.036 (smooth) |
+| Bot life | median 56 matches |
 | Rich bots fall | 100% of the top-3 at match 2k are out of the top-3 by 4k |
-| Rookies rise | 86% reach the top-3 within 300 matches |
+| Rookies rise | 85% reach the top-3 within 300 matches |
 | Gini of bot wealth | 0.24 |
-| Shares | buying every IPO returns −8% (fair). A single IPO has a median of −59%: most rookies fail and a few pay off. That is real risk, and NOX is play-money. |
+| Shares | median single IPO −57%, top 10% of IPOs +87%, 23% of IPOs end in profit; buying every IPO returns −14%. Real risk on purpose: shares go to zero on bankruptcy, and NOX is play-money. |
 
-The results hold across 10 seeds, a guest share of 50–90%, 200 players, a stronger human player and heavy share trading.
+The results hold across seeds, a guest share of 50–90%, 200 players, a stronger human player and heavy share trading.
 
 **Model assumptions:** winners are drawn from the measured win rates in `docs/balance.json`, upgrades add +12% per tier, and the human wins 8% of matches.
 
@@ -116,3 +116,12 @@ The results hold across 10 seeds, a guest share of 50–90%, 200 players, a stro
 
 ## 10. Roadmap only (not built)
 Cosmetics shop, battle pass, licensing AI athletes, sponsored tournaments, live PvP lobbies (humans + AI fighters in one match). No real-money wagering, ever.
+
+## 11. Daily check-in, quests and rookie protection
+| Rule | Value |
+|---|---|
+| Check-in (once per UTC day) | streak days 1–7 pay 1, 1, 1, 2, 2, 2, 3 NOX × min(m, 1), from the House, never below its floor |
+| Daily quests (verified on chain from settled matches) | play 3 matches → 1 NOX; finish in the top 3 → 1 NOX; take down the bounty carrier → 2 NOX (× min(m, 1)) |
+| Anti-sybil | real accounts only; only matches paid from your own NOX count (welcome-credit matches don't); check-in needs a wallet-paid match that same day and 3 in the account's lifetime; global caps of 100 check-ins and 300 quest claims a day; a reward is always smaller than the 4-NOX minimum entry |
+| Rookie protection | a rookie's first 10 matches: the minimum entry (4 NOX), no upkeep, never the bounty carrier |
+| Social quests | follow links with no reward: we only pay for what the chain can verify |
