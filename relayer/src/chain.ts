@@ -111,7 +111,7 @@ export class Chain {
       .functionCall(this.cfg.gameContractId, "settle_match", args, { gas })
       .send({ waitUntil: "EXECUTED_OPTIMISTIC" });
     const burnt = o.receipts_outcome.reduce((a: bigint, r: { outcome: { gas_burnt: number } }) => a + BigInt(r.outcome.gas_burnt), BigInt(o.transaction_outcome.outcome.gas_burnt));
-    return { tx: o.transaction.hash as string, value: gameValue(o, this.cfg.gameContractId), failure: gameFailure(o), tgas: Number(burnt / 1_000_000_000n) / 1000 };
+    return { tx: o.transaction.hash as string, value: gameValue(o, this.cfg.gameContractId), failure: gameFailure(o), events: gameEvents(o, this.cfg.gameContractId), tgas: Number(burnt / 1_000_000_000n) / 1000 };
   }
 
   view<T>(method: string, args: Record<string, unknown> = {}): Promise<T> {
@@ -150,6 +150,24 @@ export function gameValue(o: Outcome, gameId: string): unknown {
     }
   }
   return value;
+}
+
+/** The game's NEP-297 events (`standard: "bountyroyale"`) emitted in this tx, in order. */
+export function gameEvents(o: { receipts_outcome: Array<{ outcome: { executor_id: string; logs?: string[] } }> }, gameId: string): Array<{ event: string; data: Record<string, unknown> }> {
+  const out: Array<{ event: string; data: Record<string, unknown> }> = [];
+  for (const r of o.receipts_outcome) {
+    if (r.outcome.executor_id !== gameId) continue;
+    for (const l of r.outcome.logs ?? []) {
+      if (!l.startsWith("EVENT_JSON:")) continue;
+      try {
+        const e = JSON.parse(l.slice("EVENT_JSON:".length));
+        if (e.standard === "bountyroyale") for (const d of e.data ?? []) out.push({ event: e.event, data: d });
+      } catch {
+        // not ours
+      }
+    }
+  }
+  return out;
 }
 
 /** First failure inside the receipts (e.g. a contract panic in the relayed call), as a readable message. */

@@ -53,7 +53,8 @@ const GUEST_FUNDING = env("GUEST_FUNDING", "0.003 NEAR");
 const GUEST_ALLOWANCE = env("GUEST_ALLOWANCE", "0.05 NEAR");
 const GUEST_STORAGE = env("GUEST_STORAGE", "0.02 NEAR"); // = the contract's STORAGE_DEPOSIT
 const PORT = Number(env("PORT", "8788"));
-const ORIGINS = env("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",");
+const DEV_PORTS = [5173, 5180, 5181, 5184];
+const ORIGINS = env("CORS_ORIGINS", DEV_PORTS.flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(",")).split(",");
 const DATA_DIR = env("RECORDS_DIR", path.join(import.meta.dirname, "../data/records"));
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -128,7 +129,7 @@ async function handleSettle(body: Record<string, unknown>) {
     const r = await chain.settle(v.args);
     if (r.failure) return { code: 409, body: { tx: r.tx, error: r.failure } };
     console.log(`settled #${matchId}: winner ${v.winner} (replay ${v.ms} ms, kills ${v.killsFrom}), ${r.tgas} Tgas, tx ${r.tx}`);
-    return { code: 200, body: { tx: r.tx, result: r.value, replay_ms: v.ms, tgas: r.tgas } };
+    return { code: 200, body: { tx: r.tx, result: r.value, events: r.events, verified: true, replay_ms: v.ms, tgas: r.tgas } };
   } finally {
     settling.delete(matchId);
   }
