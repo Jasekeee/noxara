@@ -191,7 +191,15 @@ async function refreshLobby() {
   }
   const list = await withTimeout(c.fighters(), 8000);
   if (list) fighters = list;
-  mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : "offline practice";
+  const why: Record<string, string> = {
+    relayer_unreachable: "can't reach the island server",
+    wrong_contract: "island server is on another season",
+    sim_version_mismatch: "game update pending",
+    no_webcrypto: "this browser can't hold a guest key",
+    chain_error: "NEAR is busy",
+  };
+  const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
+  mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) renderLobby($("roster"), fighters, portraits);
 }
@@ -235,6 +243,8 @@ function buildMatch(cfg: MatchConfig) {
 async function startMatch() {
   if (starting) return;
   starting = true;
+  endOpen = false;
+  phase = "playing"; // the drop-in is part of the match flow (tick stays 0 until the island is built)
   sfx.start();
   sfx.ui();
   $("end").classList.add("hidden");
@@ -269,6 +279,7 @@ async function startMatch() {
 
 function toLobby() {
   sfx.ui();
+  endOpen = false;
   phase = "title";
   $("end").classList.add("hidden");
   $("hud").classList.add("hidden");
@@ -514,12 +525,17 @@ function stepSim() {
 
 // ------------------------------------------------------------------ end / death card
 let endGuardUntil = 0;
+let endOpen = false;
 function drawLedger() {
   if (!match) return;
   const st = match.state;
   const el = $("ledger");
   if (!st.over) {
     el.textContent = "";
+    const n = document.createElement("p");
+    n.className = "lg-note";
+    n.textContent = `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
+    el.appendChild(n);
     return;
   }
   renderLedger(el, {
@@ -565,6 +581,7 @@ function showEnd(force: boolean) {
   drawLedger();
   $("hud").classList.add("hidden");
   el.classList.remove("hidden");
+  endOpen = true;
   el.scrollTop = 0;
   controls.setEnabled(false);
   // a held trigger / stray click must not hit a button that just appeared under the cursor
@@ -582,6 +599,7 @@ $("to-lobby").addEventListener("click", guarded(toLobby));
 $("spectate").addEventListener("click", guarded(() => {
   sfx.ui();
   spectating = true;
+  endOpen = false;
   $("end").classList.add("hidden");
   $("hud").classList.remove("hidden");
 }));
@@ -640,7 +658,7 @@ function frame(now: number) {
       matchStartT = time;
     }
   }
-  if (match && (phase === "playing" || phase === "over") && introT <= 0) {
+  if (match && (phase === "playing" || phase === "over") && introT <= 0 && !starting) {
     acc += dt * SPEED;
     let n = 0;
     while (acc >= DT && n < 8 * SPEED) {
@@ -679,7 +697,7 @@ function frame(now: number) {
         if (v.dustT <= 0) { fx.dust(v.pos.x, v.pos.z); v.dustT = v.speed > 5 ? 0.16 : 0.26; }
       }
       // name tag
-      const showTag = vis && f.alive && phase !== "title";
+      const showTag = vis && f.alive && phase !== "title" && !starting && !endOpen;
       const p = showTag ? project(v.pos.x, f.bounty ? 3.3 : 2.5, v.pos.z) : null;
       // never draw a tag over the HUD bands (top chips, bottom panels, minimap corner)
       if (p && (p.y < hudTop || p.y > innerHeight - hudBottom || (p.x > innerWidth - 190 && (mobileHud ? p.y < 130 : p.y > innerHeight - 200)))) {
@@ -724,7 +742,7 @@ function frame(now: number) {
     camTarget.x += (tx - camTarget.x) * k;
     camTarget.z += (tz - camTarget.z) * k;
 
-    if (phase !== "title") {
+    if (phase !== "title" && !starting) {
       hud.update(match, me, st.fighters[watch]);
       hud.updateHints(controls.used, time - matchStartT);
       miniT -= rdt;
@@ -739,7 +757,7 @@ function frame(now: number) {
     const k = introT / INTRO;
     dist *= 1 + k * k * 1.8;
   }
-  if (phase === "title") {
+  if (phase === "title" || starting) {
     const a = time * 0.06;
     dist = portrait ? 58 * Math.pow(1 / camera.aspect, 0.5) : 58;
     camTarget.set(Math.cos(a) * 4, 0, Math.sin(a) * 4);

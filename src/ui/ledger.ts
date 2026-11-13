@@ -75,7 +75,11 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
       const carrier = L.names[L.start.bountyIdx];
       row(ICON.crown, `${carrier} survived with the bounty`, null, "bounty");
     }
-    for (const u of s.upgrades) row(ICON.up, `${u.name} bought ${u.what}`, null, "up");
+    for (const u of s.upgrades) {
+      const what = /^weapon/i.test(u.what) ? "a weapon upgrade" : /^armou?r/i.test(u.what) ? "an armor upgrade" : /^skin/i.test(u.what) ? "a new look" : u.what;
+      const paid = s.payouts.find((p) => p.reason === "upgrade" && p.name === u.name);
+      row(ICON.up, `${u.name} bought ${what} with its winnings`, paid ? paid.amount : null, "up");
+    }
     for (const r of s.retired) row(ICON.skull, `${r} went broke and retired`, null, "ret");
     for (const r of s.rookies) row(ICON.star, `${r} joins the island as a rookie`, null, "rookie");
     const house = s.payouts.find((p) => p.reason === "house" && p !== prize);

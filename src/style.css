@@ -76,6 +76,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
 .dmg.me { color: var(--hot); }
 .dmg.heal { color: var(--hp); }
 .dmg.storm { color: #d9b8ff; font-size: 17px; }
+.dmg.storm.me { color: #ff7a9c; font-size: 26px; }
 
 /* ---------- overlays ---------- */
 #vignette {
@@ -436,14 +437,20 @@ kbd {
   #title { padding: 3vh 0 10px; gap: 8px; }
   #title .title-inner { padding: 0 16px; gap: 10px; }
   .lobby-head { padding: 0 16px; }
-  .lobby-head h2 { font-size: 14px; }
+  .lobby-head h2 { font-size: 14px; white-space: nowrap; }
+  .net-mode { font-size: 9px; padding: 4px 7px; text-align: right; }
   .roster { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding: 2px 16px 8px; gap: 8px; scrollbar-width: none; }
   .roster::-webkit-scrollbar { display: none; }
   .fcard { flex: 0 0 116px; scroll-snap-align: start; min-height: 176px; }
   .spec { position: fixed; left: 50%; transform: translateX(-50%); top: auto; bottom: calc(80px + var(--safe-b)); white-space: nowrap; }
   .reload-tip { bottom: calc(200px + var(--safe-b)); }
   .end-inner { padding: 2vh 16px 20px; }
-  .end-place { font-size: 72px; }
+  .end-place { font-size: 64px; }
+  .end-title { font-size: 34px; }
+  .end-stats { margin: 8px 0 10px; gap: 8px; }
+  .end-stats div { min-width: 0; flex: 1; padding: 8px 6px; }
+  .end-stats b { font-size: 22px; }
+  .lg-rows li { font-size: 13px; padding: 7px 10px; }
   .lg-winner b { font-size: 17px; }
   .lg-face { width: 56px; height: 56px; }
 }
