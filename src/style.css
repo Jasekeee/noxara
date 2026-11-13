@@ -530,7 +530,7 @@ kbd {
 .sp-btns { display: flex; justify-content: flex-end; gap: 8px; }
 
 .toast { position: absolute; left: 50%; bottom: calc(24px + var(--safe-b)); transform: translate(-50%, 20px); opacity: 0; z-index: 9; pointer-events: none;
-  padding: 10px 16px; border-radius: 12px; background: var(--paper); color: var(--ink); font: 800 14px/1.2 var(--font); box-shadow: 0 8px 24px rgba(0,0,0,.35); transition: opacity .25s, transform .25s; max-width: calc(100% - 32px); }
+  padding: 10px 16px; border-radius: 12px; background: var(--paper); color: var(--ink); font: 800 14px/1.2 var(--font); box-shadow: 0 8px 24px rgba(0,0,0,.35); transition: opacity .25s, transform .25s; width: max-content; max-width: calc(100vw - 32px); text-align: center; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
 /* XP / level up on the end card */
