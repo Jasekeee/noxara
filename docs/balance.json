@@ -1,0 +1,68 @@
+{
+  "generatedAt": "2026-11-13T14:50:01.490Z",
+  "matches": 300,
+  "seeds": [
+    1,
+    300
+  ],
+  "p0": "balanced",
+  "finished": 300,
+  "avgMatchSeconds": 85.38116666666666,
+  "stormDeathsPct": 0.1111111111111111,
+  "endedByClockPct": 0,
+  "noWinner": 0,
+  "crashed": 0,
+  "deterministic": true,
+  "matchesPerSecond": 37.961003167592644,
+  "perPersonality": [
+    {
+      "personality": "balanced",
+      "fighters": 3,
+      "wins": 84,
+      "winShare": 28,
+      "winRatePerFighter": 9.333333333333334,
+      "avgKills": 0.8066666666666666
+    },
+    {
+      "personality": "aggressive",
+      "fighters": 2,
+      "wins": 47,
+      "winShare": 15.666666666666666,
+      "winRatePerFighter": 7.833333333333333,
+      "avgKills": 1.16
+    },
+    {
+      "personality": "camper",
+      "fighters": 2,
+      "wins": 85,
+      "winShare": 28.333333333333332,
+      "winRatePerFighter": 14.166666666666666,
+      "avgKills": 0.9933333333333333
+    },
+    {
+      "personality": "sniper",
+      "fighters": 1,
+      "wins": 30,
+      "winShare": 10,
+      "winRatePerFighter": 10,
+      "avgKills": 0.92
+    },
+    {
+      "personality": "looter",
+      "fighters": 1,
+      "wins": 40,
+      "winShare": 13.333333333333334,
+      "winRatePerFighter": 13.333333333333334,
+      "avgKills": 1.08
+    },
+    {
+      "personality": "coward",
+      "fighters": 1,
+      "wins": 14,
+      "winShare": 4.666666666666667,
+      "winRatePerFighter": 4.666666666666667,
+      "avgKills": 0.2633333333333333
+    }
+  ],
+  "fails": []
+}
