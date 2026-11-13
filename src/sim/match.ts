@@ -1,13 +1,14 @@
 // BOUNTY ROYALE deterministic match simulation (agent B). Pure TS, no DOM, integer math only.
 //
 // T1 tuning (tables live in rules.ts):
-//  - 20 Hz, 3600 ticks max. Island radius 32 u, spawns on a 24 u ring (±1.5 u, ±60 angle jitter).
+//  - 20 Hz, 3600 ticks max. Island radius 32 u, spawns on a 26 u ring (±1 u, ±30 angle jitter;
+//    neighbours >= 13 u apart). Spawn protection: no damage at all while tick <= 60 (3 s).
 //  - 18 obstacles (rock r1.0–1.6 / tree r0.6–0.8 / crate r0.8, ≥1.4 u walkable gaps), 14–18 bushes
 //    (r1.6–2.4), 9 chests (1 central + 8 on a 14–21 u ring between spawns;
 //    blaster 38 / shotgun 27 / sniper 15 / grenade 20 %), 6 heals (+35 hp).
 //  - Fighter: 100 hp, r 0.5 u, 5 u/s (250 FP/tick), soft fighter-fighter separation.
 //    A closed chest opens when the fighter centre is within 1.4 u of it; heals likewise (only if hurt).
-//  - Weapons (round 2: base damage −15 % for pacing): popper 10dmg cd6 9u 0.9u/t 6 shots rl30 ·
+//  - Weapons (round 2: base damage −15 % for pacing): popper 12dmg cd6 9u 1.0u/t 6 shots rl30 ·
 //    blaster 14 cd4 11u 1.0u/t 10 rl36 · shotgun 5×8 ±150 cd16 6u 4 rl40 · sniper 48 cd30 22u 2.5u/t 3 rl50 ·
 //    grenade 40 (→50 % at edge) r2.5u, lobbed to Input.aimDist (1..9 u, 0.1 u steps; absent = 9 u) over
 //    obstacles, fuse 16 t or on touching an enemy, 3 shots cd20 rl50; owners are immune to their grenades.
@@ -60,6 +61,7 @@ import {
   REGEN_HP,
   SPEED,
   STORM_EVERY,
+  SPAWN_PROTECT,
   STORM_GRACE,
   IDLE_RELOAD,
   STORM_PHASES,
@@ -146,6 +148,7 @@ export function createMatch(cfg: MatchConfig): Match {
 
   function damage(target: FighterState, amount: number, by: number, weapon: WeaponKind, crit: boolean, ev: SimEvent[]) {
     if (!target.alive || target.hp <= 0) return;
+    if (state.tick <= SPAWN_PROTECT) return; // spawn protection: shots are absorbed
     const dmg = armored(amount, target.armor);
     const dealt = Math.min(dmg, target.hp);
     target.hp -= dmg;

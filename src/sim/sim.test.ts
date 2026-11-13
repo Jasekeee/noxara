@@ -6,7 +6,7 @@ import { Recorder, replayRecord } from "./record";
 import { botOnlyRoster, t1Roster } from "./roster";
 import { botInput } from "./ai";
 import { simulateBots } from "./headless";
-import { CHEST_NEAR_SPAWN, FIGHTER_R, IDLE_RELOAD, N_CHESTS, STORM_GRACE, WEAPONS } from "./rules";
+import { CHEST_NEAR_SPAWN, FIGHTER_R, IDLE_RELOAD, N_CHESTS, SPAWN_PROTECT, STORM_GRACE, WEAPONS } from "./rules";
 
 const NONE = new Map<number, Input>();
 
@@ -197,6 +197,9 @@ describe("map generation", () => {
       expect(map.obstacles.length).toBeGreaterThanOrEqual(15);
       expect(map.bushes.length).toBeGreaterThanOrEqual(12);
       expect(m.state.chests.length).toBe(N_CHESTS);
+      // spawns spread: nobody starts within 13 u of anybody (beyond every bot's tick-0 vision)
+      for (let i = 0; i < FIGHTERS; i++)
+        for (let j = i + 1; j < FIGHTERS; j++) expect(dist2(map.spawns[i].x, map.spawns[i].y, map.spawns[j].x, map.spawns[j].y)).toBeGreaterThan(13000 ** 2);
       // fairness: a lootable chest within 6 u of every spawn
       for (const sp of map.spawns) expect(m.state.chests.some((c) => dist2(c.x, c.y, sp.x, sp.y) <= CHEST_NEAR_SPAWN ** 2)).toBe(true);
       expect(m.state.heals.length).toBe(6);
@@ -296,6 +299,23 @@ describe("rules", () => {
     expect(firstHit - firstOut).toBeGreaterThanOrEqual(STORM_GRACE - 1);
   });
 
+  it("spawn protection: no damage dealt or received during the first 3 s", () => {
+    const m = createMatch({ seed: 8, fighters: allHuman() });
+    const [a, b] = [m.state.fighters[0], m.state.fighters[1]];
+    a.x = 0; a.y = 0; b.x = 3000; b.y = 0;
+    m.map.obstacles.length = 0;
+    for (const c of m.state.chests) c.open = true;
+    const hits: number[] = [];
+    while (m.state.tick < SPAWN_PROTECT + 40) {
+      for (const e of m.step(new Map([[0, { mx: 0, my: 0, aim: 0, fire: true }]]))) if (e.t === "hit") hits.push(m.state.tick);
+    }
+    expect(hits.length).toBeGreaterThan(0);
+    expect(Math.min(...hits)).toBeGreaterThan(SPAWN_PROTECT);
+    // bot-only: nobody takes damage before the protection ends
+    const bm = createMatch({ seed: 9, fighters: botOnlyRoster() });
+    while (bm.state.tick <= SPAWN_PROTECT) for (const e of bm.step(NONE)) expect(e.t).not.toBe("hit");
+  });
+
   it("walking into a chest opens it and gives its weapon with full ammo", () => {
     const m = createMatch({ seed: 55, fighters: allHuman() });
     const c = m.state.chests[0];
@@ -370,6 +390,9 @@ describe("rules", () => {
     // put them in the open, 3 u apart, a shooting at b
     a.x = 0; a.y = 0; b.x = 3000; b.y = 0;
     m.map.obstacles.length = 0; // test-only: clear line of fire
+    for (const c of m.state.chests) c.open = true; // keep the popper (no chest pickups)
+    while (m.state.tick <= SPAWN_PROTECT) m.step(NONE); // wait out spawn protection
+    a.x = 0; a.y = 0; b.x = 3000; b.y = 0;
     let hit: SimEvent | undefined;
     for (let i = 0; i < 10 && !hit; i++) hit = m.step(new Map([[0, { mx: 0, my: 0, aim: 0, fire: true }]])).find((e) => e.t === "hit");
     expect(hit && hit.t === "hit" && hit.who).toBe(1);

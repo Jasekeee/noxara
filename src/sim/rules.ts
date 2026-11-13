@@ -5,7 +5,12 @@ import type { Storm, WeaponKind } from "./types";
 import { FP } from "./fixed";
 
 export const ISLAND_R = 32 * FP;
-export const SPAWN_RING = 24 * FP;
+/** spawns on a 26 u ring (±1 u, ±30 angle units): neighbours start >= 13 u apart, beyond every bot's
+ *  tick-0 vision (<= 13 u), so nobody sees anybody at spawn */
+export const SPAWN_RING = 26 * FP;
+/** spawn protection: no damage is dealt or received while state.tick <= SPAWN_PROTECT (3 s).
+ *  Everyone spawns at tick 0, so the renderer can show a shield while state.tick <= SPAWN_PROTECT. */
+export const SPAWN_PROTECT = 60;
 export const FIGHTER_R = 500;
 export const MAX_HP = 100;
 /** 5 u/s at 20 Hz */
@@ -52,7 +57,7 @@ export interface WeaponStats {
 }
 
 export const WEAPONS: Record<WeaponKind, WeaponStats> = {
-  popper: { dmg: 10, cd: 6, range: 9 * FP, speed: 900, mag: 6, reload: 30, pellets: 1, spread: 0, blast: 0, fuse: 0 },
+  popper: { dmg: 12, cd: 6, range: 9 * FP, speed: 1000, mag: 6, reload: 30, pellets: 1, spread: 0, blast: 0, fuse: 0 },
   blaster: { dmg: 14, cd: 4, range: 11 * FP, speed: 1000, mag: 10, reload: 36, pellets: 1, spread: 0, blast: 0, fuse: 0 },
   shotgun: { dmg: 8, cd: 16, range: 6 * FP, speed: 900, mag: 4, reload: 40, pellets: 5, spread: 150, blast: 0, fuse: 0 },
   sniper: { dmg: 48, cd: 30, range: 22 * FP, speed: 2500, mag: 3, reload: 50, pellets: 1, spread: 0, blast: 0, fuse: 0 },
