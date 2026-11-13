@@ -2,5 +2,5 @@
 useDefault = true
 
 [allowlist]
-description = "known false positive: a localStorage key name, not a secret"
-regexes = [ "bountyroyale\\.xp\\.v1" ]
+description = "known false positives: a localStorage key name; the fixed HMAC key used only by relayer unit tests"
+regexes = [ "bountyroyale\\.xp\\.v1", "^test-secret[a-z0-9-]*$" ]
