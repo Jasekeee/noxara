@@ -278,15 +278,10 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     let p: Value = c.view("get_player").args_json(json!({"account_id": alice.id()})).await?.json()?;
     assert_eq!(p["deaths"], 1, "the abandoned match counts as a loss");
 
-    // and can tip a bot with a plain NEP-141 transfer
+    // but game wallets refuse plain NEP-141 transfers (audit #2: no inflating a bot for one receipt)
     let bot = s2["roster"][0]["account"].as_str().unwrap().to_string();
-    alice
-        .call(c.id(), "ft_transfer")
-        .args_json(json!({"receiver_id": bot, "amount": ONE.to_string()}))
-        .deposit(NearToken::from_yoctonear(1))
-        .transact()
-        .await?
-        .into_result()?;
+    let r = alice.call(c.id(), "ft_transfer").args_json(json!({"receiver_id": bot, "amount": ONE.to_string()})).deposit(NearToken::from_yoctonear(1)).transact().await?;
+    assert!(r.into_result().is_err());
     let meta: Value = c.view("ft_metadata").await?.json()?;
     assert_eq!(meta["symbol"], "NOX");
     assert_eq!(meta["name"], "Nox");
@@ -532,5 +527,194 @@ async fn release_build_ignores_an_earlier_teardown_time_and_init_is_private() ->
     // a second init fails
     let r = c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id()})).gas(Gas::from_tgas(150)).transact().await?;
     assert!(r.into_result().is_err());
+    Ok(())
+}
+
+// ============================================================ audit #2 (sandbox): the exploits fail
+
+fn receipt_logs(r: &near_workspaces::result::ExecutionFinalResult) -> usize {
+    r.receipt_outcomes().iter().map(|o| o.logs.iter().map(|l| l.len()).sum::<usize>()).max().unwrap_or(0)
+}
+
+/// CRITICAL: [ft_transfer_call(bot, D), unsponsor(bot)] in ONE batch used to value the stake on a
+/// temporarily inflated wallet. Now the transfer into a game wallet is refused, so the batch fails.
+#[tokio::test]
+async fn audit2_sponsor_drain_via_transfer_call_fails() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    let fs = fighters(c).await?;
+    let bot = fs[1]["account"].as_str().unwrap().to_string();
+    let a = wd.w.root_account()?.create_subaccount("attacker").initial_balance(NearToken::from_near(3)).transact().await?.into_result()?;
+    a.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    for _ in 0..3 {
+        wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": a.id(), "amount": (100 * ONE).to_string()})).transact().await?.into_result()?;
+    }
+    a.call(c.id(), "sponsor").args_json(json!({"bot": bot, "amount": (30 * ONE).to_string()})).gas(Gas::from_tgas(50)).transact().await?.into_result()?;
+    let g = guest(&wd, "g-0d1a").await?;
+    for _ in 0..5 {
+        let (s, _) = start(&g, c).await?;
+        settle(&wd.server, c, &s["match_id"], 5, None).await?.0.map_err(anyhow::Error::msg)?;
+    }
+    let a0 = ft(c, a.id().as_str()).await?;
+    let bot0 = ft(c, &bot).await?;
+    let r = a
+        .batch(c.id())
+        .call(near_workspaces::operations::Function::new("ft_transfer_call").args_json(json!({"receiver_id": bot, "amount": a0.to_string(), "msg": ""})).deposit(NearToken::from_yoctonear(1)).gas(Gas::from_tgas(100)))
+        .call(near_workspaces::operations::Function::new("unsponsor").args_json(json!({"bot": bot})).gas(Gas::from_tgas(50)))
+        .transact()
+        .await?;
+    let e = format!("{:?}", r.into_result().unwrap_err());
+    assert!(e.contains("game wallets only receive"), "{e}");
+    assert_eq!(ft(c, a.id().as_str()).await?, a0, "nothing moved");
+    assert_eq!(ft(c, &bot).await?, bot0);
+    let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": a.id()})).await?.json()?;
+    assert_eq!(sp.len(), 1, "the sponsorship is untouched");
+    // the house too
+    let house = format!("house.{}", c.id());
+    let r = a.call(c.id(), "ft_transfer_call").args_json(json!({"receiver_id": house, "amount": ONE.to_string(), "msg": ""})).deposit(NearToken::from_yoctonear(1)).gas(Gas::from_tgas(100)).transact().await?;
+    assert!(r.into_result().is_err());
+    Ok(())
+}
+
+/// MEDIUM: 12 sponsors with 64-char names on a bot that wins AND claims the bounty.
+#[tokio::test]
+async fn audit2_settle_with_double_dividends_fits_the_log_limit() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    let top = wd.w.root_account()?;
+    let fs = fighters(c).await?;
+    let quillon = fs[1]["account"].as_str().unwrap().to_string();
+    // NEP-141 transfers into bots are refused now, so a bot's bankroll only grows by playing: with the
+    // 30% cap, a 100-NOX bot takes 4 sponsors of 10 (the 12-sponsor worst case is the unit test
+    // audit2_settle_logs_k*, which funds the bot directly)
+    for i in 0..4 {
+        let name = format!("{i:02}{}", "s".repeat(52)); // 64 chars with ".test.near"
+        let s = top.create_subaccount(&name).initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+        wd.relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": s.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+        wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": s.id(), "amount": (10 * ONE).to_string()})).transact().await?.into_result()?;
+        s.call(c.id(), "sponsor").args_json(json!({"bot": quillon, "amount": (10 * ONE).to_string()})).gas(Gas::from_tgas(50)).transact().await?.into_result()?;
+    }
+    let g = guest(&wd, "g-d1v1").await?;
+    let (s, _) = start(&g, c).await?;
+    let mut kills = vec![0u8; 10];
+    kills[2] = 2;
+    let bk = s["bounty_idx"].as_u64().map(|b| if b == 2 { 1 } else { 2 });
+    let killer_is_quillon = s["bounty_idx"] != 2;
+    let r = wd
+        .server
+        .call(c.id(), "settle_match")
+        .args_json(json!({"match_id": s["match_id"], "placements": places(2), "kills": kills, "bounty_killer": if killer_is_quillon { Some(2u8) } else { bk.map(|x| x as u8) }, "input_log_hash": "c0ffee".repeat(10), "result_hash": "abc123"}))
+        .gas(Gas::from_tgas(300))
+        .transact()
+        .await?;
+    let logs = receipt_logs(&r);
+    println!("settle with 4 long-named sponsors (prize + bounty dividends): {} Tgas, {logs} B of logs in the largest receipt", r.total_gas_burnt.as_tgas());
+    r.into_result()?;
+    assert!(logs < 16_384);
+    Ok(())
+}
+
+/// LOW: teardown with many pending matches now closes them in batches of 8 (call again).
+#[tokio::test]
+async fn audit2_teardown_with_many_pending_matches() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    WORKER.with(|x| *x.borrow_mut() = Some(w.clone()));
+    let top = w.root_account()?;
+    let root = top.create_subaccount("noxara").initial_balance(NearToken::from_near(30)).transact().await?.into_result()?;
+    let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    let c = root.deploy(&std::fs::read(WASM_OVERRIDE)?).await?.into_result()?;
+    let season_end = w.view_block().await?.timestamp() / 1_000_000 + 900_000;
+    c.call("new")
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id(), "teardown_after_ms": season_end.to_string()}))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?
+        .into_result()?;
+    for i in 0..15 {
+        let g = relay.create_subaccount(&format!("g-{i:04}")).initial_balance(NearToken::from_millinear(200)).transact().await?.into_result()?;
+        relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+        g.call(c.id(), "start_match").gas(Gas::from_tgas(150)).transact().await?.into_result()?;
+    }
+    while w.view_block().await?.timestamp() / 1_000_000 < season_end {
+        w.fast_forward(500).await?;
+    }
+    let mut calls = 0;
+    while w.view_account(c.id()).await.is_ok() {
+        let r = owner.call(c.id(), "teardown").gas(Gas::from_tgas(300)).transact().await?;
+        calls += 1;
+        println!("teardown call {calls}: {} Tgas, {} B of logs", r.total_gas_burnt.as_tgas(), receipt_logs(&r));
+        assert!(receipt_logs(&r) < 16_384);
+        r.into_result()?;
+        assert!(calls <= 3);
+    }
+    assert_eq!(calls, 2, "8 + 7 pending matches, then the account is deleted");
+    Ok(())
+}
+
+/// HIGH: a large state blocks DeleteAccount; teardown_clear shrinks it in batches, then teardown works.
+#[tokio::test]
+async fn audit2_large_state_cleared_then_deleted() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    WORKER.with(|x| *x.borrow_mut() = Some(w.clone()));
+    let top = w.root_account()?;
+    let root = top.create_subaccount("noxara").initial_balance(NearToken::from_near(60)).transact().await?.into_result()?;
+    let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(20)).transact().await?.into_result()?;
+    let c = root.deploy(&std::fs::read(WASM_OVERRIDE)?).await?.into_result()?;
+    let code_len = std::fs::read(WASM_OVERRIDE)?.len() as u64;
+    let season_end = w.view_block().await?.timestamp() / 1_000_000 + 1_800_000;
+    c.call("new")
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id(), "teardown_after_ms": season_end.to_string()}))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?
+        .into_result()?;
+    // grow the state: 60 guests, one settled match each
+    let mut guests = vec![];
+    for i in 0..60 {
+        let g = relay.create_subaccount(&format!("g-{i:04}")).initial_balance(NearToken::from_millinear(200)).transact().await?.into_result()?;
+        relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+        let v: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(150)).transact().await?.into_result()?.json()?;
+        settle(&relay, &c, &v["match_id"], 5, None).await?.0.map_err(anyhow::Error::msg)?;
+        guests.push(g.id().to_string());
+    }
+    let state = w.view_account(c.id()).await?.storage_usage - code_len;
+    println!("state: {state} bytes (+ {code_len} code)");
+    assert!(state >= 60_000, "{state}");
+    while w.view_block().await?.timestamp() / 1_000_000 < season_end {
+        w.fast_forward(500).await?;
+    }
+    // deleting right away fails (large state) and loses nothing
+    let r = owner.call(c.id(), "teardown").gas(Gas::from_tgas(300)).transact().await?;
+    let still_there = w.view_account(c.id()).await.is_ok();
+    println!("teardown with {state} B of state: deleted = {}, failures {}", !still_there, r.receipt_failures().len());
+    assert!(still_there, "NEAR refuses to delete an account with a large state");
+    // the fallback works meanwhile
+    let o0 = owner.view_account().await?.balance.as_yoctonear();
+    owner.call(c.id(), "withdraw_excess").args_json(json!({"amount": NearToken::from_near(1).as_yoctonear().to_string()})).gas(Gas::from_tgas(30)).transact().await?.into_result()?;
+    assert!(owner.view_account().await?.balance.as_yoctonear() > o0 + NearToken::from_millinear(990).as_yoctonear());
+    // clear in batches (players from the chain's storage_deposit history: here, the guests)
+    let mut calls = 0;
+    loop {
+        let batch: Vec<String> = guests.drain(..guests.len().min(40)).collect();
+        let r = owner.call(c.id(), "teardown_clear").args_json(json!({"players": batch, "max_matches": 60, "max_rookies": 8})).gas(Gas::from_tgas(300)).transact().await?;
+        calls += 1;
+        println!("teardown_clear {calls}: {} Tgas, {} B logs", r.total_gas_burnt.as_tgas(), receipt_logs(&r));
+        let p: Value = r.into_result()?.json()?;
+        if p["done"] == true && guests.is_empty() {
+            break;
+        }
+        assert!(calls < 10);
+    }
+    let state = w.view_account(c.id()).await?.storage_usage - code_len;
+    println!("state after clearing: {state} bytes");
+    let root_bal = w.view_account(c.id()).await?.balance.as_yoctonear();
+    let o1 = owner.view_account().await?.balance.as_yoctonear();
+    owner.call(c.id(), "teardown").gas(Gas::from_tgas(300)).transact().await?.into_result()?;
+    assert!(w.view_account(c.id()).await.is_err(), "deleted");
+    let got = owner.view_account().await?.balance.as_yoctonear() - o1;
+    println!("the beneficiary got {:.4} of {:.4} NEAR", got as f64 / 1e24, root_bal as f64 / 1e24);
+    assert!(got + NearToken::from_millinear(10).as_yoctonear() > root_bal);
     Ok(())
 }

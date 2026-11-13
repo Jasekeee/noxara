@@ -37,6 +37,9 @@ dev patch.
 | migration 5: sponsorship review fixes (code only, V2 → V2) | `EBxwrtQymR9RuxVBxm93oGgYdM6f33RyoBUKwUJMdqUC` |
 | migration 6: deposit payer / refund to payer (code only) | `7Brr5XP1kTSyhviC6N5nif2cHEAdMkMvTxPZYf7J6hJt` |
 | migration 7: V1 player records fail closed to the relayer as payer (code only) | `6v2dzRbizjP3QaF2kcTjHymjKESKxez7GwQdvaJNy4cb` |
+| migration 8: NOXARA + audits #1/#2 (code only; Nox/NOX metadata) / `set_teardown_beneficiary(br-7e8492.testnet)` | `He34ga4cPqAmAKzt21m3wCTKpTtvwzNH2eaZv5eWQ8cS` / `1wo26HWKkHEhYZtYuHyqZTREt9QvEzaNi9AzPaerJdq` |
+| migration 9: teardown_clear review fix (code only) | `CjH3XLH87dwNP1bHJiUUZxutRNsW5DyyQEnFPXYPGb85` |
+| live check after migration 8: guest match #50 start / settle (verified, played in real time) | `2QtTrSx4oZ4bQJpMtuQMkE2mQ3Cn5h4sy6MKdHVFsHDc` / `HtHbHewJmJMNfX1cyDArRXCqCdbq26HoTKdueD6Pmgcj` |
 | T3 live (game client): real account created / wallet adds the game key | `DBxrCqzzSwc9SrHUdQ4wHhV1tHvTbmuF4SHCd2xq4iA7` / `iwpQgpWqkjpADK9TVmzJt6WERewsCBH72SzfyNikEc4` |
 | T3 live: `house_grant` 60 (testing on-ramp) / relayed `sponsor` Pep 20 | `9RnX2RXNaswbbSZKrijUyAauBE8fhuBDfAm1pL9u5gVG` / `D4bU7p7cSzDGzyJfm25C6nhfaVGRpUSP1Unzc9AKV2Z8` |
 | T3 live: paid match #42 start / settle (Pep won, sponsor got 7.04 cash) | `Frk8ex3MUgn6oTawvfBSmEyJoi61zqLVg9PDW1wBwx8L` / `EZNFJ1SMGGqjMNjg4EKkep4B8VX84SQbdJq25Koo7QBy` |
@@ -268,6 +271,54 @@ instead); `RUSTFLAGS=-C link-arg=-s` → no change (already stripped); `opt-leve
 kept `z`); `lto`, `codegen-units = 1`, `panic = "abort"` were already set; `overflow-checks` stay on
 (safety). Further gains would need code changes (the ~60 `json!` event sites, the NEP-141
 `ft_transfer_call`/resolver path) for maybe 5–10% more — not worth the risk before the second audit.
+
+## Admin powers (every privileged method)
+
+| Method | Who | What it can do | What it cannot do |
+|---|---|---|---|
+| `new` | only the contract account itself (`#[private]`), once, in the deploy tx | set owner, server, guest parent, the teardown beneficiary (never the contract itself) | run twice; be called by anyone else |
+| `migrate` | only the contract account itself (`#[private]`) | re-read state after a code upgrade | change balances |
+| **deploy new code** | whoever holds the contract account's **full-access key** (owner decision: KEPT on mainnet for fixes during judging) | **anything**: new code can change every rule, including balances | — this is the real trust assumption; every upgrade is a public tx |
+| `settle_match` | only the configured `server` (on mainnet: the relayer account) | report a match result the server re-computed from the recorded inputs: winner, placements, kills, bounty killer. The pot is entries + a top-up of **at most 30 NOX** (from the house or minted below its floor), split by fixed rules | move any player's NOX directly; settle a match twice or one that isn't pending; the result it reports is replayable by anyone from the stored input log (a lying server is detectable, not preventable) |
+| `set_server` | owner | rotate the match-server account | settle itself |
+| `propose_owner` / `accept_owner` | owner, then the proposed account | hand ownership over (two steps) | — |
+| `set_max_free` | owner | size the free-match pool (≤ 96) | affect paid matches |
+| `house_grant` | owner | give ≤ 100 NOX from the house to a registered real player (testing / on-ramp), never below the house floor | mint; touch any player's or bot's NOX |
+| `set_teardown_beneficiary` | owner, only if never set | set the payee once (older deployments) | change it |
+| `teardown_clear` | owner, from 2026-11-25 00:00 UTC | close pending matches (8/call) and delete state in bounded batches | run before the lock (release builds can't move it) |
+| `teardown` | owner, from 2026-11-25 00:00 UTC | delete the contract account, all its NEAR to the fixed beneficiary | run earlier; choose another payee |
+| `withdraw_excess` | owner, from 2026-11-25 00:00 UTC | send NEAR above the storage cost (+0.05) to the fixed beneficiary | touch storage-backing NEAR |
+| `close_retired`, `sweep_match` | anyone | settle a retired bot (sponsors get its wallet by share, rest to the house) / refund an expired match | anything else |
+
+No method lets the owner or the server move a player's NOX: transfers out of a player's balance only
+happen when that player calls `ft_transfer`/`sponsor`/`start_match` (entry) or by the fixed match
+rules. Game wallets (the contract, the house, every bot and rookie) refuse NEP-141 transfers.
+
+**Teardown steps (after 2026-11-25 00:00 UTC):** NEAR refuses to delete an account whose state is
+large (`DeleteAccountWithLargeState`; the testnet contract has ~56 KB). So: (1) `teardown_clear` in
+batches until `done` (`scripts/teardown.ts` lists every registered player from the chain's
+`storage_deposit` history and loops); (2) then EITHER the owner calls `teardown()` (works without
+keys) OR, since the full-access key is kept, `near account delete-account <root> beneficiary <...>`
+works too — both only after the state was cleared. Fallback at any time after the lock:
+`withdraw_excess(amount)`. Sandbox `audit2_large_state_cleared_then_deleted`: 60 guests + matches →
+state 113 KB, `teardown` fails and loses nothing, `withdraw_excess` works, 3 `teardown_clear` calls
+(76 / 37 / 4 Tgas) bring the state to 1,240 bytes, then `teardown` deletes and the beneficiary
+receives the balance.
+
+## Independent audit #2 (NO-GO → fixes; audit #3 pending)
+
+| # | Finding | Fix | Regression test |
+|---|---|---|---|
+| 1 CRITICAL | `ft_transfer_call` into a keyless bot/house inflates its wallet until the refund (drain via `unsponsor`, house-floor bypass, bounty value) | `ft_transfer` / `ft_transfer_call` refuse any game wallet: the contract, the house, every bot / rookie, any sub-account of the contract (future rookies too) | sandbox `audit2_sponsor_drain_via_transfer_call_fails` (the batch fails, nothing moves); unit `audit2_no_transfers_into_game_wallets` |
+| 2 HIGH | teardown can't delete a large state | `teardown_clear` (bounded batches), `withdraw_excess`, both owner-only and time-locked | sandbox `audit2_large_state_cleared_then_deleted`; unit `audit2_teardown_clear_empties_state_in_bounded_batches` |
+| 3 MED | settle logs with 12 long-named sponsors + bounty + retirements | dividends: ONE transfer line + ONE event per payout; slimmer retire event | unit `audit2_settle_logs_k0..k7` on "noxara.near": 7.5–12.3 KB (< 16 KB); sandbox `audit2_settle_with_double_dividends_fits_the_log_limit` |
+| 4 LOW | teardown sweep of 60 matches overflowed logs | 8 per call, call again | unit `audit2_teardown_closes_pending_matches_in_small_batches`, sandbox `audit2_teardown_with_many_pending_matches` (15 pending → 2 calls) |
+| 5 LOW | `storage_balance_bounds.min` below the real price | min = max = 0.02 (the guest price stays internal: `get_config.guest_storage_deposit`) | `storage_bounds_and_double_registration` |
+| 6 LOW | free-start markers never removed | pruned at settlement / close | `audit2_free_start_markers_are_pruned` |
+| 7 LOW | sybils eat the welcome cap | self-registration / `claim_welcome` have their own sub-cap (10 of the 50 a day); the relayer path is rate-limited per IP | `audit2_self_registration_has_its_own_welcome_sub_cap` |
+| 8 INFO | init / owner / grant | beneficiary ≠ contract at `new`; two-step owner change; `house_grant` respects the floor; admin powers table above | `audit2_house_grant_respects_the_floor_and_owner_change_is_two_step` |
+| review | clearing could delete Pending match records / desync pending counters | range deletion only once nothing is in flight (and never a Pending record); every sweep branch keeps `pending_paid` and its id list in step | `teardown_clear_never_loses_escrow_or_credit_and_keeps_counters` (escrow == pending pots, counter == list, supply invariant after every batch) |
+| 9 DEPENDABOT | wee_alloc (unmaintained) via near-sdk default features | `near-sdk` with `default-features = false, features = ["legacy"]`: the Rust allocator (no `wee_alloc` in the tree) | wasm 375,865 → 382,179 B (+6.3 KB, dlmalloc); with this round's new methods 393,730 B. Gas unchanged: start_match + resolve 13 Tgas (was 13), settle 10 / 11 / 12 Tgas (was 10 / 11 / 12), retirement wave 71 Tgas (was 72) |
 
 ## Independent audit (NO-GO → fixes; second audit pending)
 

@@ -372,9 +372,15 @@ impl Contract {
             payouts.push((e.sponsor.clone(), d));
         }
         self.sponsors.insert(bot.clone(), pool);
-        for (sp, d) in payouts {
-            self.move_tokens(bot, &sp, d, "sponsor cut");
-            event("dividend", &near_sdk::serde_json::json!({ "bot": bot, "sponsor": sp, "amount": U128(d), "match_id": U64(match_id) }));
+        // ONE transfer log line and ONE event for all sponsors (the 16 KiB log budget per receipt)
+        let mut t = Vec::with_capacity(payouts.len());
+        for (sp, d) in &payouts {
+            self.move_quiet(bot, sp, *d);
+            t.push((bot.clone(), sp.clone(), *d));
+        }
+        crate::emit_transfers(&t, "sponsor cut");
+        if !payouts.is_empty() {
+            event("dividend", &near_sdk::serde_json::json!({ "bot": bot, "match_id": U64(match_id), "total": U128(paid), "sponsors": payouts.len() }));
         }
         if paid > 0 {
             self.push_history(bot, match_id, "dividend", paid, "");

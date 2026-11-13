@@ -1,4 +1,5 @@
-// End of season: the OWNER asks the contract to delete its own account (it sends all its NEAR to the
+// End of season: the OWNER first clears the contract's state in batches (teardown_clear), then asks the
+// contract to delete its own account (it sends all its NEAR to the
 // teardown beneficiary fixed at new()). Optionally also deletes the relayer account (it has a key) to
 // the same beneficiary. Works when the contract account has no keys left.
 //
@@ -34,6 +35,50 @@ const bal = async (a: string) => {
   return j.result ? Number(BigInt(j.result.amount) / 10n ** 18n) / 1e6 : null;
 };
 const beneficiary = (await near.view(contract, "get_teardown_beneficiary", {})) as string;
+
+// 1. NEAR refuses to delete an account with a large state: list every player that ever registered
+//    (storage_deposit history: nearblocks index + archival args) and clear the state in batches.
+async function registeredPlayers(): Promise<string[]> {
+  const index = network === "testnet" ? "https://api-testnet.nearblocks.io" : "https://api.nearblocks.io";
+  const archival = network === "testnet" ? "https://archival-rpc.testnet.fastnear.com" : "https://archival-rpc.mainnet.fastnear.com";
+  const out = new Set<string>();
+  for (let page = 1; page < 200; page++) {
+    let r: { txns?: { transaction_hash: string; predecessor_account_id: string }[] } = {};
+    for (let a = 0; a < 5 && !r.txns; a++) {
+      r = (await (await fetch(`${index}/v1/account/${contract}/txns?method=storage_deposit&per_page=100&page=${page}`)).json().catch(() => ({}))) as typeof r;
+      if (!r.txns) await new Promise((res) => setTimeout(res, 3000));
+    }
+    if (!r.txns) throw new Error("the nearblocks index didn't answer: try again");
+    for (const t of r.txns) {
+      let j: { result?: { transaction: { signer_id: string; actions: { FunctionCall?: { method_name: string; args: string } }[] } } } = {};
+      for (let a = 0; a < 6 && !j.result; a++) {
+        if (a) await new Promise((res) => setTimeout(res, 1000 * a));
+        j = (await (await fetch(archival, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tx", params: { tx_hash: t.transaction_hash, sender_account_id: t.predecessor_account_id, wait_until: "NONE" } }) })).json().catch(() => ({}))) as typeof j;
+      }
+      for (const act of j.result?.transaction.actions ?? []) {
+        if (act.FunctionCall?.method_name !== "storage_deposit") continue;
+        const args = JSON.parse(Buffer.from(act.FunctionCall.args, "base64").toString() || "{}") as { account_id?: string };
+        out.add(args.account_id ?? j.result!.transaction.signer_id);
+      }
+    }
+    if (r.txns.length < 100) break;
+  }
+  return [...out];
+}
+if (!process.argv.includes("--skip-clear")) {
+  const players = await registeredPlayers();
+  console.log(`${players.length} registered players to clear`);
+  for (let i = 0; ; i++) {
+    const batch = players.splice(0, 40);
+    const o = await near.transaction(owner).functionCall(contract, "teardown_clear", { players: batch, max_matches: 60, max_rookies: 8 }, { gas: "300 Tgas" }).send({ waitUntil: "FINAL" });
+    const p = (await near.view(contract, "get_config", {}).catch(() => null)) as unknown;
+    void p;
+    console.log(`teardown_clear ${i + 1}: ${o.transaction.hash}`);
+    const v = JSON.parse(Buffer.from((o as unknown as { status: { SuccessValue: string } }).status.SuccessValue, "base64").toString()) as { done: boolean; storage_usage: string };
+    console.log(`  done=${v.done} storage_usage=${v.storage_usage}`);
+    if (v.done && players.length === 0) break;
+  }
+}
 const b0 = await bal(beneficiary);
 const c0 = await bal(contract);
 console.log(`${contract}: ${c0} NEAR; beneficiary ${beneficiary}: ${b0} NEAR`);

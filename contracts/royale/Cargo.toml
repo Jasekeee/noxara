@@ -15,12 +15,13 @@ crate-type = ["cdylib", "rlib"]
 teardown-override = []
 
 [dependencies]
-near-sdk = "5.30.1"
+# no default features: the default pulls wee_alloc (unmaintained); the Rust allocator is used instead
+near-sdk = { version = "5.30.1", default-features = false, features = ["legacy"] }
 near-contract-standards = "5.30.1"
 borsh = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-near-sdk = { version = "5.30.1", features = ["unit-testing"] }
+near-sdk = { version = "5.30.1", default-features = false, features = ["legacy", "unit-testing"] }
 near-workspaces = { version = "0.24.0", features = ["unstable"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"

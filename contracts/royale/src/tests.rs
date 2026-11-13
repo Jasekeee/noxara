@@ -542,7 +542,7 @@ fn storage_deposit_covers_a_player_and_a_pending_match() {
 #[test]
 fn storage_bounds_and_double_registration() {
     let mut c = setup();
-    assert_eq!(c.storage_balance_bounds().min, GUEST_STORAGE_DEPOSIT);
+    assert_eq!(c.storage_balance_bounds().min, STORAGE_DEPOSIT, "what a self-registering account pays");
     assert_eq!(c.storage_balance_bounds().max, Some(STORAGE_DEPOSIT));
     assert!(c.storage_balance_of(acc(GUEST)).is_some());
     assert!(c.storage_balance_of(acc("nobody.test")).is_none());
@@ -1342,4 +1342,254 @@ fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
     let r = settle(&mut c, s.match_id, 2, None, 230);
     let earned2 = c.get_sponsorships(acc(ALICE))[0].earned.0 - earned;
     assert_eq!(earned2, r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
+}
+
+
+// ============================================================ audit #2 PoCs: the exploits no longer work
+
+#[test]
+fn audit2_no_transfers_into_game_wallets() {
+    // CRITICAL: [ft_transfer_call(bot | house, D), unsponsor | start_match] inflated a keyless game
+    // wallet for one receipt. Game wallets now refuse any NEP-141 transfer.
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let house = c.house.clone();
+    let bot = c.slots[1].clone();
+    let me = acc(ME);
+    let future_rookie = acc(&format!("yarrow-99.{ME}"));
+    for to in [house.clone(), bot.clone(), me.clone(), future_rookie.clone()] {
+        ctx(ALICE, 200, NearToken::from_yoctonear(1));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.ft_transfer(to.clone(), U128(ONE), None)));
+        assert!(r.is_err(), "ft_transfer into {to} refused");
+        ctx(ALICE, 200, NearToken::from_yoctonear(1));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = c.ft_transfer_call(to.clone(), U128(ONE), None, String::new());
+        }));
+        assert!(r.is_err(), "ft_transfer_call into {to} refused");
+    }
+    assert_eq!(bal(&c, ALICE), 50 * ONE);
+    // ordinary player-to-player transfers still work
+    ctx(RELAY, 201, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("bob.test")), None);
+    ctx(ALICE, 202, NearToken::from_yoctonear(1));
+    c.ft_transfer(acc("bob.test"), U128(ONE), None);
+    assert_eq!(bal(&c, "bob.test"), ONE);
+}
+
+/// 12 sponsors with 64-char names on a bot that wins AND claims the bounty while `k` other bots go
+/// broke in the same settlement, on the mainnet-length contract name "noxara.near".
+fn audit2_settle_logs(k: usize) -> (usize, usize, u32) {
+    const NAME: &str = "noxara.near";
+    CUR.with(|c| *c.borrow_mut() = NAME.to_string());
+    ctx(NAME, 100, NearToken::from_yoctonear(0));
+    let mut c = Contract::new(acc("owner.near"), acc(SERVER), acc("relay.noxara.near"), None, None);
+    let quillon = c.slots[1].clone();
+    let brindle = c.slots[0].clone();
+    c.mint(&brindle, 400 * ONE, "t");
+    c.mint(&quillon, 250 * ONE, "t");
+    for i in 0..12 {
+        let who = format!("{:0>64x}", 0xabcdef00u64 + i);
+        ctx(&who, 110, STORAGE_DEPOSIT);
+        c.storage_deposit(None, None);
+        c.mint(&acc(&who), 10 * ONE, "t");
+        ctx(&who, 111, NearToken::from_yoctonear(0));
+        c.sponsor(quillon.clone(), U128(10 * ONE));
+    }
+    for s in 2..2 + k {
+        let a = c.slots[s].clone();
+        let b = c.balance(&a);
+        c.burn(&a, b - ENTRY_FEE, "t"); // exactly one entry left: broke after this match
+        let mut f = c.load_fighter(&a).unwrap();
+        f.record.matches = 3;
+        c.save_fighter(f);
+    }
+    c.mint(&c.house.clone(), 20_000 * ONE, "t");
+    let player = format!("{:0>64x}", 0x1234u64);
+    ctx(&player, 120, STORAGE_DEPOSIT);
+    c.storage_deposit(None, None);
+    c.mint(&acc(&player), 10 * ONE, "t");
+    let s = start(&mut c, &player, 200);
+    assert_eq!(s.bounty_idx, Some(1));
+    let r0 = c.rookies;
+    let _ = settle(&mut c, s.match_id, 2, Some(2), 210);
+    let logs = near_sdk::test_utils::get_logs();
+    let bytes: usize = logs.iter().map(|l| l.len()).sum();
+    CUR.with(|c| *c.borrow_mut() = ME.to_string());
+    (bytes, logs.len(), c.rookies - r0)
+}
+
+fn audit2_check(k: usize) {
+    let (b, n, rookies) = audit2_settle_logs(k);
+    println!("k={k}: settle logs {b} B in {n} lines, {rookies} retirements");
+    assert_eq!(rookies as usize, k, "the wave happened");
+    assert!(b < 16_384 && n < 100, "k={k}: {b} B / {n} lines");
+}
+#[test]
+fn audit2_settle_logs_k0() { audit2_check(0) }
+#[test]
+fn audit2_settle_logs_k1() { audit2_check(1) }
+#[test]
+fn audit2_settle_logs_k2() { audit2_check(2) }
+#[test]
+fn audit2_settle_logs_k3() { audit2_check(3) }
+#[test]
+fn audit2_settle_logs_k4() { audit2_check(4) }
+#[test]
+fn audit2_settle_logs_k5() { audit2_check(5) }
+#[test]
+fn audit2_settle_logs_k6() { audit2_check(6) }
+#[test]
+fn audit2_settle_logs_k7() { audit2_check(7) }
+
+#[test]
+fn audit2_teardown_closes_pending_matches_in_small_batches() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 0);
+    for i in 0..15 {
+        let g = guest_n(&mut c, 500 + i);
+        start(&mut c, &g, 200 + i as u64);
+    }
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    let mut calls = 0;
+    loop {
+        testing_env!(b.build());
+        let r = c.teardown();
+        calls += 1;
+        let bytes: usize = near_sdk::test_utils::get_logs().iter().map(|l| l.len()).sum();
+        assert!(bytes < 16_384, "{bytes} B");
+        if matches!(r, near_sdk::PromiseOrValue::Promise(_)) {
+            break;
+        }
+        assert!(calls < 10);
+    }
+    assert_eq!(calls, 2, "15 pending matches: 8 + 7");
+    assert!(c.pending_free.is_empty());
+}
+
+#[test]
+fn audit2_house_grant_respects_the_floor_and_owner_change_is_two_step() {
+    let mut c = setup();
+    let house = c.house.clone();
+    let spare = c.balance(&house) - HOUSE_FLOOR;
+    c.move_tokens(&house, &acc(GUEST), spare, "test");
+    ctx("owner.test", 300, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.house_grant(acc(ALICE), U128(ONE)))).is_err());
+    ctx("owner.test", 301, NearToken::from_yoctonear(0));
+    c.propose_owner(acc("new.test"));
+    ctx("evil.test", 302, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.accept_owner())).is_err());
+    ctx("new.test", 303, NearToken::from_yoctonear(0));
+    c.accept_owner();
+    assert_eq!(c.owner, acc("new.test"));
+}
+
+#[test]
+fn audit2_free_start_markers_are_pruned() {
+    let mut c = setup();
+    let s = start(&mut c, GUEST, 200);
+    assert!(near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart).get(&acc(GUEST)).is_some());
+    settle(&mut c, s.match_id, 3, None, 200 + FREE_COOLDOWN_BLOCKS + 1);
+    assert!(near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart).get(&acc(GUEST)).is_none(), "pruned at settlement");
+}
+
+#[test]
+fn audit2_self_registration_has_its_own_welcome_sub_cap() {
+    let mut c = setup();
+    for i in 0..(WELCOME_SELF_DAILY_CAP + 3) {
+        let who = format!("sybil{i}.testnet");
+        register_as(&mut c, &who, &who, 1);
+    }
+    let got = (0..(WELCOME_SELF_DAILY_CAP + 3)).filter(|i| c.welcome_credit(&acc(&format!("sybil{i}.testnet"))) > 0).count();
+    assert_eq!(got as u32, WELCOME_SELF_DAILY_CAP, "self-registrations capped");
+    register_as(&mut c, RELAY, "real.testnet", 1);
+    assert_eq!(c.welcome_credit(&acc("real.testnet")), WELCOME_STAKE, "the relayer path still has room");
+}
+
+#[test]
+fn audit2_teardown_clear_empties_state_in_bounded_batches() {
+    let mut c = setup();
+    let mut guests = vec![GUEST.to_string()];
+    for i in 0..30 {
+        let g = guest_n(&mut c, 900 + i);
+        let s = start(&mut c, &g, 200 + i as u64 * 10);
+        settle(&mut c, s.match_id, 5, None, 205 + i as u64 * 10);
+        guests.push(g);
+    }
+    assert!(c.rookies > 0, "rookies to clear too");
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    let before_fighters = c.slots.clone();
+    let mut calls = 0;
+    loop {
+        let batch: Vec<AccountId> = guests.drain(..guests.len().min(20)).map(|g| acc(&g)).collect();
+        let p = c.teardown_clear(batch, Some(10), Some(3));
+        calls += 1;
+        let bytes: usize = near_sdk::test_utils::get_logs().iter().map(|l| l.len()).sum();
+        assert!(bytes < 16_384);
+        if p.done && guests.is_empty() {
+            break;
+        }
+        assert!(calls < 20);
+    }
+    c.players.flush();
+    c.matches.flush();
+    c.fighters.flush();
+    assert!(c.get_match(U64(1)).is_none() && c.get_match(U64(31)).is_none());
+    assert!(before_fighters.iter().all(|f| c.fighters.get(f).is_none()), "fighter records gone");
+    assert!(c.get_player(acc(GUEST)).is_none());
+    println!("teardown_clear: {calls} calls");
+}
+
+
+#[test]
+fn teardown_clear_never_loses_escrow_or_credit_and_keeps_counters() {
+    // review: clearing must wait for in-flight matches and keep the pending counters consistent
+    let mut c = setup();
+    register_as(&mut c, RELAY, "cred.testnet", 1); // credit-paid entries
+    grant(&mut c, ALICE, 50 * ONE);
+    let mut paid_players = vec![ALICE.to_string(), "cred.testnet".to_string()];
+    for i in 0..6 {
+        let who = format!("p{i}.testnet");
+        ctx(&who, 140, STORAGE_DEPOSIT);
+        c.storage_deposit(None, None);
+        grant(&mut c, &who, 10 * ONE);
+        paid_players.push(who);
+    }
+    let mut h = 200;
+    for p in &paid_players {
+        start(&mut c, p, h);
+        h += 2;
+    }
+    for i in 0..6 {
+        let g = guest_n(&mut c, 700 + i);
+        start(&mut c, &g, h);
+        h += 2;
+    }
+    assert_eq!(c.pending_paid as usize, paid_players.len());
+    let check = |c: &Contract| {
+        // escrow on the contract == the sum of what pending matches hold
+        let held: u128 = c.pending_free.iter().chain(c.pending_paid_ids().iter()).filter_map(|id| c.load_match(*id)).map(|m| m.pot.0).sum();
+        assert_eq!(c.balance(&acc(ME)), held, "escrow matches the pending matches");
+        assert_eq!(c.pending_paid as usize, c.pending_paid_ids().len(), "counter == list");
+        assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
+    };
+    check(&c);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    let mut calls = 0;
+    loop {
+        testing_env!(b.build());
+        let p = c.teardown_clear(vec![], Some(5), Some(2));
+        calls += 1;
+        check(&c);
+        if p.done {
+            break;
+        }
+        assert!(calls < 20);
+    }
+    assert!(c.pending_free.is_empty() && c.pending_paid == 0);
+    assert_eq!(c.balance(&acc(ME)), 0, "every entry went back by the rules before any record was deleted");
+    assert_eq!(c.welcome_credit(&acc("cred.testnet")), WELCOME_STAKE - ENTRY_FEE, "a seeded credit entry is forfeited to the house, never lost");
 }
