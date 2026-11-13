@@ -61,10 +61,10 @@ export const WEAPON_ORDER: WeaponKind[] = ["popper", "blaster", "shotgun", "snip
 
 /** Chest loot weights (sum 100). */
 export const CHEST_LOOT: [WeaponKind, number][] = [
-  ["blaster", 34],
-  ["shotgun", 24],
-  ["sniper", 20],
-  ["grenade", 22],
+  ["blaster", 38],
+  ["shotgun", 27],
+  ["sniper", 15],
+  ["grenade", 20],
 ];
 
 /** Damage after upgrades: +10 % per weapon tier, −2 per armor level, minimum 1. */

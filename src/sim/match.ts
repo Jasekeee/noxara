@@ -273,7 +273,7 @@ export function createMatch(cfg: MatchConfig): Match {
         let boom = p.ttl <= 0;
         if (!boom) {
           for (const f of fighters) {
-            if (f.alive && f.idx !== p.owner && dist2(f.x, f.y, p.x, p.y) <= sq(FIGHTER_R + 300)) {
+            if (f.alive && f.idx !== p.owner && dist2(f.x, f.y, p.x, p.y) <= sq(FIGHTER_R + 150)) {
               boom = true;
               break;
             }

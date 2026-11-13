@@ -35,13 +35,15 @@ interface Params {
   lootUntil: number;
 }
 
+/** vision ranges (u): short / normal / sniper */
+const V1 = 10, V2 = 11, V3 = 14;
 export const PERSONALITY: Record<Personality, Params> = {
-  aggressive: { engage: 140, pref: 45, lowHp: 25, jitter: 140, react: 8, vision: 12 * FP, passive: false, camp: false, lootUntil: 0 },
-  camper: { engage: 100, pref: 70, lowHp: 40, jitter: 115, react: 10, vision: 11 * FP, passive: false, camp: true, lootUntil: 0 },
-  sniper: { engage: 110, pref: 80, lowHp: 40, jitter: 100, react: 12, vision: 15 * FP, passive: false, camp: false, lootUntil: 0 },
-  looter: { engage: 100, pref: 70, lowHp: 45, jitter: 135, react: 10, vision: 11 * FP, passive: false, camp: false, lootUntil: 1500 },
-  coward: { engage: 90, pref: 90, lowHp: 60, jitter: 150, react: 12, vision: 11 * FP, passive: true, camp: true, lootUntil: 0 },
-  balanced: { engage: 110, pref: 70, lowHp: 40, jitter: 125, react: 9, vision: 12 * FP, passive: false, camp: false, lootUntil: 0 },
+  aggressive: { engage: 140, pref: 45, lowHp: 25, jitter: 140, react: 8, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
+  camper: { engage: 100, pref: 70, lowHp: 40, jitter: 115, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
+  sniper: { engage: 105, pref: 80, lowHp: 40, jitter: 100, react: 12, vision: 15 * FP, passive: false, camp: false, lootUntil: 0 },
+  looter: { engage: 100, pref: 70, lowHp: 45, jitter: 135, react: 10, vision: V1 * FP, passive: false, camp: false, lootUntil: 1500 },
+  coward: { engage: 90, pref: 90, lowHp: 60, jitter: 150, react: 12, vision: V1 * FP, passive: true, camp: true, lootUntil: 0 },
+  balanced: { engage: 100, pref: 70, lowHp: 40, jitter: 125, react: 9, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
 };
 
 interface Brain {
@@ -64,6 +66,13 @@ interface Brain {
   wanderY: number;
   wanderUntil: number;
   bush: number;
+  burstLeft: number;
+  burstPause: number;
+  /** awareness of each other fighter (ticks noticed) */
+  aw: number[];
+  fleeUntil: number;
+  fleeX: number;
+  fleeY: number;
   lastMove: number;
   mode: string;
 }
@@ -80,6 +89,7 @@ interface Mind {
 const minds = new WeakMap<Match, Mind>();
 /** campers hold still in their bush while the target is farther than this */
 const BUSH_HOLD = 2800;
+const BURST_MIN = 2, BURST_MAX = 4, PAUSE_MIN = 10, PAUSE_MAX = 22;
 const sq = (v: number) => v * v;
 
 function mind(match: Match): Mind {
@@ -97,8 +107,8 @@ function mind(match: Match): Mind {
         const p = PERSONALITY[f.personality] ?? PERSONALITY.balanced;
         return {
           rng,
-          jitter: Math.max(40, Math.min(170, p.jitter + rng.range(-15, 15) - 8 * match.cfg.fighters[i].upgrades.weaponTier)),
-          leadPct: rng.range(35, 85) + (f.personality === "sniper" ? 15 : 0),
+          jitter: Math.max(40, Math.min(220, p.jitter + 40 + rng.range(-15, 15) - 8 * match.cfg.fighters[i].upgrades.weaponTier)),
+          leadPct: rng.range(20, 70) + (f.personality === "sniper" ? 15 : 0),
           strafe: rng.chance(50) ? 1 : -1,
           strafeUntil: 0,
           aimErr: 0,
@@ -114,6 +124,12 @@ function mind(match: Match): Mind {
           wanderY: 0,
           wanderUntil: 0,
           bush: -1,
+          burstLeft: 3,
+          burstPause: 0,
+          aw: fs.map(() => 0),
+          fleeUntil: 0,
+          fleeX: 0,
+          fleeY: 0,
           lastMove: -1,
           mode: "",
         };
@@ -199,11 +215,26 @@ export function botInput(match: Match, idx: number): Input {
   const vision = me.weapon === "sniper" ? P.vision + 3 * FP : P.vision;
   let tgt = -1, tgtScore = 1e18, nearest = 1e18, nearIdx = -1;
   let threatX = 0, threatY = 0, threats = 0;
+  const alerted = t - me.lastHurtTick <= 30;
   for (const f of s.fighters) {
-    if (f.idx === idx || !f.alive || !match.canSee(idx, f.idx)) continue;
+    if (f.idx === idx) continue;
     const d2 = dist2(me.x, me.y, f.x, f.y);
-    if (d2 > vision * vision) continue;
+    if (!f.alive || d2 > vision * vision || !match.canSee(idx, f.idx)) {
+      b.aw[f.idx] = Math.max(0, b.aw[f.idx] - 2);
+      continue;
+    }
     const d = isqrt(d2);
+    // Awareness: an enemy must be noticed before it counts (view cone, hearing shots, being shot at).
+    const need = 3 + Math.trunc(d / 700);
+    if (b.aw[f.idx] < need) {
+      const attended =
+        alerted ||
+        d < 4 * FP ||
+        (t - f.lastShotTick <= 20 && d < 14 * FP) ||
+        Math.abs(angDiff(iatan2(f.y - me.y, f.x - me.x), me.aim)) < 1000;
+      if (attended) b.aw[f.idx]++;
+      if (b.aw[f.idx] < need) continue;
+    } else b.aw[f.idx] = Math.min(b.aw[f.idx] + 1, 60);
     if (d < nearest) {
       nearest = d;
       nearIdx = f.idx;
@@ -244,7 +275,7 @@ export function botInput(match: Match, idx: number): Input {
     st.phase > 0 &&
     (toShrink < ticksToWalk * 2 + 120 || (P.passive && t > 200) || (st.targetR <= 4500 && needT > 0));
   const provoked = hurtRecently || (dT < 3500 && t >= 300) || s.alive <= 3;
-  const earlyLoot = t < 300 || (!armed && t < 700 && me.personality !== "aggressive");
+  const earlyLoot = t < 60 || (!armed && t < 700 && me.personality !== "aggressive");
   const willFight =
     T !== null &&
     (!P.passive || provoked) &&
@@ -254,6 +285,11 @@ export function botInput(match: Match, idx: number): Input {
   const engageR = Math.min(vision, Math.trunc((w.range * P.engage) / 100));
 
   const angleTo = (x: number, y: number) => iatan2(y - me.y, x - me.x);
+  // Disengage when losing (not aggressive bots, not in the endgame) or low; keep it up for a while.
+  const losing = T !== null && me.personality !== "aggressive" && s.alive > 3 && me.hp < 60 && T.hp > me.hp + 20;
+  if ((me.hp < P.lowHp || losing) && threats > 0 && s.alive > 2) b.fleeUntil = t + 50;
+  if (me.hp >= Math.min(95, P.lowHp + 35) && threats === 0) b.fleeUntil = 0;
+  const fleeing = t < b.fleeUntil && s.alive > 2;
   const insideTarget = (x: number, y: number, pad: number) =>
     dist2(x, y, st.tx, st.ty) <= sq(Math.max(st.targetR - pad, 0)) || st.phase === 0;
 
@@ -268,20 +304,54 @@ export function botInput(match: Match, idx: number): Input {
     }
   }
 
+  let healSafe = true;
+  if (heal >= 0 && threats > 0) {
+    const ha = angleTo(s.heals[heal].x, s.heals[heal].y);
+    healSafe = Math.abs(angDiff(ha, iatan2(Math.trunc(threatY / threats) - me.y, Math.trunc(threatX / threats) - me.x))) > 1200;
+  }
   if (stormUrgent || stormSoon) {
     mode = "storm";
     goalA = needT > 0 ? angleTo(st.tx, st.ty) : angleTo(st.cx, st.cy);
     avoidStorm = false;
-  } else if (me.hp < P.lowHp && heal >= 0 && healD < 20 * FP) {
+  } else if (me.hp < P.lowHp && heal >= 0 && healD < 20 * FP && (threats === 0 || healSafe)) {
     mode = "heal";
     goalA = angleTo(s.heals[heal].x, s.heals[heal].y);
-  } else if (me.hp < P.lowHp && threats > 0 && s.alive > 2) {
+  } else if (fleeing) {
     mode = "flee";
-    const ax = Math.trunc(threatX / threats), ay = Math.trunc(threatY / threats);
+    let ax = st.tx, ay = st.ty;
+    if (threats > 0) {
+      ax = Math.trunc(threatX / threats);
+      ay = Math.trunc(threatY / threats);
+      b.fleeX = ax;
+      b.fleeY = ay;
+    } else {
+      ax = b.fleeX;
+      ay = b.fleeY;
+    }
     let a = iatan2(me.y - ay, me.x - ax);
-    // bias toward the safe centre so fleeing doesn't run into the storm
-    const toC = angleTo(st.tx, st.ty);
-    if (Math.abs(angDiff(a, toC)) > 1300) a = a + (angDiff(toC, a) > 0 ? 600 : -600);
+    // prefer a nearby bush that is not toward the threat (hide + regen)
+    let bestBush = -1, bestCost = 1e18;
+    match.map.bushes.forEach((bu, i) => {
+      const d = isqrt(dist2(me.x, me.y, bu.x, bu.y));
+      if (d > 10 * FP || !insideTarget(bu.x, bu.y, 500)) return;
+      const toward = Math.abs(angDiff(angleTo(bu.x, bu.y), iatan2(ay - me.y, ax - me.x)));
+      if (toward < 1100 && d > 1500) return;
+      const cost = d - isqrt(dist2(ax, ay, bu.x, bu.y));
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestBush = i;
+      }
+    });
+    if (bestBush >= 0) {
+      const bu = match.map.bushes[bestBush];
+      a = dist2(me.x, me.y, bu.x, bu.y) > sq(800) ? angleTo(bu.x, bu.y) : -1;
+    } else {
+      // bias toward the safe centre so fleeing doesn't run into the storm
+      const toC = angleTo(st.tx, st.ty);
+      if (Math.abs(angDiff(a, toC)) > 1300) a = a + (angDiff(toC, a) > 0 ? 600 : -600);
+    }
+    // zig-zag while running so pursuers' leads miss
+    if (a >= 0 && threats > 0) a += ((t >> 3) & 1 ? 1 : -1) * 450;
     goalA = a;
   } else if (me.hp <= me.maxHp - 35 && heal >= 0 && healD < 7 * FP) {
     mode = "heal";
@@ -301,7 +371,12 @@ export function botInput(match: Match, idx: number): Input {
     if (P.camp && me.inBush && dT > BUSH_HOLD) {
       goalA = -1; // ambush: hold still in the bush
       mode = "ambush";
-    } else if (dT > pref + 1000) goalA = at + b.strafe * 350;
+    } else if (dT > pref + 1000) {
+      // don't run after a retreating target unless aggressive or it is nearly dead
+      const vx = m.vx[T.idx], vy = m.vy[T.idx];
+      const away = vx * (T.x - me.x) + vy * (T.y - me.y) > 0 && vx * vx + vy * vy > 150 * 150;
+      goalA = away && me.personality !== "aggressive" && T.hp > 30 ? at + b.strafe * 1024 : at + b.strafe * 350;
+    }
     else if (dT < pref - 1000) goalA = at + 2048 - b.strafe * 350;
     else goalA = at + b.strafe * 1024;
   } else if (!armed || (t < P.lootUntil) || (me.personality === "sniper" && me.weapon !== "sniper" && t < 1400)) {
@@ -310,11 +385,11 @@ export function botInput(match: Match, idx: number): Input {
     for (const c of s.chests) {
       if (c.open || !insideTarget(c.x, c.y, 1000)) continue;
       const d = isqrt(dist2(me.x, me.y, c.x, c.y));
-      if (d > 30 * FP) continue;
+      if (d > (t < 200 ? 30 : 16) * FP) continue;
       let cost = d;
       for (const f of s.fighters) {
         if (f.idx === idx || !f.alive || !match.canSee(idx, f.idx)) continue;
-        if (dist2(f.x, f.y, c.x, c.y) < sq(d - 1500)) cost += 6 * FP;
+        if (dist2(f.x, f.y, c.x, c.y) < sq(d + 1500)) cost += 10 * FP;
       }
       if (cost < bestCost) {
         bestCost = cost;
@@ -327,7 +402,7 @@ export function botInput(match: Match, idx: number): Input {
     }
   }
 
-  if (mode === "roam" && T && willFight && t >= 300 && (me.personality === "aggressive" || (!P.camp && me.hp >= T.hp + 20))) {
+  if (mode === "roam" && T && willFight && t >= 300 && (me.personality === "aggressive" || (!P.camp && me.hp >= T.hp + 30))) {
     // chase visible targets beyond engage range
     mode = "chase";
     goalA = angleTo(T.x, T.y);
@@ -362,17 +437,20 @@ export function botInput(match: Match, idx: number): Input {
 
   if (mode === "roam") {
     // wander inside the next safe circle; passive bots also keep away from visible enemies
-    if (t >= b.wanderUntil || dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(2 * FP) || !insideTarget(b.wanderX, b.wanderY, 1000)) {
+    if (t >= b.wanderUntil || dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(2 * FP) || dist2(b.wanderX, b.wanderY, st.cx, st.cy) > sq(st.r - 1500)) {
       // local wander (a few units from here), pulled inside the next safe circle
       const a = b.rng.below(4096);
       const rr = b.rng.range(4 * FP, me.personality === "aggressive" ? 10 * FP : 7 * FP);
       let wx = me.x + Math.trunc((icos(a) * rr) / 1024);
       let wy = me.y + Math.trunc((isin(a) * rr) / 1024);
-      const lim = Math.max(1000, Math.trunc((st.targetR * 8) / 10));
-      const dd = isqrt(dist2(wx, wy, st.tx, st.ty));
+      // roam anywhere inside the current safe circle while the storm waits; inside the next one once it moves
+      const shrinking = phase !== undefined && t >= phase.shrinkStart - 100;
+      const cx = shrinking ? st.tx : st.cx, cy = shrinking ? st.ty : st.cy;
+      const lim = Math.max(1000, Math.trunc(((shrinking ? st.targetR : st.r) * 8) / 10));
+      const dd = isqrt(dist2(wx, wy, cx, cy));
       if (dd > lim) {
-        wx = st.tx + Math.trunc(((wx - st.tx) * lim) / dd);
-        wy = st.ty + Math.trunc(((wy - st.ty) * lim) / dd);
+        wx = cx + Math.trunc(((wx - cx) * lim) / dd);
+        wy = cy + Math.trunc(((wy - cy) * lim) / dd);
       }
       b.wanderX = wx;
       b.wanderY = wy;
@@ -431,12 +509,19 @@ export function botInput(match: Match, idx: number): Input {
     const aimed = Math.abs(angDiff(want, aim)) <= 60;
     let maxR = w.range;
     if (me.weapon === "shotgun") maxR = w.range - 800;
-    if (me.weapon === "grenade") maxR = w.range + 800;
+    if (me.weapon === "grenade") maxR = w.range + 500;
+    if (me.weapon === "grenade" && dT < 3 * FP) maxR = 0;
     const ambushR = P.camp && me.inBush ? Math.trunc((w.range * 85) / 100) : maxR;
     const clear = me.weapon === "grenade" || lineClear(match, me.x, me.y, T.x, T.y);
-    const allowed = willFight || (mode === "flee" && provoked);
+    const allowed = willFight && (mode !== "flee" || dT < 4 * FP);
     fire = allowed && aimed && clear && dT <= Math.min(maxR, ambushR) && t - b.targetSince >= P.react && t >= me.readyTick;
     if (me.ammo === 0) fire = false;
+    // Human-like bursts: a few shots, then a short pause to re-aim / move.
+    if (fire && t < b.burstPause) fire = false;
+    if (fire && --b.burstLeft <= 0) {
+      b.burstLeft = b.rng.range(BURST_MIN, BURST_MAX);
+      b.burstPause = t + b.rng.range(PAUSE_MIN, PAUSE_MAX);
+    }
   } else if (goalA >= 0) {
     const d = angDiff(iatan2(my, mx), aim);
     aim = (aim + Math.max(-200, Math.min(200, d))) & 4095;

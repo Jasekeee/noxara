@@ -103,7 +103,7 @@ export function generateWorld(seed: number): GeneratedWorld {
     if (i === 0) p = placeNear(0, 0, 2500);
     else {
       const a = rot + Math.trunc(((2 * i - 1) * 4096) / (2 * (N_CHESTS - 1)));
-      const rr = rng.range(13 * FP, 18 * FP);
+      const rr = rng.range(14 * FP, 21 * FP);
       p = placeNear(Math.trunc((icos(a) * rr) / 1024), Math.trunc((isin(a) * rr) / 1024), 2000);
     }
     chests.push({ id: i, x: p.x, y: p.y, open: false, weapon: pickLoot(rng) });
