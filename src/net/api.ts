@@ -124,5 +124,96 @@ export interface GameClientT3 extends GameClient {
   claimWelcome(): Promise<number>;
 }
 
+// ------------------------------------------------------------------ Economy v2 (docs/ECONOMY.md)
+/** One point of the on-chain economy history (the contract keeps the last 64 settles). */
+export interface EconomySnapshot {
+  match: string;
+  at: number; // unix ms
+  supply: number;
+  burned: number; // cumulative
+  house: number;
+  m: number; // reward multiplier at that settle
+}
+
+/** `get_economy`: the House rule and the money supply, live. All amounts in NOX. */
+export interface EconomyInfo {
+  supply: number;
+  genesis: number; // 2,900
+  minted: number; // == genesis (nothing is minted after genesis)
+  burned: number;
+  house: number;
+  houseEma: number; // the moving average the rule uses
+  floor: number;
+  target: number;
+  m: number; // reward multiplier 0..1.5
+  houseShare: number; // fraction of every pot kept by the House (0.05..0.15)
+  burnShare: number; // fraction of every pot burned (0.01..0.04)
+  brake: number; // s: fraction of every burn that really burns (0..1)
+  topUp: number; // current pot top-up from the House (25 × m)
+  season: number;
+  seasonEndsAt: number; // unix ms
+  seasonBurned: number;
+  seasonRewards: number; // paid out of the House this season (top-ups + bounty bonuses + rookie grants)
+  snapshots: EconomySnapshot[];
+}
+
+/** A bot's shares (NEP-245 token_id = bot account). */
+export interface ShareMarketRow {
+  bot: string;
+  name: string;
+  status: "active" | "retired";
+  sharesSold: number; // of 1,000 (IPO block is 300)
+  ipoLeft: number; // IPO shares still for sale at ipoPrice
+  ipoPrice: number; // NOX per share
+  lastPrice: number | null; // last trade, NOX per share
+  dividendsPaid: number; // lifetime NOX paid to holders
+  holders: number;
+  wallet: number; // the bot's NOX (a share's book value = wallet / 1,000)
+  seasonPnl: number;
+}
+
+export interface Holding {
+  bot: string;
+  name: string;
+  shares: number;
+  claimable: number; // dividends waiting for claimDividends
+  value: number; // shares × book value
+}
+
+export interface Listing {
+  id: string;
+  seller: string;
+  bot: string;
+  name: string;
+  shares: number;
+  pricePerShare: number;
+}
+
+export interface SeasonRow {
+  bot: string;
+  name: string;
+  points: number; // 10 per win + 2 per kill
+  wins: number;
+  kills: number;
+  income: number; // prizes + bounties
+  costs: number; // entries + upkeep + upgrades + cosmetics
+  pnl: number; // income − costs
+}
+
+/** Economy v2 calls. Views work for everyone; writes need a signed-in real account (guests can't hold shares). */
+export interface GameClientEcon {
+  economy(): Promise<EconomyInfo>;
+  sharesMarket(): Promise<ShareMarketRow[]>;
+  myShares(): Promise<Holding[]>;
+  listings(bot?: string): Promise<Listing[]>;
+  seasonStandings(season?: number): Promise<SeasonRow[]>;
+  buyIpo(bot: string, shares: number): Promise<{ tx: string | null }>;
+  claimDividends(bot: string): Promise<{ tx: string | null; claimed: number }>;
+  listShares(bot: string, shares: number, pricePerShare: number): Promise<{ tx: string | null; id: string }>;
+  cancelListing(id: string): Promise<{ tx: string | null }>;
+  buyListing(id: string): Promise<{ tx: string | null }>;
+  buyCosmetic(id: number): Promise<{ tx: string | null }>;
+}
+
 /** Implemented by Agent C in src/net/client.ts. */
 export type CreateGameClient = (opts?: { relayer?: string; rpc?: string; contract?: string }) => Promise<GameClient>;
