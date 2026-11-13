@@ -124,7 +124,7 @@ impl StorageManagement for Contract {
         self.xp.remove(&id);
         self.history.remove(&id);
         // the permanent "welcomed" record outlives the registration: its storage stays paid from the deposit
-        let kept = if self.is_welcomed(&id) { crate::WELCOME_RECORD_NEAR.as_yoctonear() } else { 0 };
+        let kept = if self.is_welcomed(&id) { crate::WELCOME_RECORD_NEAR.as_yoctonear() } else { 0 } + self.daily_row_near(&id);
         self.set_welcome_credit(&id, 0);
         let refund_to = p.deposit_payer.clone().unwrap_or(id);
         let _ = Promise::new(refund_to).transfer(NearToken::from_yoctonear(p.storage_paid.0.saturating_sub(kept)));

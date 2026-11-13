@@ -2273,3 +2273,22 @@ fn unregister_does_not_reset_the_daily_wins() {
     register(&mut c, ALICE);
     assert_eq!(c.player_prize_bps(&acc(ALICE)), 5_000, "the 4th win of the day still pays half");
 }
+
+#[test]
+fn audit5_holders_can_still_leave_after_teardown_cleared_the_bots() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let _bot = ipo(&mut c, ALICE, 3, 50, 150);
+    let s = start(&mut c, GUEST, 200);
+    settle(&mut c, s.match_id, 4, None, 210);
+    assert!(c.get_holdings(acc(ALICE))[0].claimable.0 > 0);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    let _ = c.teardown_clear(vec![], Some(200), Some(20));
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).account_balance(NearToken::from_near(50)).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000 + 1);
+    testing_env!(b.build());
+    assert!(c.storage_unregister(Some(true)), "unregister works after the bots were cleared");
+    assert!(c.get_holdings(acc(ALICE)).is_empty());
+}

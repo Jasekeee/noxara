@@ -364,6 +364,11 @@ impl Contract {
     }
 
     /// The daily-diminishing share (bps) of a prize for a real player's next paid win today.
+    /// NEAR kept from an unregistering account's refund for its daily-wins row (it outlives the account)
+    pub(crate) fn daily_row_near(&self, id: &AccountId) -> u128 {
+        if daily_map().get(id).is_some() { (40 + 8 + id.len() as u128 + 8) * env::storage_byte_cost().as_yoctonear() } else { 0 }
+    }
+
     pub(crate) fn player_prize_bps(&mut self, player: &AccountId) -> u128 {
         let day = (env::block_timestamp_ms() / 86_400_000) as u32;
         let mut m = daily_map();
@@ -435,7 +440,7 @@ impl Contract {
     /// Credit a holding with the dividends paid since it last settled. A bankrupt bot's shares vanish here.
     fn settle_holding(&self, holder: &AccountId, bot: &AccountId, b: &BotEcon) -> Holding {
         let mut h = holding_map().get(&(holder.clone(), bot.clone())).cloned().unwrap_or_default();
-        h.claimable = U128(h.claimable.0 + h.shares as u128 * (b.acc.0 - h.debt.0));
+        h.claimable = U128(h.claimable.0 + h.shares as u128 * b.acc.0.saturating_sub(h.debt.0));
         h.debt = b.acc;
         if b.bankrupt {
             h.shares = 0;
@@ -859,6 +864,13 @@ impl Contract {
             }
         }
         for bot in bots {
+            if bot_map().get(&bot).is_none() {
+                // the bot's record was cleared at teardown (audit #5): nothing left to settle, drop the row
+                let mut hm = holding_map();
+                hm.remove(&(id.clone(), bot.clone()));
+                hm.flush();
+                continue;
+            }
             let mut b = self.bot_econ(&bot);
             let h = self.settle_holding(id, &bot, &b);
             require!(force || (h.shares == 0 && h.claimable.0 == 0), "sell or transfer your bot shares and claim your dividends first (or pass force=true to give them up)");
@@ -867,7 +879,7 @@ impl Contract {
                 self.move_tokens(&d, id, h.claimable.0, "dividends");
             }
             if h.shares > 0 && !b.bankrupt {
-                b.sold -= h.shares;
+                b.sold = b.sold.saturating_sub(h.shares);
                 mt_event("mt_transfer", near_sdk::serde_json::json!({ "old_owner_id": id, "new_owner_id": bot, "token_ids": [bot], "amounts": [h.shares.to_string()], "memo": "unregistered" }));
             }
             let stored = holding_map().get(&(id.clone(), bot.clone())).map(|x| x.shares).unwrap_or(0);
