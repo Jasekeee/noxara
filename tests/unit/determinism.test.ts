@@ -1,5 +1,5 @@
 // Determinism suite: the match result must be a pure function of (cfg, human input log).
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -8,12 +8,13 @@ import { createMatch } from "../../src/sim/match";
 import { botInput } from "../../src/sim/ai";
 import { Recorder, replayRecord } from "../../src/sim/record";
 import { t1Roster } from "../../src/sim/roster";
+import { isStubSource, scanSim } from "../../tools/scan";
 import { botRoster, runMatch, scriptedInput, toRecord, type Sim } from "../../tools/simlib";
 
 const sim: Sim = { createMatch, botInput, Recorder, replayRecord, t1Roster };
 const SIM_DIR = fileURLToPath(new URL("../../src/sim", import.meta.url));
 /** Agent B's placeholder files start with a "STUB" comment; checks that need the real sim skip them. */
-const isStub = (file: string) => /^\/\/.*\bSTUB\b/.test(readFileSync(join(SIM_DIR, file), "utf8").split("\n", 1)[0]);
+const isStub = (file: string) => isStubSource(readFileSync(join(SIM_DIR, file), "utf8"));
 const stubSim = ["match.ts", "record.ts"].some(isStub);
 const stubMsg = "(skipped: src/sim match.ts/record.ts are still the stubs; runs after the real sim merges)";
 
@@ -111,37 +112,17 @@ describe("record → replay reproduces the match", () => {
 });
 
 describe("src/sim uses only deterministic primitives", () => {
-  const BANNED: [string, RegExp][] = [
-    ["Math.random", /\bMath\.random\b/],
-    ["Math.sin", /\bMath\.sin\b/],
-    ["Math.cos", /\bMath\.cos\b/],
-    ["Math.tan", /\bMath\.tan\b/],
-    ["Math.atan2", /\bMath\.atan2\b/],
-    ["Math.atan/asin/acos", /\bMath\.a(?:tan|sin|cos)h?\b/],
-    ["Math.exp/log/hypot/cbrt", /\bMath\.(?:exp|expm1|log|log2|log10|log1p|hypot|cbrt)\b/],
-    ["Date", /\bDate\b/],
-    ["performance", /\bperformance\b/],
-    ["crypto", /\bcrypto\b/],
-  ];
-  /** Remove comments so documentation like "never use Math.random" doesn't trip the scan. */
-  const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
-  const files = readdirSync(SIM_DIR).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
-  const real = files.filter((f) => !isStub(f));
+  const scan = scanSim(SIM_DIR);
 
   it("finds the sim sources", () => {
-    expect(files).toContain("fixed.ts");
-    expect(files).toContain("types.ts");
-    const stubs = files.filter(isStub);
-    if (stubs.length) console.warn(`determinism scan skips stub files: ${stubs.join(", ")}`);
+    expect(scan.files).toContain("fixed.ts");
+    expect(scan.files).toContain("types.ts");
+    if (scan.stubs.length) console.warn(`determinism scan skips stub files: ${scan.stubs.join(", ")}`);
   });
 
-  for (const file of real) {
+  for (const file of scan.files.filter((f) => !scan.stubs.includes(f))) {
     it(`${file} has no nondeterministic calls`, () => {
-      const code = stripComments(readFileSync(join(SIM_DIR, file), "utf8"));
-      const hits = BANNED.flatMap(([name, re]) =>
-        code.split("\n").flatMap((line, i) => (re.test(line) ? [`${file}:${i + 1} ${name}: ${line.trim()}`] : [])),
-      );
-      expect(hits).toEqual([]);
+      expect(scan.hits.filter((h) => h.startsWith(`${file}:`))).toEqual([]);
     });
   }
 });
