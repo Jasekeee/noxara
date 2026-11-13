@@ -515,7 +515,7 @@ fn storage_deposit_covers_a_player_and_a_pending_match() {
     c.storage_deposit(Some(acc(who)), None);
     let s = start(&mut c, who, 301);
     let id_len = 4 + who.len();
-    let p = borsh::to_vec(&VPlayer::V1(c.get_player(acc(who)).unwrap())).unwrap().len();
+    let p = borsh::to_vec(&VPlayer::V2(c.get_player(acc(who)).unwrap())).unwrap().len();
     let m = borsh::to_vec(&VMatch::V2(c.get_match(s.match_id).unwrap())).unwrap().len();
     // + what a real player can add on top: XP, and 3 sponsorships (one pool entry each + their list)
     let bot_id = 4 + "yarrow-1234.royale.br-7e8492.testnet".len();
@@ -877,4 +877,27 @@ fn a_pool_closes_only_after_the_retired_bots_escrow_comes_back() {
     let got = bal(&c, ALICE) - alice0;
     assert!(got > r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000, "dividend + share of the final bankroll: {got}");
     assert_supply(&c);
+}
+
+#[test]
+fn a_subsidised_deposit_is_refunded_to_its_payer_not_the_account() {
+    // review (HIGH): register via the relayer -> unregister -> the 0.02 NEAR must go back to the relayer
+    let mut c = setup();
+    ctx(RELAY, 300, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("bob.test")), None);
+    assert_eq!(c.get_player(acc("bob.test")).unwrap().deposit_payer, Some(acc(RELAY)));
+    ctx("bob.test", 301, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).expect("a refund");
+    assert_eq!(refund.receiver_id, acc(RELAY), "refund goes to the payer");
+    // a self-paid registration refunds the account itself
+    ctx("carol.test", 302, STORAGE_DEPOSIT);
+    c.storage_deposit(None, None);
+    assert_eq!(c.get_player(acc("carol.test")).unwrap().deposit_payer, None);
+    ctx("carol.test", 303, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
+    assert_eq!(refund.receiver_id, acc("carol.test"));
 }

@@ -160,6 +160,15 @@ active names. Sandbox test `migrates_from_the_v1_contract` deploys the real V1 w
    so late refunds and prizes reach its sponsors; the closing uses the bankroll, which then equals the
    wallet (`a_pool_closes_only_after_the_retired_bots_escrow_comes_back`).
 
+4. **(HIGH) Storage-subsidy farming.** A deposit paid by someone else (the relayer, for guests and
+   signed-in accounts) is recorded as `deposit_payer` and `storage_unregister` refunds THE PAYER, never
+   the account; V1 guest records load with the relayer as payer. The relayer subsidises each account at
+   most once ever (persisted in `relayer/data/subsidised.json`, gitignored) and at most
+   `REGISTER_GLOBAL_PER_HOUR` (30) per hour; a repeat gets 403 `already_subsidised` (the player can
+   still register with their own wallet). Tests: `a_subsidised_deposit_is_refunded_to_its_payer_not_the_account`
+   (unit), `a_relayer_paid_deposit_goes_back_to_the_relayer` (sandbox),
+   `register -> unregister -> register` and the hourly budget (relayer node tests).
+
 **Judge #2 fixes:** progressive bot entry (sim: ~1 retirement per 17 matches, tier 2 by match ~9; it
 barely changes wealth concentration — richest bot ≈ 19% of bot wealth either way; the bounty and the
 upgrade price ladder are the real brakes [simulated]); strict broke rule at `start_match`; unique names.

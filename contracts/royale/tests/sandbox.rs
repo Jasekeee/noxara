@@ -396,3 +396,21 @@ async fn migrates_from_the_v1_contract() -> anyhow::Result<()> {
     assert_eq!(fs.len(), 9);
     Ok(())
 }
+
+#[tokio::test]
+async fn a_relayer_paid_deposit_goes_back_to_the_relayer() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    let eve = wd.w.root_account()?.create_subaccount("eve").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let relay0 = wd.relay.view_account().await?.balance;
+    wd.relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": eve.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let eve0 = eve.view_account().await?.balance;
+    eve.call(c.id(), "storage_unregister").args_json(json!({"force": true})).deposit(NearToken::from_yoctonear(1)).transact().await?.into_result()?;
+    let eve1 = eve.view_account().await?.balance;
+    let relay1 = wd.relay.view_account().await?.balance;
+    assert!(eve1 < eve0, "eve gains nothing (pays only gas)");
+    // the relayer got its 0.02 back: net cost ≈ gas only
+    let spent = relay0.as_yoctonear() - relay1.as_yoctonear();
+    assert!(spent < NearToken::from_millinear(5).as_yoctonear(), "relayer spent {spent} yocto");
+    Ok(())
+}

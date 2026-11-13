@@ -172,6 +172,7 @@ pub enum VFighter {
     V1(FighterV1),
 }
 
+/// Player layout V1 (decoded only; loads as PlayerV2).
 #[near(serializers = [borsh, json])]
 #[derive(Clone, Debug, Default)]
 pub struct PlayerV1 {
@@ -188,10 +189,48 @@ pub struct PlayerV1 {
     pub storage_paid: U128,
 }
 
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, Default)]
+pub struct PlayerV2 {
+    pub guest: bool,
+    pub matches: u32,
+    pub wins: u32,
+    pub kills: u32,
+    pub deaths: u32,
+    pub earnings: U128,
+    /// best placement ever (1 = won), 0 = never finished a match
+    pub best_place: u8,
+    pub pending: Option<U64>,
+    /// NEAR locked for this player's storage (NEP-145)
+    pub storage_paid: U128,
+    /// who paid `storage_paid` when it wasn't the player (the relayer for guests / signed-in accounts):
+    /// `storage_unregister` refunds THEM, so a subsidised deposit can't be farmed
+    pub deposit_payer: Option<AccountId>,
+}
+
+impl From<PlayerV1> for PlayerV2 {
+    fn from(p: PlayerV1) -> Self {
+        // every V1 registration was a guest or a self-paid real account; guests were relayer-paid
+        PlayerV2 {
+            guest: p.guest,
+            matches: p.matches,
+            wins: p.wins,
+            kills: p.kills,
+            deaths: p.deaths,
+            earnings: p.earnings,
+            best_place: p.best_place,
+            pending: p.pending,
+            storage_paid: p.storage_paid,
+            deposit_payer: None,
+        }
+    }
+}
+
 #[near(serializers = [borsh])]
 #[derive(Clone)]
 pub enum VPlayer {
     V1(PlayerV1),
+    V2(PlayerV2),
 }
 
 #[near(serializers = [borsh, json])]
@@ -916,7 +955,7 @@ impl Contract {
         self.recent.iter().rev().take(n).filter_map(|id| self.load_match(*id)).collect()
     }
 
-    pub fn get_player(&self, account_id: AccountId) -> Option<PlayerV1> {
+    pub fn get_player(&self, account_id: AccountId) -> Option<PlayerV2> {
         self.load_player(&account_id)
     }
 
@@ -974,11 +1013,20 @@ impl Contract {
 // ---------------------------------------------------------------------- internals
 
 impl Contract {
-    pub(crate) fn load_player(&self, id: &AccountId) -> Option<PlayerV1> {
-        self.players.get(id).map(|VPlayer::V1(p)| p.clone())
+    pub(crate) fn load_player(&self, id: &AccountId) -> Option<PlayerV2> {
+        self.players.get(id).map(|v| match v {
+            VPlayer::V1(p) => {
+                let mut p2: PlayerV2 = p.clone().into();
+                if p2.guest {
+                    p2.deposit_payer = Some(self.guest_parent.clone());
+                }
+                p2
+            }
+            VPlayer::V2(p) => p.clone(),
+        })
     }
-    pub(crate) fn save_player(&mut self, id: &AccountId, p: PlayerV1) {
-        self.players.insert(id.clone(), VPlayer::V1(p));
+    pub(crate) fn save_player(&mut self, id: &AccountId, p: PlayerV2) {
+        self.players.insert(id.clone(), VPlayer::V2(p));
     }
     fn load_fighter(&self, id: &AccountId) -> Option<FighterV1> {
         self.fighters.get(id).map(|VFighter::V1(f)| f.clone())
