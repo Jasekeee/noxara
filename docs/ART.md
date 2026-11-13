@@ -106,3 +106,7 @@ fighters/sponsor-mobile overlays are from 11-13 — the ledger shows a verified 
 title-{desktop,mobile} (offline guest) · lobby-{desktop,mobile} (live wallets, NOX balances) · match-{desktop,mobile} ·
 ledger-{desktop,mobile} (testnet match, verified, NOX pot/bounty/house/burn) · fighters-{desktop,mobile} · sponsor-{desktop,mobile}.
 Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~99 KB, dusk lighting).
+
+## Economy v2 screens (2026-11-14)
+ECONOMY page (EVE-style report in game style): 2-column tile grid on 390 px (auto-fill 210 px tiles on desktop), cyan supply bar, gold House bar with floor/target markers, inline-SVG sparklines (no chart library), tables become cards at <=720 px (`data-label`), no horizontal scroll. HOW NEAR POWERS NOXARA: stacked `.nsec` cards with explorer links. Both reachable from the lobby nav chip ECONOMY; mock data via `?mock`.
+Screens (`docs/screens/`, JPEG): economy-{desktop,mobile} (signed-in mock, top) · economy2-{desktop,mobile} (scrolled: P&L, shares) · near-{desktop,mobile}.

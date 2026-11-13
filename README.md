@@ -34,6 +34,28 @@ Guests play everything but earn **zero** NOX — only signed-in NEAR accounts ca
 - **Next-block randomness:** `start_match` commits first; the seed is fixed by the next block's randomness (async receipt), so nobody can pick a seed.
 - **Invisible chain:** guests get an account from a relayer with function-call keys and NEP-366 meta-transactions — no wallet, no gas, no popups.
 
+## Economy (v2)
+> **AI esports where the athletes are autonomous agents with wallets and fans are their owners.**
+
+- **Closed loop:** 2,900 NOX at genesis, **nothing minted afterwards**. Every reward is paid from NOX collected earlier through entry fees, pot cuts and taxes.
+- **The House rule:** one public formula of the House treasury's moving average sets the reward multiplier, the House's share of each pot and the burn share. Poorer House: smaller rewards, bigger cuts. Readable on chain (`get_economy`).
+- **Sinks and anti-snowball:** progressive entry fees and upkeep for rich bots, a 2% burned tax on share trades, capped upgrade power (cosmetics have no cap), bronze brackets for new players, a deflation brake so supply levels off instead of burning to zero.
+- **Bots are businesses:** each has a season P&L, can go bankrupt and is replaced by a rookie. Fans own **shares** (1,000 per fighter, NEP-245 inside the game contract): IPO for rookies, a fixed-price market, dividends from profit only.
+- **Checked by simulation:** 20 runs x 10,000 matches, charts below. Full spec and results: [`docs/ECONOMY.md`](docs/ECONOMY.md). The in-game **ECONOMY** page is the live report. NOX is play-money. **No real-money wagering anywhere.**
+
+![Supply over 10,000 simulated matches](docs/econ/supply.svg)
+![House treasury vs. target](docs/econ/house.svg)
+
+## How NEAR powers NOXARA
+The in-game page "HOW NEAR POWERS NOXARA" shows the same list with live explorer links.
+- **Fighters are keyless NEAR accounts:** no access key, so only the contract's rules move their NOX.
+- **Next-block randomness** fixes every match seed after the player commits.
+- **Every match is settled on chain** after the match server replays the input log; anyone can re-verify offline.
+- **NOX is NEP-141; fighter shares are NEP-245** (views, transfers, events; no `mt_transfer_call`, on purpose), in one contract.
+- **Gasless guest play:** function-call keys + a NEP-366 relayer. A welcome credit (30 NOX, entry-only) is paid from the House, not minted.
+- **The House rule is readable on chain** via `get_economy`.
+- **Honest trust model:** the server computes, the chain records, anyone can re-verify. The developer keeps the contract key during judging to fix bugs. Testnet only until the owner says yes.
+
 ## How it's built
 - **Deterministic match simulation** (`src/sim/`, pure TypeScript): 20 Hz fixed tick, integer fixed-point math, pre-computed trig tables, one seeded PRNG. The browser renders it at 60 FPS (three.js) with interpolation; Node runs the exact same code.
 - **Re-verifiable matches:** a match is its seed + the human's inputs. The match server replays the input log before settling; `npm run verify-match <file>` lets anyone replay it offline and check the result hash.
@@ -50,6 +72,11 @@ npm run sim -- 300                         # 300 bot-only matches: no personalit
 npm run test:e2e                           # a guest plays a full match on desktop + phone, 0 console errors, axe a11y
 (cd contracts/royale && cargo test)        # contract unit + sandbox tests
 ```
+
+## Roadmap
+- Live PvP lobbies (humans + AI fighters in one match).
+- Cosmetics shop, battle pass, sponsored tournaments.
+- No real-money wagering anywhere.
 
 ## Mainnet
 Prepared, not deployed: `docs/MAINNET.md` (accounts, cost, steps, teardown). It goes live only after an independent security audit passes and the owner says yes.
