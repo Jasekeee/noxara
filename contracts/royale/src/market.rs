@@ -22,6 +22,8 @@ pub const SPONSOR_MAX_BPS: u128 = 3_000;
 pub const SPONSOR_CUT_BPS: u128 = 1_000;
 pub const MIN_STAKE: u128 = 10 * ONE;
 pub const SPONSOR_COOLDOWN: u32 = 5;
+/// legacy sponsorship stays exercisable in unit tests (migration/exit paths); disabled in every build
+pub const LEGACY_SPONSOR_IN_TESTS: bool = true;
 pub const MAX_SPONSORS_PER_BOT: usize = 12;
 pub const MAX_SPONSORSHIPS_PER_PLAYER: usize = 3;
 pub const HISTORY_LEN: usize = 24;
@@ -119,6 +121,8 @@ impl Contract {
     /// Back an active bot with `amount` $BOUNTY (real players only). Returns the sponsorship.
     pub fn sponsor(&mut self, bot: AccountId, amount: U128) -> SponsorshipView {
         let who = env::predecessor_account_id();
+        // economy v2: backing a bot means owning its shares (buy_ipo / buy_listing); old positions can still exit
+        require!(cfg!(test) && LEGACY_SPONSOR_IN_TESTS, "sponsorship became bot shares: use buy_ipo");
         require!(!self.is_guest(&who), "guests can't sponsor: sign in with a NEAR account");
         require!(self.load_player(&who).is_some(), "register first: storage_deposit");
         require!(amount.0 >= MIN_STAKE, "stake at least 10 $NOX");

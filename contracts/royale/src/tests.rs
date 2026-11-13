@@ -9,6 +9,16 @@ const SERVER: &str = "server.test";
 const RELAY: &str = "relay.test";
 const GUEST: &str = "g-ab12.relay.test";
 const ALICE: &str = "alice.test";
+const BOB: &str = "bob.test";
+
+/// the House rule's top-up / bounty bonus at the settle that just happened (the EMA doesn't move after it)
+fn top_up_now(c: &Contract) -> u128 {
+    let e = c.get_economy();
+    (econ::BASE_TOP_UP * e.m_bps as u128 / 10_000).min(e.house.0.saturating_sub(HOUSE_FLOOR) + econ::BASE_TOP_UP * e.m_bps as u128 / 10_000)
+}
+fn m_now(c: &Contract) -> u128 {
+    c.get_economy().m_bps as u128
+}
 
 /// entry a genesis bot pays on its first match (progressive fee)
 fn e0() -> u128 {
@@ -100,7 +110,7 @@ fn assert_supply(c: &Contract) {
 
 /// `seen` accumulates every bot ever in a slot (retired bots keep their dust).
 fn assert_supply_seen(c: &Contract, seen: &mut std::collections::BTreeSet<AccountId>) {
-    let mut sum = bal(c, ME) + c.balance(&c.house) + bal(c, GUEST) + bal(c, ALICE);
+    let mut sum = bal(c, ME) + c.balance(&c.house) + bal(c, GUEST) + bal(c, ALICE) + bal(c, BOB) + c.balance(&c.dividends_account());
     seen.extend(c.slots.iter().cloned());
     seen.extend(c.get_retired().into_iter().map(|f| f.fighter.account));
     for a in seen.iter() {
@@ -192,11 +202,14 @@ fn guest_win_goes_to_the_house() {
     assert_eq!(r.winner, Some(0));
     assert_eq!(r.prize_to, c.house);
     assert_eq!(bal(&c, GUEST), 0, "guests earn zero");
-    let pot = 9 * e0() + POT_TOP_UP;
-    assert_eq!(r.prize.0 + r.burned.0 + r.house_cut.0, pot);
-    // the house (above its floor) paid the top-up itself: nothing minted
+    // economy v2: entries + the House's top-up == entry burn + pot burn + house cut + prize; nothing minted
+    // (the deflation brake sends the unburnt part of each burn to the House: supply is just below genesis)
+    let top_up = econ::BASE_TOP_UP * m_now(&c) / 10_000;
+    let total = 9 * e0() + top_up;
+    let accounted = r.prize.0 + r.burned.0 + r.house_cut.0;
+    assert!(accounted <= total && total - accounted < total / 100, "{accounted} vs {total}");
     assert_eq!(r.minted.0, 0);
-    assert_eq!(c.balance(&c.house), house0 + pot - r.burned.0 - POT_TOP_UP);
+    assert_eq!(c.balance(&c.house), house0 - top_up + r.house_cut.0 + r.prize.0 + (total - accounted));
     let p = c.get_player(acc(GUEST)).unwrap();
     assert_eq!((p.matches, p.wins, p.kills, p.earnings.0, p.pending), (1, 1, 3, 0, None));
     assert_eq!(c.get_leaderboard().players[0].account.as_str(), GUEST, "guests still get leaderboards");
@@ -212,8 +225,9 @@ fn bot_win_pays_the_bot_wallet() {
     let r = settle(&mut c, s.match_id, 4, None, 210);
     let winner = slot_acc(&c, 3);
     assert_eq!(r.prize_to.as_str(), winner);
-    // the winner immediately buys weapon tier 1 (paid to the house)
-    assert_eq!(bal(&c, &winner), STARTER - e0() + r.prize.0 - WEAPON_PRICES[0]);
+    // upkeep on the windfall, then the winner buys weapon tier 1 (half burned, half to the House)
+    let w = STARTER - e0() + r.prize.0;
+    assert_eq!(bal(&c, &winner), w - econ::upkeep(w) - WEAPON_PRICES[0]);
     let f = c.get_fighter(acc(&winner)).unwrap();
     assert_eq!(f.fighter.upgrades.weapon_tier, 1);
     assert_eq!((f.fighter.record.wins, f.fighter.record.kills, f.fighter.record.matches), (1, 3, 1));
@@ -257,9 +271,11 @@ fn bounty_is_paid_to_the_killer() {
     let killer = slot_acc(&c, 1); // idx 2
     let before = bal(&c, &carrier);
     let r = settle(&mut c, s.match_id, 5, Some(2), 210);
-    assert_eq!(r.bounty_amount.0, before * BOUNTY_BPS / 10_000);
+    let taken = before * BOUNTY_BPS / 10_000;
+    let bonus = econ::BOUNTY_BONUS * m_now(&c) / 10_000;
+    assert_eq!(r.bounty_amount.0, taken + bonus, "the carrier's 15% + the House rule's bonus");
     assert_eq!(r.bounty_to.as_ref().map(|a| a.as_str()), Some(killer.as_str()));
-    assert_eq!(bal(&c, &carrier), before - r.bounty_amount.0);
+    assert_eq!(bal(&c, &carrier), before - taken);
     // the killer may immediately spend its windfall on its first upgrade
     let k = STARTER - e0() + r.bounty_amount.0;
     let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
@@ -273,12 +289,21 @@ fn guest_bounty_kill_feeds_the_house_not_the_guest() {
     let mut c = setup();
     let s = start(&mut c, GUEST, 200);
     let house0 = c.balance(&c.house);
+    let carrier0 = bal(&c, &slot_acc(&c, 0));
     let r = settle(&mut c, s.match_id, 5, Some(0), 210);
     assert!(r.bounty_amount.0 > 0);
     assert_eq!(r.bounty_to.as_ref(), Some(&c.house));
     assert_eq!(bal(&c, GUEST), 0);
-    // + the winner's first upgrade
-    assert_eq!(c.balance(&c.house), house0 + r.house_cut.0 + r.bounty_amount.0 + WEAPON_PRICES[0] - POT_TOP_UP);
+    // no House bonus for a guest's kill; + half the winner's upkeep and half its first upgrade
+    let w = STARTER - e0() + r.prize.0;
+    let up = econ::upkeep(w);
+    let upkeep_house = up * econ::UPKEEP_HOUSE_BPS / 10_000;
+    let bought = w - up >= WEAPON_PRICES[0] + RESERVE;
+    let upgrade_house = if bought { WEAPON_PRICES[0] - WEAPON_PRICES[0] * econ::UPGRADE_BURN_BPS / 10_000 } else { 0 };
+    assert_eq!(r.bounty_amount.0, carrier0 * BOUNTY_BPS / 10_000, "a guest's kill: the carrier's 15% only");
+    let floor = house0 - econ::BASE_TOP_UP * m_now(&c) / 10_000 + r.house_cut.0 + r.bounty_amount.0 + upkeep_house + upgrade_house;
+    let h = c.balance(&c.house);
+    assert!(h >= floor && h - floor < ONE, "house {h} vs {floor} (+ the brake's unburnt parts)");
     assert_supply(&c);
 }
 
@@ -592,22 +617,23 @@ fn long_run_economy_keeps_supply_consistent() {
 }
 
 #[test]
-fn the_house_reinvests_above_its_floor_and_mints_below_it() {
+fn v2_nothing_is_minted_even_below_the_floor() {
     let mut c = setup();
-    let supply0 = c.token.total_supply;
+    let minted0 = c.total_minted;
     let s = start(&mut c, GUEST, 200);
     let r = settle(&mut c, s.match_id, 4, None, 210);
-    assert_eq!(r.minted.0, 0, "healthy house pays the top-up");
-    assert_eq!(c.token.total_supply, supply0 - r.burned.0, "no inflation while the house is healthy");
-    // drain the house below its floor (test only): now the top-up is minted
+    assert_eq!(r.minted.0, 0, "a healthy House pays the top-up");
+    // drain the House to its floor (test only): the top-up is simply 0, never minted
     let house = c.house.clone();
     let drain = c.balance(&house) - HOUSE_FLOOR;
     c.move_tokens(&house, &acc(ALICE), drain, "test");
     let supply1 = c.token.total_supply;
     let s = start(&mut c, GUEST, 220);
     let r = settle(&mut c, s.match_id, 4, None, 230);
-    assert_eq!(r.minted.0, POT_TOP_UP);
-    assert_eq!(c.token.total_supply, supply1 + POT_TOP_UP - r.burned.0);
+    assert_eq!(r.minted.0, 0);
+    assert_eq!(c.total_minted, minted0, "economy v2: no minting after genesis");
+    assert!(c.token.total_supply <= supply1, "supply never grows");
+    assert!(c.balance(&house) >= HOUSE_FLOOR, "the House never pays below its floor");
     assert_supply(&c);
 }
 
@@ -1362,7 +1388,8 @@ fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
     let s = start(&mut c, GUEST, 200);
     let r = settle(&mut c, s.match_id, 2, None, 210);
     let earned = c.get_sponsorships(acc(ALICE))[0].earned.0;
-    let pot = s.pot.0 + POT_TOP_UP;
+    let entry_burn = s.pot.0 * econ::ENTRY_BURN_BPS / 10_000;
+    let pot = r.prize.0 + r.house_cut.0 + (r.burned.0 - entry_burn);
     let entries_part = (r.prize.0 / 1_000_000_000_000) * s.pot.0 / pot * 1_000_000_000_000;
     // audit #3: the cut also scales with how much of the pool the sponsors own (full 10% only at 30%)
     let scale = |full: u128, c: &Contract| {
@@ -1370,7 +1397,8 @@ fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
         let sh: u128 = pool.entries.iter().map(|e| e.shares.0).sum();
         full.min(full * sh * 10_000 / (pool.total_shares.0 * crate::market::SPONSOR_MAX_BPS))
     };
-    assert_eq!(earned, scale(entries_part * crate::market::SPONSOR_CUT_BPS / 10_000, &c));
+    let want = scale(entries_part * crate::market::SPONSOR_CUT_BPS / 10_000, &c);
+    assert!(earned.abs_diff(want) <= want / 500, "{earned} vs {want} (pot inferred without the brake's unburnt part)");
     assert!(earned < r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
     // in a PAID match sponsors share the whole prize
     let s = start(&mut c, ALICE, 220);

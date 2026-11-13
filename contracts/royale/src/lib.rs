@@ -34,6 +34,7 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::{LazyOption, LookupMap};
 use near_sdk::{env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise};
 
+pub mod econ;
 mod market;
 pub mod progression;
 mod token;
@@ -54,9 +55,9 @@ pub const ENTRY_FEE: u128 = 4 * ONE;
 /// up to `MAX_ENTRY` in total.
 pub const ENTRY_WEALTH_BPS: u128 = 200;
 pub const MAX_ENTRY: u128 = 16 * ONE;
-pub const POT_TOP_UP: u128 = 30 * ONE;
+pub const POT_TOP_UP: u128 = econ::BASE_TOP_UP; // economy v2: × the House rule's m, never minted
 /// The house keeps this much for rookie grants; above it, the house funds the pot top-up itself.
-pub const HOUSE_FLOOR: u128 = 1_000 * ONE;
+pub const HOUSE_FLOOR: u128 = 500 * ONE; // economy v2: the House rule's floor (econ.rs)
 pub const BURN_BPS: u128 = 200; // 2% of every pot is burned
 pub const HOUSE_BPS: u128 = 500; // 5% of every pot goes to the house treasury
 pub const BOUNTY_BPS: u128 = 1_500; // killing the bounty carrier takes 15% of its wallet
@@ -174,6 +175,14 @@ enum Key {
     WelcomeCredit,
     CreditMatches,
     LastFreeStart,
+    // economy v2 (econ.rs): opened on demand too
+    BotEcon,
+    Holdings,
+    HoldingsOf,
+    Listings,
+    ListingsOf,
+    DailyWins,
+    Cosmetics,
 }
 
 #[near(serializers = [borsh, json])]
@@ -682,10 +691,15 @@ impl Contract {
             player_paid = ENTRY_FEE;
             pot += ENTRY_FEE;
         } else if will_pay {
-            self.token.internal_transfer(&id, &me, ENTRY_FEE, Some("match entry".into()));
-            player_paid = ENTRY_FEE;
-            pot += ENTRY_FEE;
+            // progressive like the bots' (econ v2): 4 + 2% of the wallet above 50, at most 16
+            let fee = entry_fee_for(self.balance(&id)).max(ENTRY_FEE);
+            self.token.internal_transfer(&id, &me, fee, Some("match entry".into()));
+            player_paid = fee;
+            pot += fee;
         }
+        // bronze bracket (econ v2): guests and players up to level 3 face bots capped at weapon 1 / armor 1.
+        // Match-config data only: the simulation rules don't change and the match is still replay-verified.
+        let bronze = guest || player_level <= 3;
         let mut roster = Vec::with_capacity(BOTS);
         let mut entries: Vec<(AccountId, u128)> = Vec::with_capacity(BOTS);
         for slot in 0..BOTS {
@@ -719,7 +733,7 @@ impl Contract {
                 account: f.account.clone(),
                 name: f.name.clone(),
                 personality: f.personality.clone(),
-                upgrades: f.upgrades.clone(),
+                upgrades: if bronze { Upgrades { weapon_tier: f.upgrades.weapon_tier.min(1), armor: f.upgrades.armor.min(1), skin: f.upgrades.skin } } else { f.upgrades.clone() },
                 bounty: false,
                 paid: U128(paid),
             });
@@ -824,33 +838,43 @@ impl Contract {
         self.release_escrow(&m);
 
 
-        // ---- the pot: escrowed entries + the minted top-up
+        // ---- economy v2: the House rule (on the treasury's moving average) sets this match's numbers
         let house = self.house.clone();
-        let minted = if self.balance(&house) >= HOUSE_FLOOR + POT_TOP_UP {
-            self.move_tokens(&house, &me, POT_TOP_UP, "pot top-up (the house reinvests)");
-            0
-        } else {
-            self.mint(&me, POT_TOP_UP, "pot top-up");
-            POT_TOP_UP
-        };
-        let pot = m.pot.0 + POT_TOP_UP;
-        let burned = pot * BURN_BPS / 10_000;
-        let house_cut = pot * HOUSE_BPS / 10_000;
-        let prize = pot - burned - house_cut;
+        let mut e = self.econ();
+        self.roll_season(&mut e);
+        let hb = self.balance(&house);
+        e.ema = if hb >= e.ema { e.ema + (hb - e.ema) / econ::EMA_DIV } else { e.ema - (e.ema - hb) / econ::EMA_DIV };
+        let (m_bps, house_bps, burn_bps) = econ::rule(e.ema);
+        let burned_before = self.total_burned;
+        // 10% of every entry burns (deflation brake applies: the unburnt part goes to the House)
+        let entry_burn = m.pot.0 * econ::ENTRY_BURN_BPS / 10_000;
+        self.econ_burn(&me, entry_burn, "entry burn", &mut e);
+        // the top-up comes ONLY from the House's NOX above its floor: nothing is minted
+        let top_up = (econ::BASE_TOP_UP * m_bps / 10_000).min(self.balance(&house).saturating_sub(HOUSE_FLOOR));
+        self.move_tokens(&house, &me, top_up, "pot top-up (the House rule)");
+        e.season_rewards += top_up;
+        let minted = 0u128;
+        let pot = m.pot.0 - entry_burn + top_up;
+        let to_burn = pot * burn_bps / 10_000;
+        let house_cut = pot * house_bps / 10_000;
+        let prize = pot - to_burn - house_cut;
+        self.econ_burn(&me, to_burn, "pot burn", &mut e);
+        let burned = self.total_burned - burned_before;
         let prize_to = winner.map(|w| self.payee(&m, w)).unwrap_or_else(|| self.house.clone());
-        self.move_tokens(&me, &prize_to, prize, "match prize");
-        self.move_tokens(&me, &house, house_cut, "house cut");
-        self.burn(&me, burned, "pot burn");
-        // a bot's sponsors take their part of the prize in cash
+        // a real player's paid wins diminish over the UTC day (100% / 50% / 25%); the rest goes to the House
+        let prize_paid = if winner == Some(0) && prize_to == m.player { prize * self.player_prize_bps(&m.player) / 10_000 } else { prize };
+        self.move_tokens(&me, &prize_to, prize_paid, "match prize");
+        self.move_tokens(&me, &house, house_cut + (prize - prize_paid), "house cut");
+        // legacy sponsorship pools (pre-v2) still get their cut; v2 shares are paid from profit below
         if winner.is_some_and(|w| w > 0) {
-            // a free match's pot is mostly the house's top-up: sponsors only share the bots' entries part
             const U: u128 = 1_000_000_000_000; // scale down first: amounts are ~1e20, avoid u128 overflow
-            let base = if m.player_paid.0 > 0 { prize } else { (prize / U) * m.pot.0 / pot * U };
+            let base = if m.player_paid.0 > 0 { prize } else { (prize / U) * m.pot.0 / pot.max(1) * U };
             self.pay_dividends(&prize_to, base, match_id.0);
+            self.add_income(&prize_to, prize);
         }
-        event("match_prize", &near_sdk::serde_json::json!({ "match_id": match_id, "winner": winner, "to": prize_to, "prize": U128(prize), "burned": U128(burned), "house_cut": U128(house_cut) }));
+        event("match_prize", &near_sdk::serde_json::json!({ "match_id": match_id, "winner": winner, "to": prize_to, "prize": U128(prize_paid), "burned": U128(burned), "house_cut": U128(house_cut), "top_up": U128(top_up), "m_bps": m_bps }));
 
-        // ---- the bounty: the carrier's killer takes a share of the carrier's wallet
+        // ---- the bounty: the carrier's killer takes a share of the carrier's wallet + the House's bonus
         let mut bounty_to = None;
         let mut bounty_amount = 0u128;
         if let (Some(k), Some(b)) = (bounty_killer, m.bounty_idx) {
@@ -858,13 +882,20 @@ impl Contract {
             if k != b && placements[b as usize] != 1 {
                 let carrier = m.roster[b as usize - 1].account.clone();
                 let to = self.payee(&m, k);
-                bounty_amount = self.balance(&carrier) * BOUNTY_BPS / 10_000;
-                self.move_tokens(&carrier, &to, bounty_amount, "bounty");
-                event("bounty_paid", &near_sdk::serde_json::json!({ "match_id": match_id, "carrier": carrier, "killer_idx": k, "to": to, "amount": U128(bounty_amount) }));
-                self.push_history(&carrier, match_id.0, "bounty", bounty_amount, "lost");
+                let taken = self.balance(&carrier) * BOUNTY_BPS / 10_000;
+                self.move_tokens(&carrier, &to, taken, "bounty");
+                self.add_cost(&carrier, taken);
+                // the House's bonus only goes to a real collector (a guest's kill feeds the House anyway)
+                let bonus = if to == house { 0 } else { (econ::BOUNTY_BONUS * m_bps / 10_000).min(self.balance(&house).saturating_sub(HOUSE_FLOOR)) };
+                self.move_tokens(&house, &to, bonus, "bounty bonus (the House rule)");
+                e.season_rewards += bonus;
+                bounty_amount = taken + bonus;
+                event("bounty_paid", &near_sdk::serde_json::json!({ "match_id": match_id, "carrier": carrier, "killer_idx": k, "to": to, "amount": U128(bounty_amount), "bonus": U128(bonus) }));
+                self.push_history(&carrier, match_id.0, "bounty", taken, "lost");
                 if k > 0 {
                     self.push_history(&to, match_id.0, "bounty", bounty_amount, "collected");
                     self.pay_dividends(&to, bounty_amount, match_id.0);
+                    self.add_income(&to, bounty_amount);
                 }
                 bounty_to = Some(to);
             }
@@ -910,6 +941,12 @@ impl Contract {
                 f.record.kills += kills[i] as u32;
                 f.record.earnings = U128(f.record.earnings.0 + earned);
                 self.save_fighter(f);
+                let mut be = self.bot_econ(&acct);
+                be.points += 10 * won as u32 + 2 * kills[i] as u32;
+                be.wins += won as u32;
+                be.kills += kills[i] as u32;
+                be.costs = U128(be.costs.0 + m.roster[i - 1].paid.0);
+                self.save_bot_econ(&acct, be);
                 let kind = if won { "win" } else { "death" };
                 self.push_history(&acct, match_id.0, kind, earned, &format!("{}:{}", placements[i], kills[i]));
             }
@@ -917,7 +954,13 @@ impl Contract {
 
         // ---- the bot economy: deterministic, no dev patch
         let entropy = env::sha256_array(&[&m.seed.to_le_bytes()[..], &match_id.0.to_le_bytes()].concat());
-        self.run_economy(&entropy, match_id.0);
+        for slot in 0..BOTS {
+            let acct = self.slots[slot].clone();
+            self.settle_bot_econ(&acct, &mut e);
+        }
+        self.run_economy(&entropy, match_id.0, &mut e);
+        self.push_snapshot(&mut e, match_id.0);
+        self.save_econ(&e);
 
         let result = MatchResult {
             placements,
@@ -1317,6 +1360,14 @@ impl Contract {
     pub(crate) fn save_player(&mut self, id: &AccountId, p: PlayerV2) {
         self.players.insert(id.clone(), VPlayer::V2(p));
     }
+    pub(crate) fn load_fighter_pub(&self, id: &AccountId) -> Option<FighterV1> {
+        self.load_fighter(id)
+    }
+    /// this contract, its sub-accounts (house, bots, rookies, dividends; mainnet guests too) and every fighter
+    pub(crate) fn is_game_wallet_pub(&self, a: &AccountId) -> bool {
+        let me = env::current_account_id();
+        a == &me || a == &self.house || a.as_str().strip_suffix(me.as_str()).is_some_and(|p| p.ends_with('.')) || self.fighters.get(a).is_some()
+    }
     fn load_fighter(&self, id: &AccountId) -> Option<FighterV1> {
         self.fighters.get(id).map(|VFighter::V1(f)| f.clone())
     }
@@ -1480,7 +1531,7 @@ impl Contract {
     /// After every settled match, in slot order: each bot buys at most one upgrade it can afford
     /// while keeping `RESERVE` (weapon tier, then armor, then a new skin; the price goes to the
     /// house), then a bot that can't pay the next entry retires and a rookie takes the slot.
-    fn run_economy(&mut self, entropy: &[u8; 32], match_id: u64) {
+    fn run_economy(&mut self, entropy: &[u8; 32], match_id: u64, e: &mut econ::EconState) {
         let house = self.house.clone();
         for slot in 0..BOTS {
             let mut f = self.slot_fighter(slot);
@@ -1494,7 +1545,11 @@ impl Contract {
             };
             if bal >= price + RESERVE {
                 let acct = f.account.clone();
-                self.move_tokens(&acct, &house, price, &format!("upgrade: {what}"));
+                // econ v2: upgrades burn half (skins burn all), the rest goes to the House
+                let burn_part = if what == "skin" { price } else { price * econ::UPGRADE_BURN_BPS / 10_000 };
+                self.move_tokens(&acct, &house, price - burn_part, &format!("upgrade: {what}"));
+                self.econ_burn(&acct, burn_part, &format!("upgrade: {what}"), e);
+                self.add_cost(&acct, price);
                 match what {
                     "weapon" => f.upgrades.weapon_tier += 1,
                     "armor" => f.upgrades.armor += 1,
@@ -1512,10 +1567,12 @@ impl Contract {
             // broke = wallet + escrow below the entry; never a rookie before its first match, and only
             // when the house can fund the successor (otherwise it keeps the slot for now)
             let f = self.slot_fighter(slot);
+            self.lower_hwm(&f.account);
             if self.balance(&f.account) < ENTRY_FEE && f.escrowed.0 == 0 && f.record.matches > 0 && self.can_fund_rookie() {
                 self.retire(slot, "broke", match_id);
-                let e = env::sha256_array(&[&entropy[..], &(slot as u64).to_le_bytes()].concat());
-                self.spawn_rookie(slot, &e, match_id);
+                let en = env::sha256_array(&[&entropy[..], &(slot as u64).to_le_bytes()].concat());
+                let r = self.spawn_rookie(slot, &en, match_id);
+                e.season_rewards += self.balance(&r.account);
             }
         }
         if let Some(s) = self.richest_slot() {
@@ -1524,6 +1581,8 @@ impl Contract {
     }
 
     fn retire(&mut self, slot: usize, why: &str, match_id: u64) {
+        let acct0 = self.slots[slot].clone();
+        self.bankrupt_shares(&acct0);
         let mut f = self.slot_fighter(slot);
         f.active = false;
         f.retired_block = Some(env::block_height());
