@@ -24,6 +24,7 @@ import { levelProgress, upgradesForLevel, xpForMatch } from "./sim/progression";
 import type { MatchConfig } from "./sim/types";
 import { diffLines, loadSnap, lobbySkeleton, renderLobby, saveSnap, type Snap } from "./ui/lobby";
 import { renderLedger } from "./ui/ledger";
+import { Social } from "./ui/challenge";
 import { fmt } from "./ui/dom";
 
 const U = 1 / 1000;
@@ -371,6 +372,15 @@ const pages = new Pages({
   toast,
   sfx: (k) => (k === "coin" ? sfx.heal() : sfx.ui()),
 });
+// Challenge a friend + DAILY (docs/SOCIAL.md): own DOM, three hooks below (forcedStart / matchOver / endShown)
+const social = new Social({
+  getRecord: () => record,
+  start: () => void startMatch(),
+  client: () => client,
+  toast,
+  sfx: (k) => { sfx.start(); if (k === "coin") sfx.heal(); else sfx.ui(); },
+  signIn,
+});
 $("signin").addEventListener("click", () => void signIn());
 $("signout").addEventListener("click", async () => {
   if (isT3(client)) await client.signOut().catch(() => {});
@@ -463,8 +473,8 @@ async function startMatch() {
   sfx.ui();
   $("end").classList.add("hidden");
   // ?seed=N (tests, replays) always plays the local deterministic roster
-  let start: StartResult | null = null;
-  const c = SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
+  let start: StartResult | null = await social.forcedStart(); // challenge / daily: fixed config, no chain
+  const c = start === null && SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
   if (c && c.mode === "chain") {
     $("dropping").classList.remove("hidden");
     $("drop-sub").textContent = "sealing the match seed on NEAR…";
@@ -730,6 +740,7 @@ function stepSim() {
     }
     const rec = record;
     const cur = current;
+    social.matchOver(rec);
     if (client && cur && !cur.matchId.startsWith("local-")) {
       settleState = "pending";
       client
@@ -807,6 +818,7 @@ function showEnd(force: boolean) {
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
   $("spectate").classList.toggle("hidden", st.over);
   $("to-lobby").classList.toggle("hidden", !st.over);
+  social.endShown(st.over);
   drawLedger();
   const xb = $("xp-box");
   xb.classList.toggle("hidden", !st.over || SEED_PARAM !== null && AUTOPLAY);
