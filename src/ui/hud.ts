@@ -37,6 +37,8 @@ export class Hud {
   private reloadStart = 0;
   private flashA = 0;
   hintsDone = false;
+  private lastR = Infinity;
+  private shrinkTick = -99;
 
   constructor() {
     const box = $("floaters");
@@ -56,6 +58,8 @@ export class Hud {
   }
 
   reset() {
+    this.lastR = Infinity;
+    this.shrinkTick = -99;
     this.feed.textContent = "";
     this.cache.clear();
     this.maxAmmo.clear();
@@ -92,9 +96,12 @@ export class Hud {
     const left = Math.max(0, MATCH_TICKS - st.tick);
     const secs = Math.ceil(left / TICK_HZ);
     this.set("time", secs, () => (this.matchTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
-    const closing = st.storm.targetR < st.storm.r - 1;
-    this.set("storm", `${st.storm.phase}${closing}`, () => {
-      this.stormText.textContent = closing ? "STORM CLOSING" : st.storm.phase > 0 ? `STORM ${st.storm.phase}` : "SAFE";
+    if (st.storm.r < this.lastR) this.shrinkTick = st.tick;
+    this.lastR = st.storm.r;
+    const closing = st.tick - this.shrinkTick < 3;
+    const soon = !closing && st.storm.targetR < st.storm.r - 1;
+    this.set("storm", `${st.storm.phase}${closing}${soon}`, () => {
+      this.stormText.textContent = closing ? "STORM CLOSING" : soon ? "STORM INCOMING" : st.storm.phase > 0 ? `STORM ${st.storm.phase}` : "SAFE ZONE";
       this.stormChip.classList.toggle("closing", closing);
     });
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
