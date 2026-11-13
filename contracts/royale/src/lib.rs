@@ -1018,7 +1018,12 @@ impl Contract {
         let prev = self.slot_fighter(slot);
         self.rookies += 1;
         let n = self.rookies;
-        let base = ROOKIE_NAMES[entropy[0] as usize % ROOKIE_NAMES.len()];
+        // a name no active fighter is using (the pool is larger than the roster)
+        let taken: Vec<String> = (0..BOTS).filter(|s| *s != slot).map(|s| self.slot_fighter(s).name.to_ascii_lowercase()).collect();
+        let base = (0..ROOKIE_NAMES.len())
+            .map(|k| ROOKIE_NAMES[(entropy[0] as usize + k) % ROOKIE_NAMES.len()])
+            .find(|n| !taken.iter().any(|t| t == n))
+            .unwrap_or(ROOKIE_NAMES[entropy[0] as usize % ROOKIE_NAMES.len()]);
         let personality = PERSONALITIES[entropy[1] as usize % PERSONALITIES.len()];
         let account: AccountId = format!("{base}-{n}.{}", env::current_account_id()).parse().unwrap();
         let mut name = base.to_string();

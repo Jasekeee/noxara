@@ -332,6 +332,10 @@ fn broke_bots_retire_and_rookies_take_the_slot() {
     assert!(rookie.fighter.account.as_str().ends_with("-3.royale.test"), "slots 0, 1, 2 retired in order: the third rookie");
     assert!(PERSONALITIES.contains(&rookie.fighter.personality.as_str()));
     assert_eq!(c.get_retired().len(), 8, "everyone but the winner went broke together");
+    let mut names: Vec<String> = c.get_fighters().into_iter().map(|f| f.fighter.name).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), BOTS, "rookies never share a name with an active fighter");
     assert_eq!(c.rookies, 8);
     assert_supply(&c);
 }
