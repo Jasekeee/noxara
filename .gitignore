@@ -7,7 +7,7 @@
 **/.near-credentials/
 
 # build
-node_modules/
+node_modules
 target/
 dist/
 .DS_Store
