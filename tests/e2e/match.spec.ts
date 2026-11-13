@@ -1,12 +1,13 @@
 import { expect, test } from "@playwright/test";
-import { collectErrors, hasHorizontalScroll, phase, requireHook } from "./hook";
+import { collectErrors, hasHorizontalScroll, isolateFromChain, offlineUrl, phase, requireHook } from "./hook";
 
 test.use({ video: "on" });
 
 test("guest opens → plays a full match", async ({ page }) => {
   test.setTimeout(300_000);
   const errors = collectErrors(page);
-  await page.goto("/?e2e&autoplay&seed=7&bots=1");
+  const chainCalls = await isolateFromChain(page);
+  await page.goto(offlineUrl("autoplay&bots=1"));
   await requireHook(page);
 
   // ?bots=1 skips the title: the match should be running almost immediately
@@ -29,4 +30,5 @@ test("guest opens → plays a full match", async ({ page }) => {
   expect(result.hasRecord, "window.__br.record() exposed on match end").toBe(true);
   expect(await hasHorizontalScroll(page), "no horizontal scroll on the end screen").toBe(false);
   expect(errors, "zero console errors / page errors").toEqual([]);
+  expect(chainCalls, "offline match made no relayer/RPC calls").toEqual([]);
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { phase, requireHook } from "./hook";
+import { isolateFromChain, offlineUrl, phase, requireHook } from "./hook";
 
 // axe-core WCAG 2.x A/AA scan. Needs the dev dependency @axe-core/playwright@4.14.0 (requested from
 // the lead, see docs/QA.md); the test skips with a message until it is installed.
@@ -14,12 +14,13 @@ async function loadAxe(): Promise<any> {
 }
 
 for (const [label, url] of [
-  ["title screen", "/?e2e"],
-  ["in-match HUD", "/?e2e&autoplay&seed=7&bots=1"],
+  ["title screen", offlineUrl()],
+  ["in-match HUD", offlineUrl("autoplay&bots=1")],
 ] as const) {
   test(`a11y: no WCAG A/AA violations on the ${label}`, async ({ page }) => {
     const AxeBuilder = await loadAxe();
     test.skip(!AxeBuilder, `${AXE} is not installed (dependency request: ${AXE}@4.14.0)`);
+    await isolateFromChain(page);
     await page.goto(url);
     await requireHook(page);
     if (url.includes("bots=1")) await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("playing");

@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { collectErrors, phase, requireHook } from "./hook";
+import { collectErrors, isolateFromChain, offlineUrl, phase, requireHook } from "./hook";
 
 test("title: PLAY is keyboard-reachable and starts the match", async ({ page }) => {
   const errors = collectErrors(page);
-  await page.goto("/?e2e");
+  const chainCalls = await isolateFromChain(page);
+  await page.goto(offlineUrl());
   await requireHook(page);
   expect(await phase(page)).toBe("title");
 
@@ -22,13 +23,16 @@ test("title: PLAY is keyboard-reachable and starts the match", async ({ page }) 
   await play.click();
   await expect.poll(() => phase(page), { timeout: 10_000 }).toBe("playing");
   expect(errors).toEqual([]);
+  expect(chainCalls, "offline page made no relayer/RPC calls").toEqual([]);
 });
 
 test("title: Enter on the focused PLAY button starts the match", async ({ page }) => {
-  await page.goto("/?e2e");
+  const chainCalls = await isolateFromChain(page);
+  await page.goto(offlineUrl());
   await requireHook(page);
   const play = page.getByRole("button", { name: /play/i }).first();
   await play.focus();
   await page.keyboard.press("Enter");
   await expect.poll(() => phase(page), { timeout: 10_000 }).toBe("playing");
+  expect(chainCalls, "offline page made no relayer/RPC calls").toEqual([]);
 });
