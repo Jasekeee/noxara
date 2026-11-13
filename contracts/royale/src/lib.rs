@@ -91,6 +91,24 @@ const WELCOME_DAY_KEY: &[u8] = b"welcome_day";
 /// The owner may delete the whole contract account (deposits back) only after this: 2026-11-25 00:00 UTC.
 pub const TEARDOWN_AFTER_MS: u64 = 1_795_564_800_000;
 const TEARDOWN_KEY: &[u8] = b"teardown_after";
+const BENEFICIARY_KEY: &[u8] = b"teardown_beneficiary";
+/// From 2026-11-20 00:00 UTC the season is ending: players can leave even with open sponsorships
+/// (they are closed at their current value) to take their own deposits back before the teardown.
+pub const SEASON_END_MS: u64 = 1_795_132_800_000;
+
+/// The earliest teardown. Release builds always use TEARDOWN_AFTER_MS; only the unit tests and the
+/// non-default `teardown-override` feature (sandbox tests) may move it.
+fn clamp_teardown_after(requested: Option<U64>) -> u64 {
+    #[cfg(any(test, feature = "teardown-override"))]
+    {
+        requested.map(|t| t.0).unwrap_or(TEARDOWN_AFTER_MS)
+    }
+    #[cfg(not(any(test, feature = "teardown-override")))]
+    {
+        let _ = requested;
+        TEARDOWN_AFTER_MS
+    }
+}
 pub const RECENT_MATCHES: usize = 50;
 pub const RETIRED_SHOWN: usize = 30;
 pub const LEADERBOARD_SIZE: usize = 50;
@@ -98,6 +116,10 @@ pub const MAX_HASH_LEN: usize = 128;
 /// NEP-145 deposit per player (guests: prepaid by the relayer). Covers the FT account, the player
 /// record and one pending match (measured in the unit tests).
 pub const STORAGE_DEPOSIT: NearToken = NearToken::from_millinear(20);
+/// A guest's deposit (prepaid by the relayer), sized to the measured need + 20% (see the
+/// measure_guest_storage test): player record, FT account, one pending match, XP.
+pub const GUEST_STORAGE_DEPOSIT: NearToken = NearToken::from_yoctonear(GUEST_STORAGE_BYTES as u128 * 10_000_000_000_000_000_000);
+pub const GUEST_STORAGE_BYTES: u64 = 1_514; // measured 1,261 (worst-case names) + 20%
 /// NEAR given to every bot / house sub-account the contract creates (they have NO access keys).
 pub const NPC_NEAR: NearToken = NearToken::from_millinear(1);
 const GAS_RESOLVE: Gas = Gas::from_tgas(10);
@@ -444,6 +466,7 @@ pub struct ConfigView {
     pub pending_paid: u32,
     pub max_paid: u32,
     pub storage_deposit: NearToken,
+    pub guest_storage_deposit: NearToken,
     pub block_height: U64,
 }
 
@@ -518,12 +541,16 @@ pub struct ContractV1 {
 impl Contract {
     /// Creates the house and the genesis nine as sub-accounts WITHOUT access keys (only this
     /// contract's rules move their $BOUNTY) and mints their starter wallets.
+    /// Private: only the contract account itself can initialise (deploy + new in ONE batch tx), so
+    /// nobody can front-run the init. `owner` must be an account the owner controls OTHER than this
+    /// contract's account if its full-access keys are going to be removed. `teardown_beneficiary` is
+    /// fixed here and can never change. `teardown_after_ms` only has an effect in test builds.
     #[init]
-    /// `owner` must be an account the owner controls OTHER than this contract's account if its
-    /// full-access keys are going to be removed (it is the only one who can `teardown`).
-    /// `teardown_after_ms` defaults to TEARDOWN_AFTER_MS (tests pass an earlier time).
-    pub fn new(owner: AccountId, server: AccountId, guest_parent: AccountId, teardown_after_ms: Option<U64>) -> Self {
-        env::storage_write(TEARDOWN_KEY, &teardown_after_ms.map(|t| t.0).unwrap_or(TEARDOWN_AFTER_MS).to_le_bytes());
+    #[private]
+    pub fn new(owner: AccountId, server: AccountId, guest_parent: AccountId, teardown_beneficiary: Option<AccountId>, teardown_after_ms: Option<U64>) -> Self {
+        env::storage_write(TEARDOWN_KEY, &clamp_teardown_after(teardown_after_ms).to_le_bytes());
+        let beneficiary = teardown_beneficiary.unwrap_or_else(|| owner.clone());
+        env::storage_write(BENEFICIARY_KEY, beneficiary.as_bytes());
         let me = env::current_account_id();
         let house: AccountId = format!("house.{me}").parse().unwrap();
         let mut c = Self {
@@ -912,16 +939,36 @@ impl Contract {
         self.owner = owner;
     }
 
-    /// Owner, after the time lock: delete this contract's own account and send its whole NEAR balance
-    /// (storage deposits included) to `beneficiary`. Works without any full-access key on the account.
-    /// Bot / house / rookie sub-accounts are keyless and can't be deleted: their ~0.001 NEAR each stays.
-    pub fn teardown(&mut self, beneficiary: AccountId) -> Promise {
+    /// Owner, after the time lock (2026-11-25 00:00 UTC), with no match in flight: delete this
+    /// contract's own account and send its whole NEAR balance to the beneficiary fixed at `new()`.
+    /// Works without any full-access key on the account. Keyless bot / house / rookie sub-accounts
+    /// can't be deleted: their ~0.001 NEAR each stays. Storage deposits the relayer paid go back to
+    /// the operator with the rest; players can take their own deposits back from the season's end.
+    pub fn teardown(&mut self) -> Promise {
         require!(env::predecessor_account_id() == self.owner, "owner only");
         let after = env::storage_read(TEARDOWN_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(TEARDOWN_AFTER_MS);
         require!(env::block_timestamp_ms() >= after, "teardown is locked until 2026-11-25 00:00 UTC");
-        require!(beneficiary != env::current_account_id(), "pick another beneficiary");
+        require!(self.pending_free.is_empty() && self.pending_paid == 0, "matches are still in flight: settle or sweep them first");
+        let beneficiary = self.teardown_beneficiary().unwrap_or_else(|| env::panic_str("no teardown beneficiary set"));
         event("teardown", &near_sdk::serde_json::json!({ "beneficiary": beneficiary, "at_ms": U64(env::block_timestamp_ms()) }));
         Promise::new(env::current_account_id()).delete_account(beneficiary)
+    }
+
+    /// For contracts initialised before the beneficiary existed: the owner sets it ONCE.
+    pub fn set_teardown_beneficiary(&mut self, beneficiary: AccountId) {
+        require!(env::predecessor_account_id() == self.owner, "owner only");
+        require!(self.teardown_beneficiary().is_none(), "the teardown beneficiary is fixed");
+        require!(beneficiary != env::current_account_id(), "pick another beneficiary");
+        env::storage_write(BENEFICIARY_KEY, beneficiary.as_bytes());
+    }
+
+    pub fn get_teardown_beneficiary(&self) -> Option<AccountId> {
+        self.teardown_beneficiary()
+    }
+
+    /// True from 2026-11-20 00:00 UTC: players may leave with open sponsorships (closed at value).
+    pub fn is_season_ending(&self) -> bool {
+        env::block_timestamp_ms() >= SEASON_END_MS
     }
 
     pub fn get_teardown_after(&self) -> U64 {
@@ -1054,6 +1101,7 @@ impl Contract {
             pending_paid: self.pending_paid,
             max_paid: MAX_PENDING_PAID,
             storage_deposit: STORAGE_DEPOSIT,
+            guest_storage_deposit: GUEST_STORAGE_DEPOSIT,
             block_height: U64(env::block_height()),
         }
     }
@@ -1412,6 +1460,10 @@ impl Contract {
             m.insert(account.clone(), v);
         }
         m.flush();
+    }
+
+    fn teardown_beneficiary(&self) -> Option<AccountId> {
+        env::storage_read(BENEFICIARY_KEY).and_then(|b| String::from_utf8(b).ok()).and_then(|s| s.parse().ok())
     }
 
     pub(crate) fn is_welcomed(&self, account: &AccountId) -> bool {

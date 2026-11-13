@@ -3,6 +3,7 @@
 //  - the relayer nonce is cached by near-kit's nonce manager after the first fetch,
 //  => one RPC round-trip per relayed click: `send_tx` with wait_until=EXECUTED_OPTIMISTIC.
 import { Near, InMemoryKeyStore, decodeSignedDelegateAction } from "near-kit";
+import { tokensBurnt } from "./budget.ts";
 
 export type ChainConfig = {
   network: "testnet" | "mainnet";
@@ -91,7 +92,7 @@ export class Chain {
       .transaction(this.cfg.relayerId)
       .signedDelegateAction(sd)
       .send({ waitUntil: "EXECUTED_OPTIMISTIC" });
-    return { tx: o.transaction.hash as string, value: gameValue(o, this.cfg.gameContractId), failure: gameFailure(o), outcome: o };
+    return { tx: o.transaction.hash as string, value: gameValue(o, this.cfg.gameContractId), failure: gameFailure(o), outcome: o, burnt: tokensBurnt(o as never) };
   }
 
   /** NEP-145: the relayer prepays a guest's storage (guests' function-call keys can't attach deposits). */
@@ -100,7 +101,7 @@ export class Chain {
       .transaction(this.cfg.relayerId)
       .functionCall(this.cfg.gameContractId, "storage_deposit", { account_id: accountId }, { gas: "10 Tgas", attachedDeposit: amount })
       .send({ waitUntil: "EXECUTED_OPTIMISTIC" });
-    return { tx: o.transaction.hash as string, failure: gameFailure(o) };
+    return { tx: o.transaction.hash as string, failure: gameFailure(o), burnt: tokensBurnt(o as never) };
   }
 
   /** settle_match, signed by the match-server key. */
@@ -126,7 +127,7 @@ export class Chain {
       .transfer(accountId, funding)
       .addKey(publicKey, { type: "functionCall", receiverId: this.cfg.gameContractId, methodNames: [...methods], allowance })
       .send({ waitUntil: "EXECUTED_OPTIMISTIC" });
-    return { tx: o.transaction.hash as string };
+    return { tx: o.transaction.hash as string, burnt: tokensBurnt(o as never) };
   }
 }
 

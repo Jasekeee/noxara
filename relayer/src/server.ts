@@ -20,6 +20,7 @@ import { checkDelegate, isGuestAccount, RateLimiter, Budget, GUEST_PREFIX, type 
 import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
 import { registerMessage } from "./protocol.ts";
 import { Subsidies } from "./subsidies.ts";
+import { SpendBudget, RESERVE, near as nearToYocto, fmtNear } from "./budget.ts";
 import type { ChainMatch } from "./roster.ts";
 import type { MatchRecord } from "../../src/sim/types.ts";
 
@@ -53,7 +54,9 @@ const senderGas = new Budget(BigInt(env("GAS_PER_SENDER_PER_HOUR_TGAS", "3000"))
 const globalGas = new Budget(BigInt(env("GAS_GLOBAL_PER_HOUR_TGAS", "200000")) * TGAS, 3_600_000);
 const GUEST_FUNDING = env("GUEST_FUNDING", "0.003 NEAR");
 const GUEST_ALLOWANCE = env("GUEST_ALLOWANCE", "0.05 NEAR");
-const GUEST_STORAGE = env("GUEST_STORAGE", "0.02 NEAR"); // = the contract's STORAGE_DEPOSIT
+// storage deposits: read from the contract at start (guests: the measured size), env overrides
+let GUEST_STORAGE = process.env.GUEST_STORAGE ?? "";
+let REAL_STORAGE = process.env.REAL_STORAGE ?? "";
 const PORT = Number(env("PORT", "8788"));
 const DEV_PORTS = [5173, 5180, 5181, 5184];
 const ORIGINS = env("CORS_ORIGINS", DEV_PORTS.flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(",")).split(",");
@@ -68,6 +71,9 @@ const relayPerSender = new RateLimiter(Number(env("RELAY_PER_SENDER_PER_MIN", "2
 const relayPerIp = new RateLimiter(Number(env("RELAY_PER_IP_PER_MIN", "60")), 60_000);
 const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10")), 3_600_000);
 // storage subsidies for signed-in real accounts: once per account ever, at most N per hour (N x 0.02 NEAR)
+// guest budget mode: 1 NEAR total for everything the relayer spends on players, N new guests a day
+const budget = new SpendBudget(path.join(DATA_DIR, "../budget.json"), env("RELAYER_BUDGET_NEAR", "1"), Number(env("DAILY_GUEST_CAP", "200")));
+const closedReply = (why: string) => ({ error: why === "daily_cap" ? "today's free guest spots are taken: sign in with NEAR or play offline" : "the free relayer budget is used up: sign in with NEAR or play offline", code: "guests_closed", reason: why });
 const subsidies = new Subsidies(path.join(DATA_DIR, "../subsidised.json"), Number(env("REGISTER_GLOBAL_PER_HOUR", "30")));
 const settlePerIp = new RateLimiter(Number(env("SETTLE_PER_IP_PER_MIN", "20")), 60_000);
 const settling = new Set<string>();
@@ -153,7 +159,7 @@ const server = http.createServer(async (req, res) => {
   const t0 = performance.now();
   try {
     if (req.method === "GET" && req.url === "/api/health") {
-      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null }, origin);
+      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null, ...budget.status() }, origin);
     }
     const rec = req.method === "GET" ? /^\/api\/match\/([0-9]{1,18})\/record$/.exec(req.url ?? "") : null;
     if (rec) {
@@ -166,10 +172,13 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const publicKey = String(body.publicKey ?? "");
       if (!/^ed25519:[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(publicKey)) return send(res, 400, { error: "bad public key" }, origin);
+      const shut = budget.closed("guest", RESERVE.guest);
+      if (shut) return send(res, 503, closedReply(shut), origin);
       const id = `${GUEST_PREFIX}${crypto.randomBytes(5).toString("hex")}.${relayerId}`;
       const r = await chain.createGuest(id, publicKey, GUEST_METHODS, GUEST_FUNDING, GUEST_ALLOWANCE);
       owners.add(id, publicKey);
       const s = await chain.storageDeposit(id, GUEST_STORAGE);
+      budget.spend(nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) + yoctoOf(GUEST_STORAGE) + r.burnt + s.burnt, "guest");
       if (s.failure) return send(res, 500, { accountId: id, error: `storage: ${s.failure}` }, origin);
       return send(res, 200, { accountId: id, tx: r.tx, storageTx: s.tx, ms: Math.round(performance.now() - t0) }, origin);
     }
@@ -190,6 +199,11 @@ const server = http.createServer(async (req, res) => {
       if (!sig.ok || !sig.publicKey) return send(res, 401, { error: "bad signature" }, origin);
       if (!(await owners.owns(d.senderId, sig.publicKey))) return send(res, 401, { error: "unknown key for this account" }, origin);
       if (!relayPerSender.take(d.senderId)) return send(res, 429, { error: "slow down" }, origin);
+      const shutRelay = budget.closed("relay", RESERVE.relay);
+      if (shutRelay) {
+        // real accounts keep playing: their client signs the same call itself (its key's allowance pays)
+        return send(res, 503, isGuestAccount(d.senderId, relayerId) ? closedReply(shutRelay) : { error: "relayer closed: sign it yourself", code: "relay_closed", reason: shutRelay }, origin);
+      }
       if (!senderGas.take(d.senderId, check.gas)) return send(res, 429, { error: "you've played a lot this hour: rest a little" }, origin);
       if (!globalGas.take("all", check.gas)) return send(res, 503, { error: "the island is crowded: try again soon" }, origin);
       let r;
@@ -200,6 +214,7 @@ const server = http.createServer(async (req, res) => {
         globalGas.refund("all", check.gas);
         throw e;
       }
+      budget.spend(r.burnt);
       if (r.failure) return send(res, 409, { tx: r.tx, error: r.failure, ms: Math.round(performance.now() - t0) }, origin);
       return send(res, 200, { tx: r.tx, value: r.value, guest: isGuestAccount(d.senderId, relayerId), ms: Math.round(performance.now() - t0) }, origin);
     }
@@ -215,6 +230,8 @@ const server = http.createServer(async (req, res) => {
       if (!(await owners.owns(accountId, publicKey))) return send(res, 401, { error: "this key is not on the account yet", code: "unknown_key" }, origin);
       const sb = await chain.view<unknown>("storage_balance_of", { account_id: accountId });
       if (sb) return send(res, 200, { accountId, registered: true, tx: null }, origin);
+      const shutReg = budget.closed("register", RESERVE.register);
+      if (shutReg) return send(res, 503, { error: "the relayer can't sponsor registrations now: register with your wallet (storage_deposit)", code: "relay_closed", reason: shutReg }, origin);
       const sub = subsidies.take(accountId);
       if (!sub.ok) {
         return sub.reason === "already_subsidised"
@@ -223,11 +240,12 @@ const server = http.createServer(async (req, res) => {
       }
       let s;
       try {
-        s = await chain.storageDeposit(accountId, GUEST_STORAGE);
+        s = await chain.storageDeposit(accountId, REAL_STORAGE);
       } catch (e) {
         subsidies.release(accountId);
         throw e;
       }
+      budget.spend(yoctoOf(REAL_STORAGE) + s.burnt);
       if (s.failure) {
         subsidies.release(accountId);
         return send(res, 500, { error: `storage: ${s.failure}`, code: "chain_refused" }, origin);
@@ -247,7 +265,20 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+/** "0.0152 NEAR" | "15140000000000000000000 yocto" -> yocto */
+function yoctoOf(amount: string): bigint {
+  const m = /^\s*([0-9.]+)\s*(NEAR|yocto)?\s*$/i.exec(amount);
+  if (!m) return 0n;
+  return (m[2] ?? "").toLowerCase() === "yocto" ? BigInt(m[1]) : nearToYocto(m[1]);
+}
+
 await chain.start();
 await chain.warm();
+{
+  const cfg = await chain.view<{ storage_deposit: string; guest_storage_deposit?: string }>("get_config").catch(() => null);
+  GUEST_STORAGE ||= cfg?.guest_storage_deposit ? `${cfg.guest_storage_deposit} yocto` : "0.02 NEAR";
+  REAL_STORAGE ||= cfg?.storage_deposit ? `${cfg.storage_deposit} yocto` : "0.02 NEAR";
+  console.log(`storage: guests ${GUEST_STORAGE}, real accounts ${REAL_STORAGE}; budget ${fmtNear(budget.remaining)} of ${fmtNear(budget.total)} NEAR left`);
+}
 server.listen(PORT, () => console.log(`relayer ${relayerId} + match server ${serverId ?? "(off)"} on :${PORT} (${network}, game ${gameId}, sim ${SIM_VERSION})`));
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { chain.stop(); server.close(() => process.exit(0)); });

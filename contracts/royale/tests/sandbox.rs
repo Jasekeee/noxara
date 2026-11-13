@@ -5,6 +5,9 @@ use near_workspaces::{network::Sandbox, Account, Contract, Worker};
 use serde_json::{json, Value};
 
 const WASM: &str = "target/near/royale.wasm";
+/// Same contract built with the sandbox-only `teardown-override` feature (an earlier teardown time):
+/// `cargo near build non-reproducible-wasm --features teardown-override --out-dir target/near/override`
+const WASM_OVERRIDE: &str = "target/near/override/royale.wasm";
 use royale::{entry_fee_for, BOUNTY_BPS, ENTRY_FEE as E, ONE, POT_TOP_UP as T, RESERVE, STARTER, WEAPON_PRICES};
 
 struct World {
@@ -440,10 +443,9 @@ async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
     let root = top.create_subaccount("noxara").initial_balance(NearToken::from_near(10)).transact().await?.into_result()?;
     let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
     let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
-    let c = root.deploy(&std::fs::read(WASM)?).await?.into_result()?;
-    // locked in the future first
+    let c = root.deploy(&std::fs::read(WASM_OVERRIDE)?).await?.into_result()?;
     c.call("new")
-        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_after_ms": "1"}))
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id(), "teardown_after_ms": "1"}))
         .gas(Gas::from_tgas(150))
         .transact()
         .await?
@@ -464,11 +466,11 @@ async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
     }
     assert_eq!(w.view_access_keys(root.id()).await?.len(), 0);
     // a stranger can't, the owner can (lock already passed: teardown_after_ms = 1)
-    let r = g.call(c.id(), "teardown").args_json(json!({"beneficiary": g.id()})).transact().await?;
+    let r = g.call(c.id(), "teardown").transact().await?;
     assert!(r.into_result().is_err());
     let root_bal = w.view_account(root.id()).await?.balance;
     let owner0 = owner.view_account().await?.balance;
-    let r = owner.call(c.id(), "teardown").args_json(json!({"beneficiary": owner.id()})).gas(Gas::from_tgas(50)).transact().await?;
+    let r = owner.call(c.id(), "teardown").gas(Gas::from_tgas(50)).transact().await?;
     println!("teardown: {} Tgas, failures {:?}", r.total_gas_burnt.as_tgas(), r.receipt_failures().len());
     r.into_result()?;
     assert!(w.view_account(root.id()).await.is_err(), "the root account is gone");
@@ -482,10 +484,30 @@ async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
 #[tokio::test]
 async fn teardown_refused_before_the_lock() -> anyhow::Result<()> {
     let wd = world().await?; // default lock: 2026-11-25 00:00 UTC
-    let r = wd.owner.call(wd.c.id(), "teardown").args_json(json!({"beneficiary": wd.owner.id()})).transact().await?;
+    let r = wd.owner.call(wd.c.id(), "teardown").transact().await?;
     let e = format!("{:?}", r.into_result().unwrap_err());
     assert!(e.contains("locked until 2026-11-25"), "{e}");
     let t: String = wd.c.view("get_teardown_after").await?.json()?;
     assert_eq!(t, "1795564800000");
+    Ok(())
+}
+
+#[tokio::test]
+async fn release_build_ignores_an_earlier_teardown_time_and_init_is_private() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    let root = w.root_account()?;
+    let ca = root.create_subaccount("game").initial_balance(NearToken::from_near(10)).transact().await?.into_result()?;
+    let mallory = root.create_subaccount("mallory").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let c = ca.deploy(&std::fs::read(WASM)?).await?.into_result()?;
+    // a foreign init (front-running between deploy and init) is refused
+    let r = mallory.call(c.id(), "new").args_json(json!({"owner": mallory.id(), "server": mallory.id(), "guest_parent": mallory.id()})).gas(Gas::from_tgas(150)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("private"));
+    // the account itself can, but a release build ignores teardown_after_ms
+    c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id(), "teardown_after_ms": "1"})).gas(Gas::from_tgas(150)).transact().await?.into_result()?;
+    let t: String = c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1795564800000", "release builds can't move the lock");
+    // a second init fails
+    let r = c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id()})).gas(Gas::from_tgas(150)).transact().await?;
+    assert!(r.into_result().is_err());
     Ok(())
 }

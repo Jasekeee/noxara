@@ -7,7 +7,7 @@
 //! `storage_deposit({account_id: <guest>})` right after creating the guest account. The contract
 //! itself only pays for bounded data: the 9 slots, the last `RECENT_MATCHES` settled matches, the
 //! leaderboard and one record per retired bot.
-use crate::{Contract, ContractExt, PlayerV2, STORAGE_DEPOSIT};
+use crate::{Contract, ContractExt, PlayerV2, GUEST_STORAGE_DEPOSIT, STORAGE_DEPOSIT};
 use near_contract_standards::fungible_token::core::FungibleTokenCore;
 use near_contract_standards::fungible_token::events::FtBurn;
 use near_contract_standards::fungible_token::metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider, FT_METADATA_SPEC};
@@ -64,28 +64,30 @@ impl StorageManagement for Contract {
         let amount = env::attached_deposit();
         let payer = env::predecessor_account_id();
         let account = account_id.unwrap_or_else(|| payer.clone());
-        if self.load_player(&account).is_some() {
+        if let Some(p) = self.load_player(&account) {
             if !amount.is_zero() {
                 let _ = Promise::new(payer).transfer(amount);
             }
-            return paid_balance();
+            return paid_balance(p.storage_paid.0);
         }
-        require!(amount >= STORAGE_DEPOSIT, format!("attach at least {} yoctoNEAR", STORAGE_DEPOSIT.as_yoctonear()));
         let guest = self.is_guest(&account);
+        // guests need less (measured: player + FT account + one pending match + XP, +20%)
+        let need = if guest { GUEST_STORAGE_DEPOSIT } else { STORAGE_DEPOSIT };
+        require!(amount >= need, "attach the storage deposit (see storage_balance_bounds)");
         // a deposit paid by someone else (the relayer) is refunded to THEM on unregister, never to the account
         let deposit_payer = (payer != account).then(|| payer.clone());
-        self.save_player(&account, PlayerV2 { guest, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), deposit_payer, ..Default::default() });
+        self.save_player(&account, PlayerV2 { guest, storage_paid: U128(need.as_yoctonear()), deposit_payer, ..Default::default() });
         self.ensure_registered(&account);
         // the one-time welcome credit: only when the account registers itself or via the trusted relayer
         // (a third party registering someone else grants nothing and never touches the daily cap)
         if !guest && (payer == account || payer == self.guest_parent) {
             self.grant_welcome(&account);
         }
-        let refund = amount.saturating_sub(STORAGE_DEPOSIT);
+        let refund = amount.saturating_sub(need);
         if !refund.is_zero() {
             let _ = Promise::new(payer).transfer(refund);
         }
-        paid_balance()
+        paid_balance(need.as_yoctonear())
     }
 
     /// Nothing is ever withdrawable (min = max): use `storage_unregister` to leave.
@@ -95,7 +97,7 @@ impl StorageManagement for Contract {
         let id = env::predecessor_account_id();
         require!(self.load_player(&id).is_some(), "not registered");
         require!(amount.is_none_or(|a| a.is_zero()), "nothing to withdraw");
-        paid_balance()
+        paid_balance(self.load_player(&id).map(|p| p.storage_paid.0).unwrap_or(0))
     }
 
     /// Leave: refunds the storage deposit to whoever paid it (the relayer for subsidised accounts). Needs no pending match; a non-zero $BOUNTY balance is
@@ -106,6 +108,10 @@ impl StorageManagement for Contract {
         let id = env::predecessor_account_id();
         let Some(p) = self.load_player(&id) else { return false };
         require!(p.pending.is_none(), "finish or abandon your match first");
+        if self.is_season_ending() {
+            // the season is ending: open sponsorships are closed at their current value
+            self.close_all_sponsorships(&id);
+        }
         require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first");
         let bal = self.balance(&id);
         require!(bal == 0 || force.unwrap_or(false), "non-zero $NOX balance: pass force=true to burn it");
@@ -123,7 +129,8 @@ impl StorageManagement for Contract {
     }
 
     fn storage_balance_bounds(&self) -> StorageBalanceBounds {
-        StorageBalanceBounds { min: STORAGE_DEPOSIT, max: Some(STORAGE_DEPOSIT) }
+        // guests (relayer-registered) need GUEST_STORAGE_DEPOSIT, real players STORAGE_DEPOSIT
+        StorageBalanceBounds { min: GUEST_STORAGE_DEPOSIT, max: Some(STORAGE_DEPOSIT) }
     }
 
     fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
@@ -138,8 +145,8 @@ impl StorageManagement for Contract {
     }
 }
 
-fn paid_balance() -> StorageBalance {
-    StorageBalance { total: STORAGE_DEPOSIT, available: NearToken::from_yoctonear(0) }
+fn paid_balance(total: u128) -> StorageBalance {
+    StorageBalance { total: NearToken::from_yoctonear(total), available: NearToken::from_yoctonear(0) }
 }
 
 #[near]

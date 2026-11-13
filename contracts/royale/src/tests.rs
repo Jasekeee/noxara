@@ -33,7 +33,7 @@ fn ctx(pred: &str, height: u64, deposit: NearToken) {
 
 fn setup() -> Contract {
     ctx(ME, 100, NearToken::from_yoctonear(0));
-    let mut c = Contract::new(acc("owner.test"), acc(SERVER), acc(RELAY), None);
+    let mut c = Contract::new(acc("owner.test"), acc(SERVER), acc(RELAY), Some(acc("operator.test")), None);
     for who in [GUEST, ALICE] {
         ctx(RELAY, 101, STORAGE_DEPOSIT);
         c.storage_deposit(Some(acc(who)), None);
@@ -535,16 +535,21 @@ fn storage_deposit_covers_a_player_and_a_pending_match() {
 #[test]
 fn storage_bounds_and_double_registration() {
     let mut c = setup();
-    assert_eq!(c.storage_balance_bounds().min, STORAGE_DEPOSIT);
+    assert_eq!(c.storage_balance_bounds().min, GUEST_STORAGE_DEPOSIT);
+    assert_eq!(c.storage_balance_bounds().max, Some(STORAGE_DEPOSIT));
     assert!(c.storage_balance_of(acc(GUEST)).is_some());
     assert!(c.storage_balance_of(acc("nobody.test")).is_none());
     ctx(RELAY, 300, STORAGE_DEPOSIT);
     c.storage_deposit(Some(acc(GUEST)), None); // refunded, no change
-    assert_eq!(c.get_player(acc(GUEST)).unwrap().storage_paid.0, STORAGE_DEPOSIT.as_yoctonear());
+    assert_eq!(c.get_player(acc(GUEST)).unwrap().storage_paid.0, GUEST_STORAGE_DEPOSIT.as_yoctonear(), "guests pay the measured size");
+    assert_eq!(c.get_player(acc(ALICE)).unwrap().storage_paid.0, STORAGE_DEPOSIT.as_yoctonear());
+    // a real account can't register with the guest amount
+    ctx(RELAY, 301, GUEST_STORAGE_DEPOSIT);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.storage_deposit(Some(acc("real.test")), None))).is_err());
 }
 
 #[test]
-#[should_panic(expected = "attach at least")]
+#[should_panic(expected = "attach the storage deposit")]
 fn storage_deposit_too_small() {
     let mut c = setup();
     ctx(RELAY, 300, NearToken::from_millinear(1));
@@ -1054,19 +1059,79 @@ fn unregister_then_register_brings_no_new_credit_and_keeps_the_record_paid() {
 }
 
 #[test]
-fn teardown_is_owner_only_and_time_locked() {
+fn teardown_is_owner_only_time_locked_and_pays_the_fixed_beneficiary() {
     let mut c = setup();
     assert_eq!(c.get_teardown_after().0, TEARDOWN_AFTER_MS);
+    assert_eq!(c.get_teardown_beneficiary(), Some(acc("operator.test")));
     let mut b = VMContextBuilder::new();
     b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp((TEARDOWN_AFTER_MS - 1) * 1_000_000);
     testing_env!(b.build());
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(acc("owner.test")); })).is_err(), "locked");
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(); })).is_err(), "locked");
     b.block_timestamp(TEARDOWN_AFTER_MS * 1_000_000).predecessor_account_id(acc(ALICE));
     testing_env!(b.build());
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(acc(ALICE)); })).is_err(), "owner only");
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(); })).is_err(), "owner only");
+    // the beneficiary is fixed
     b.predecessor_account_id(acc("owner.test"));
     testing_env!(b.build());
-    let _ = c.teardown(acc("owner.test"));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.set_teardown_beneficiary(acc("owner.test")))).is_err());
+    let _ = c.teardown();
     let r = near_sdk::test_utils::get_created_receipts();
-    assert!(r.iter().any(|x| x.receiver_id == acc(ME) && x.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::DeleteAccount { .. }))));
+    let del = r.iter().find(|x| x.receiver_id == acc(ME) && x.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::DeleteAccount { .. }))).expect("delete");
+    assert!(del.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::DeleteAccount { beneficiary_id, .. } if beneficiary_id == &acc("operator.test"))));
+}
+
+#[test]
+fn no_teardown_while_a_match_is_in_flight() {
+    let mut c = setup();
+    let s = start(&mut c, GUEST, 200);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(); })).is_err(), "pending match");
+    settle(&mut c, s.match_id, 3, None, 300);
+    b.predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    let _ = c.teardown();
+}
+
+#[test]
+fn at_season_end_players_leave_with_open_sponsorships() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[0].clone();
+    sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
+    // before the season end: refused
+    ctx(ALICE, 160, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.storage_unregister(Some(true)))).is_err());
+    // from 2026-11-20: the sponsorship is closed at its value and she can leave (deposit back to its payer)
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).block_timestamp(SEASON_END_MS * 1_000_000);
+    testing_env!(b.build());
+    assert!(c.is_season_ending());
+    assert!(c.storage_unregister(Some(true)));
+    assert!(c.sponsors.get(&bot).unwrap().entries.is_empty());
+    assert!(c.sponsoring.get(&acc(ALICE)).is_none());
+}
+
+#[test]
+fn measure_guest_storage() {
+    // a guest: player record + FT account + one pending match + XP (no sponsorships, no welcome)
+    let rec = |key: usize, val: usize| key + val + 40;
+    let mut c = setup();
+    let who = "g-0123456789.relay.br-7e8492.testnet"; // 36 chars (mainnet relay.noxara.near guests: 30)
+    c.guest_parent = acc("relay.br-7e8492.testnet");
+    ctx("relay.br-7e8492.testnet", 300, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc(who)), None);
+    let s = start(&mut c, who, 301);
+    c.xp.insert(acc(who), 1);
+    let id = 4 + who.len();
+    let p = borsh::to_vec(&VPlayer::V2(c.get_player(acc(who)).unwrap())).unwrap().len();
+    let m = borsh::to_vec(&VMatch::V2(c.get_match(s.match_id).unwrap())).unwrap().len();
+    // worst-case roster names: 9 bots like "yarrow-1234.royale.br-7e8492.testnet" (36 chars)
+    let roster_now: usize = s.roster.iter().map(|r| r.account.len()).sum();
+    let m = m + 9 * 36 - roster_now;
+    let bytes = rec(1 + id, p) + rec(1 + id, 16) + rec(1 + 8, m) + rec(1 + id, 8);
+    let need = env::storage_byte_cost().as_yoctonear() * (bytes as u128 * 12 / 10);
+    println!("GUEST: player {p} B + match {m} B + ft + xp = {bytes} bytes; +20% = {} yocto", need);
+    assert!(need <= GUEST_STORAGE_DEPOSIT.as_yoctonear(), "GUEST_STORAGE_DEPOSIT too small: need {need}");
 }

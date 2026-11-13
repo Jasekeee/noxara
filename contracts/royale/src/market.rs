@@ -287,6 +287,27 @@ impl Contract {
         })
     }
 
+    /// Season end: close every sponsorship of `who` at its current value (no cooldown, escrow ignored:
+    /// pays what the bot's wallet holds). Returns the total paid back.
+    pub(crate) fn close_all_sponsorships(&mut self, who: &AccountId) -> u128 {
+        let bots = self.sponsoring.get(who).cloned().unwrap_or_default();
+        let mut total = 0u128;
+        for bot in bots {
+            let Some(mut pool) = self.sponsors.get(&bot).cloned() else { continue };
+            let Some(i) = pool.entries.iter().position(|e| &e.sponsor == who) else { continue };
+            let e = pool.entries.remove(i);
+            let value = e.shares.0 * self.bankroll(&bot) / pool.total_shares.0.max(1);
+            let pay = value.min(self.balance(&bot));
+            pool.total_shares = U128(pool.total_shares.0 - e.shares.0);
+            self.sponsors.insert(bot.clone(), pool);
+            self.move_tokens(&bot, who, pay, "sponsorship closed: season end");
+            event("unsponsor", &near_sdk::serde_json::json!({ "sponsor": who, "bot": bot, "returned": U128(pay), "staked": e.staked, "earned": e.earned, "season_end": true }));
+            total += pay;
+        }
+        self.sponsoring.remove(who);
+        total
+    }
+
     fn forget_sponsoring(&mut self, who: &AccountId, bot: &AccountId) {
         let mut mine = self.sponsoring.get(who).cloned().unwrap_or_default();
         mine.retain(|b| b != bot);
