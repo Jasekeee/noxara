@@ -17,6 +17,7 @@ Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for 
 | Do | See |
 |---|---|
 | WASD / arrows to move; click or Space to fire — keep the mouse still and it **auto-aims** at the nearest visible enemy, move the mouse to aim yourself (light ±8° assist). Phone: left stick moves, **tap** the right side to auto-aim and fire, drag it to aim | Your fighter with a ring under it; an aim line (red ring on a locked target), shots, muzzle flashes, damage numbers, screen shake. Aim assist is only input: the recorded aim angle replays bit-for-bit |
+| New here? Press **TRAINING ISLAND** on the title | An offline match where the bots go easy on you (worse aim, slower reactions — against you only); nothing is recorded or paid. A fast loss in a real match offers it too |
 | Press **Esc / P** or the ⏸ button | Menu: Resume, Sound, Aim assist, Controls, Exit (exit counts as a loss; offline practice truly pauses) |
 | Walk into a crate with a gold beam | It bursts: blaster, shotgun, sniper or grenades |
 | Step into a bush | "HIDDEN": enemies can't see you unless they're very close or you shoot |
