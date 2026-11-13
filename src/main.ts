@@ -10,11 +10,17 @@ import { loadAll } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
 import { Fx } from "./render/fx";
-import { makeWeaponIcons } from "./render/icons";
+import { makePortraits, makeWeaponIcons } from "./render/icons";
 import { BOLT_COLOR, PAL, WEAPON_LABEL } from "./render/palette";
 import { Controls } from "./input/input";
 import { Hud } from "./ui/hud";
 import { sfx } from "./audio/sfx";
+import { createGameClient } from "./net/client";
+import type { FighterInfo, GameClient, SettleResult, StartResult } from "./net/api";
+import type { MatchConfig } from "./sim/types";
+import { lobbySkeleton, renderLobby } from "./ui/lobby";
+import { renderLedger } from "./ui/ledger";
+import { fmt } from "./ui/dom";
 
 const U = 1 / 1000;
 const DT = 1 / TICK_HZ;
@@ -92,8 +98,19 @@ sun.shadow.bias = -0.0008;
 sun.shadow.normalBias = 0.03;
 scene.add(sun, sun.target);
 
+// ground arrow that points back to the safe zone while you are in the storm
+const safeArrow = (() => {
+  const sh = new THREE.Shape();
+  sh.moveTo(0, 1.1); sh.lineTo(0.75, 0.2); sh.lineTo(0.28, 0.2); sh.lineTo(0.28, -0.7); sh.lineTo(-0.28, -0.7); sh.lineTo(-0.28, 0.2); sh.lineTo(-0.75, 0.2); sh.closePath();
+  const g = new THREE.ShapeGeometry(sh);
+  g.rotateX(-Math.PI / 2); // tip points to -Z
+  const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false, depthTest: false }));
+  m.renderOrder = 20;
+  m.visible = false;
+  return m;
+})();
 const water = makeWater();
-scene.add(water.mesh);
+scene.add(water.mesh, safeArrow);
 const fx = new Fx(scene);
 const hud = new Hud();
 const controls = new Controls(canvas, camera);
@@ -141,26 +158,74 @@ const camLook = new THREE.Vector3();
 let trauma = 0;
 const PITCH = THREE.MathUtils.degToRad(52);
 
-function seedFromUrl(): number {
+const SEED_PARAM = (() => {
   const s = params.get("seed");
-  if (s !== null && /^\d+$/.test(s)) return Number(s) >>> 0;
+  return s !== null && /^\d+$/.test(s) ? Number(s) >>> 0 : null;
+})();
+function localSeed(): number {
+  if (SEED_PARAM !== null) return SEED_PARAM;
   const a = new Uint32Array(1);
   crypto.getRandomValues(a);
   return a[0];
 }
 
-function buildMatch(seed: number) {
+// ------------------------------------------------------------------ chain (invisible to the player)
+let client: GameClient | null = null;
+// ?seed=N is a deterministic local match (tests / replays): no network at all.
+const clientP: Promise<GameClient | null> =
+  SEED_PARAM !== null ? Promise.resolve(null) : createGameClient().then((c) => (client = c)).catch(() => null);
+let fighters: FighterInfo[] = [];
+let portraits: string[] = [];
+let current: StartResult | null = null;
+let settleState: SettleResult | "pending" | null = null;
+let starting = false;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
+}
+
+async function refreshLobby() {
+  const c = await clientP;
+  const mode = $("net-mode");
+  if (!c) {
+    mode.textContent = "offline practice";
+    return;
+  }
+  const list = await withTimeout(c.fighters(), 8000);
+  if (list) fighters = list;
+  const why: Record<string, string> = {
+    relayer_unreachable: "can't reach the island server",
+    wrong_contract: "island server is on another season",
+    sim_version_mismatch: "game update pending",
+    no_webcrypto: "this browser can't hold a guest key",
+    chain_error: "NEAR is busy",
+  };
+  const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
+  mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
+  mode.classList.toggle("chain", c.mode === "chain");
+  if (fighters.length && portraits.length) renderLobby($("roster"), fighters, portraits);
+}
+
+function localStart(): StartResult {
+  const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
+  const b = cfg.fighters.findIndex((f) => f.bounty);
+  return { matchId: `local-${cfg.seed}`, cfg, pot: 0, bountyIdx: b >= 0 ? b : null, bountyValue: 0, playerPaid: 0, tx: null };
+}
+
+function buildMatch(cfg: MatchConfig) {
   if (world) world.dispose();
   for (const v of views) v.dispose();
   fx.clear();
-  match = createMatch({ seed, fighters: t1Roster() });
+  match = createMatch(cfg);
   world = new World(match);
   world.onBurst = (x, z, kind) => (kind === "chest" ? fx.chestBurst(x, z) : fx.healBurst(x, z));
   scene.add(world.group);
   water.uniforms.uR.value = world.radius;
   const tags = $("tags");
+  const bv = current?.bountyValue ?? 0;
   views = match.state.fighters.map((f, i) => {
     const v = new FighterView(i, f, tags);
+    if (f.bounty) v.setBountyValue(bv);
     scene.add(v.root);
     return v;
   });
@@ -177,23 +242,56 @@ function buildMatch(seed: number) {
   camLook.copy(camTarget);
 }
 
-function startMatch() {
+async function startMatch() {
+  if (starting) return;
+  starting = true;
+  endOpen = false;
+  phase = "playing"; // the drop-in is part of the match flow (tick stays 0 until the island is built)
   sfx.start();
   sfx.ui();
-  buildMatch(seedFromUrl());
+  $("end").classList.add("hidden");
+  // ?seed=N (tests, replays) always plays the local deterministic roster
+  let start: StartResult | null = null;
+  const c = SEED_PARAM === null ? await withTimeout(clientP, 3000) : null;
+  if (c && c.mode === "chain") {
+    $("dropping").classList.remove("hidden");
+    $("drop-sub").textContent = "sealing the match seed on NEAR…";
+    start = await withTimeout(c.startMatch(), 20000);
+  } else if (c) start = await withTimeout(c.startMatch(), 3000);
+  current = start ?? localStart();
+  $("dropping").classList.add("hidden");
+  settleState = null;
+  buildMatch(current.cfg);
+  starting = false;
   phase = "playing";
   matchStartT = time;
   introT = INTRO;
   myKillTimes = [];
   lastAmmo = -1;
-  hud.banner("READY…", "gold");
+  const st = current;
+  if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} $BOUNTY ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
+  else hud.banner("READY…", "gold");
   $("title").classList.add("hidden");
-  $("end").classList.add("hidden");
   $("hud").classList.remove("hidden");
+  $("pot-chip").classList.toggle("hidden", !(current.pot > 0));
+  $("pot").textContent = fmt(current.pot);
   hud.reset();
   controls.setEnabled(true);
   if (!AUTOPLAY) hud.showHints(controls.touchMode);
   canvas.focus();
+}
+
+function toLobby() {
+  sfx.ui();
+  endOpen = false;
+  phase = "title";
+  $("end").classList.add("hidden");
+  $("hud").classList.add("hidden");
+  $("title").classList.remove("hidden");
+  controls.setEnabled(false);
+  for (const v of views) v.tag.style.transform = "translate(-9999px, 0px)";
+  void refreshLobby();
+  ($("play") as HTMLButtonElement).focus();
 }
 
 // ------------------------------------------------------------------ helpers
@@ -245,8 +343,8 @@ function onEvents(evs: SimEvent[]) {
         const mine = e.by === 0, me = e.who === 0;
         if (storm) {
           fx.spark(x, z, PAL.stormHot);
-          if (me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, "storm", e.who);
-          if (me) { hud.hurtFlash(); shake(0.08); }
+          if (me || canSeeNow(e.who)) hud.floater(`-${Math.round(e.dmg)}`, v.pos.x, 3.1, v.pos.z, me ? "storm me" : "storm", e.who);
+          if (me) { hud.hurtFlash(); shake(0.1); sfx.hurt(); }
           break;
         }
         fx.impact(x, 1.1, z, BOLT_COLOR[st.fighters[e.by]?.weapon ?? "popper"], e.crit);
@@ -259,6 +357,14 @@ function onEvents(evs: SimEvent[]) {
           hud.hurtFlash();
           sfx.hurt();
           shake(0.28);
+          const a = views[e.by];
+          if (a) {
+            // screen-space direction from me to the attacker
+            const pm = project(v.pos.x, 1, v.pos.z);
+            const mx = pm ? pm.x : innerWidth / 2, my = pm ? pm.y : innerHeight / 2;
+            const pa = project(a.pos.x, 1, a.pos.z);
+            if (pa) hud.damageDir(Math.atan2(pa.x - mx, -(pa.y - my)));
+          }
         } else sfx.hit(e.crit, mine);
         break;
       }
@@ -297,10 +403,13 @@ function onEvents(evs: SimEvent[]) {
         }
         break;
       }
-      case "bounty":
-        hud.banner(`${nameOf(e.by)!.toUpperCase()} CLAIMED THE BOUNTY!`, "gold");
+      case "bounty": {
+        const val = current && current.bountyValue > 0 ? `THE ${fmt(current.bountyValue)} $BOUNTY BOUNTY` : "THE BOUNTY";
+        hud.banner(`${nameOf(e.by)!.toUpperCase()} CLAIMED ${val} ON ${nameOf(e.who)!.toUpperCase()}!`, "gold");
+        hud.feedBounty(nameOf(e.by)!, nameOf(e.who)!, current?.bountyValue ?? 0, e.by === 0);
         sfx.chest();
         break;
+      }
       case "chest":
         if (e.who === 0) {
           hud.popup(`${WEAPON_LABEL[e.weapon]}!`);
@@ -397,42 +506,112 @@ function stepSim() {
       placements: st.fighters.map((f) => f.placement),
     };
     phase = "over";
+    const rec = record;
+    const cur = current;
+    if (client && cur && !cur.matchId.startsWith("local-")) {
+      settleState = "pending";
+      client
+        .settle(cur.matchId, rec)
+        .then((r) => {
+          if (current !== cur) return;
+          settleState = r;
+          if (endShown) drawLedger();
+          void refreshLobby();
+        })
+        .catch(() => {
+          settleState = null;
+          if (endShown) drawLedger();
+        });
+    }
     setTimeout(() => showEnd(true), 1400);
   }
 }
 
 // ------------------------------------------------------------------ end / death card
-function showEnd(final: boolean) {
+let endGuardUntil = 0;
+let endOpen = false;
+function drawLedger() {
   if (!match) return;
-  const me = match.state.fighters[0];
-  if (!final && endShown) return;
+  const st = match.state;
+  const el = $("ledger");
+  if (!st.over) {
+    el.textContent = "";
+    const n = document.createElement("p");
+    n.className = "lg-note";
+    n.textContent = `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
+    el.appendChild(n);
+    return;
+  }
+  renderLedger(el, {
+    names: st.fighters.map((f) => (f.idx === 0 ? "You" : f.name)),
+    accounts: match.cfg.fighters.map((f) => f.id),
+    placements: st.fighters.map((f) => f.placement),
+    kills: st.fighters.map((f) => f.kills),
+    winner: st.winner,
+    start: current,
+    settle: settleState,
+    chain: !!client && client.mode === "chain",
+    guest: !!client && client.mode === "chain" && client.isGuest(),
+    portraits,
+    explorerTx: (h) => client?.explorerTx(h) ?? "#",
+    explorerAccount: (a) => client?.explorerAccount(a) ?? "#",
+  });
+}
+
+function showEnd(force: boolean) {
+  if (!match) return;
+  const st = match.state;
+  const me = st.fighters[0];
+  if (!force && endShown) return;
+  if (phase === "title") return;
   endShown = true;
+  spectating = false;
   const el = $("end");
-  const won = match.state.winner === 0 || (me.alive && match.state.over);
+  const won = st.winner === 0;
   const place = me.placement || (me.alive ? 1 : FIGHTERS);
   el.classList.toggle("win", won);
   $("end-place").textContent = `#${place}`;
   $("end-title").textContent = won ? "LAST ONE STANDING" : "ELIMINATED";
   const killer = killerOf.get(0);
-  $("end-sub").textContent = won ? `of ${FIGHTERS} — the bounty is yours` : killer != null ? `of ${FIGHTERS} — taken out by ${nameOf(killer)}` : killerOf.has(0) ? `of ${FIGHTERS} — lost to the storm` : `of ${FIGHTERS}`;
+  const how = won ? "the island is yours" : killer != null ? `taken out by ${nameOf(killer)}` : killerOf.has(0) ? "lost to the storm" : "";
+  const winnerLine = st.over ? (st.winner === null ? "no winner" : won ? "" : `${nameOf(st.winner)} won`) : `${st.alive} still fighting`;
+  $("end-sub").textContent = [`of ${FIGHTERS}`, how, winnerLine].filter(Boolean).join(" — ");
   $("end-kills").textContent = String(me.kills);
   $("end-dmg").textContent = String(Math.round(me.damageDealt));
-  const surv = Math.round(((me.alive ? match.state.tick : lastTickAlive) / TICK_HZ));
+  const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
-  $("spectate").classList.toggle("hidden", match.state.over);
+  $("spectate").classList.toggle("hidden", st.over);
+  $("to-lobby").classList.toggle("hidden", !st.over);
+  drawLedger();
+  $("hud").classList.add("hidden");
   el.classList.remove("hidden");
+  endOpen = true;
+  el.scrollTop = 0;
   controls.setEnabled(false);
-  ($("again") as HTMLButtonElement).focus();
+  // a held trigger / stray click must not hit a button that just appeared under the cursor
+  endGuardUntil = performance.now() + 700;
+  ($("again") as HTMLButtonElement).focus({ preventScroll: true });
 }
 let lastTickAlive = 0;
+const guarded = (fn: () => void) => (e: Event) => {
+  if (performance.now() < endGuardUntil && (e as MouseEvent).detail > 0) return; // ignore pointer clicks, allow keyboard
+  fn();
+};
 
-$("again").addEventListener("click", () => startMatch());
-$("spectate").addEventListener("click", () => {
+$("again").addEventListener("click", guarded(() => void startMatch()));
+$("to-lobby").addEventListener("click", guarded(toLobby));
+$("spectate").addEventListener("click", guarded(() => {
   sfx.ui();
   spectating = true;
+  endOpen = false;
   $("end").classList.add("hidden");
+  $("hud").classList.remove("hidden");
+}));
+$("spec-exit").addEventListener("click", () => showEnd(true));
+addEventListener("keydown", (e) => {
+  if (e.code === "Escape" && spectating && match) showEnd(true);
 });
-$("play").addEventListener("click", () => startMatch());
+$("play").addEventListener("click", () => void startMatch());
 const muteBtn = $("mute");
 function toggleMute() {
   const m = sfx.toggleMute();
@@ -483,7 +662,7 @@ function frame(now: number) {
       matchStartT = time;
     }
   }
-  if (match && (phase === "playing" || phase === "over") && introT <= 0) {
+  if (match && (phase === "playing" || phase === "over") && introT <= 0 && !starting) {
     acc += dt * SPEED;
     let n = 0;
     while (acc >= DT && n < 8 * SPEED) {
@@ -506,10 +685,13 @@ function frame(now: number) {
     if (meDeadAt >= 0 && !endShown && time - meDeadAt > 1.8 && !AUTOPLAY) showEnd(false);
 
     // fighters
+    const mobileHud = innerWidth <= 720 || controls.touchMode;
+    const hudTop = mobileHud ? 140 : 92;
+    const hudBottom = mobileHud ? 70 : 96;
     rustlers.length = 0;
     for (const f of st.fighters) {
       const v = views[f.idx];
-      v.update(dt, alpha, f);
+      v.update(dt, alpha, f, st.tick);
       const vis = f.idx === 0 || !f.alive || canSeeNow(f.idx) || v.dead;
       v.root.visible = vis && !(v.dead && v.deadT > 1.9);
       if (!vis && f.alive && v.speed > 0.5) rustlers.push(v.pos);
@@ -519,9 +701,12 @@ function frame(now: number) {
         if (v.dustT <= 0) { fx.dust(v.pos.x, v.pos.z); v.dustT = v.speed > 5 ? 0.16 : 0.26; }
       }
       // name tag
-      const showTag = vis && f.alive && phase !== "title";
+      const showTag = vis && f.alive && phase !== "title" && !starting && !endOpen;
       const p = showTag ? project(v.pos.x, f.bounty ? 3.3 : 2.5, v.pos.z) : null;
-      if (p) v.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
+      // never draw a tag over the HUD bands (top chips, bottom panels, minimap corner)
+      if (p && (p.y < hudTop || p.y > innerHeight - hudBottom || (p.x > innerWidth - 190 && (mobileHud ? p.y < 130 : p.y > innerHeight - 200)))) {
+        if (v.tag.style.transform !== "translate(-9999px, 0px)") v.tag.style.transform = "translate(-9999px, 0px)";
+      } else if (p) v.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
       else if (v.tag.style.transform !== "translate(-9999px, 0px)") v.tag.style.transform = "translate(-9999px, 0px)";
     }
     // off-screen bounty marker
@@ -532,7 +717,18 @@ function frame(now: number) {
 
     // storm effects for the local player
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
-    if (me.alive && phase === "playing" && dx * dx + dy * dy > st.storm.r * st.storm.r) {
+    const outside = me.alive && phase === "playing" && dx * dx + dy * dy > st.storm.r * st.storm.r;
+    safeArrow.visible = outside && watch === 0;
+    if (safeArrow.visible) {
+      const ax = st.storm.cx * U - views[0].pos.x, az = st.storm.cy * U - views[0].pos.z;
+      const yaw = Math.atan2(-ax, -az);
+      safeArrow.rotation.y = yaw;
+      const k = 2.2 + Math.sin(time * 8) * 0.25;
+      const l = Math.hypot(ax, az) || 1;
+      safeArrow.position.set(views[0].pos.x + (ax / l) * k, 0.2, views[0].pos.z + (az / l) * k);
+      (safeArrow.material as THREE.MeshBasicMaterial).opacity = 0.65 + Math.sin(time * 8) * 0.3;
+    }
+    if (outside) {
       stormTickT -= dt;
       if (stormTickT <= 0) { sfx.stormTick(); stormTickT = 1; shake(0.06); }
     } else stormTickT = 0;
@@ -550,7 +746,7 @@ function frame(now: number) {
     camTarget.x += (tx - camTarget.x) * k;
     camTarget.z += (tz - camTarget.z) * k;
 
-    if (phase !== "title") {
+    if (phase !== "title" && !starting) {
       hud.update(match, me, st.fighters[watch]);
       hud.updateHints(controls.used, time - matchStartT);
       miniT -= rdt;
@@ -565,7 +761,7 @@ function frame(now: number) {
     const k = introT / INTRO;
     dist *= 1 + k * k * 1.8;
   }
-  if (phase === "title") {
+  if (phase === "title" || starting) {
     const a = time * 0.06;
     dist = portrait ? 58 * Math.pow(1 / camera.aspect, 0.5) : 58;
     camTarget.set(Math.cos(a) * 4, 0, Math.sin(a) * 4);
@@ -608,7 +804,7 @@ function updateBountyArrow(f: { idx: number } | null) {
       const W = innerWidth, H = innerHeight, mob = W < 720;
       const cx = W / 2, cy = H / 2;
       const dx = x * cx, dy = -y * cy;
-      const left = 34, right = W - (mob ? 34 : 34), top = mob ? 150 : 80, bot = H - (mob ? 210 : 110);
+      const left = 34, right = W - (mob ? 34 : 34), top = mob ? 150 : 80, bot = H - (mob ? 240 : 110);
       let t = 1e9;
       if (dx > 0) t = Math.min(t, (right - cx) / dx);
       if (dx < 0) t = Math.min(t, (left - cx) / dx);
@@ -628,15 +824,20 @@ function updateBountyArrow(f: { idx: number } | null) {
 
 // ------------------------------------------------------------------ boot
 async function boot() {
+  lobbySkeleton($("roster"));
+  void clientP.then(() => refreshLobby());
   const fill = $("loadfill");
   await loadAll((p) => (fill.style.width = `${Math.round(p * 100)}%`));
   hud.icons = makeWeaponIcons(renderer);
-  buildMatch(seedFromUrl());
+  portraits = makePortraits(renderer);
+  hud.portraits = portraits;
+  if (fighters.length) renderLobby($("roster"), fighters, portraits);
+  buildMatch(localStart().cfg);
   const play = $("play") as HTMLButtonElement;
   play.disabled = false;
   play.textContent = "PLAY";
   $("loadfill").parentElement!.classList.add("done");
-  if (SKIP_TITLE || AUTOPLAY) startMatch();
+  if (SKIP_TITLE || AUTOPLAY) void startMatch();
   else play.focus();
 }
 

@@ -345,7 +345,8 @@ export class Fx {
       const ang = Math.atan2(p.vx, p.vy);
       v.g.rotation.y = ang;
       const sp = Math.hypot(p.vx, p.vy) * U;
-      v.trail.scale.set(1, 1, Math.min(4, sp * 1.6));
+      // other fighters' shots get longer tracers so incoming fire is readable
+      v.trail.scale.set(p.owner === 0 ? 1 : 1.3, 1, p.owner === 0 ? Math.min(4, sp * 1.6) : Math.min(6.5, sp * 3));
     }
     for (const v of this.bolts) {
       if (v.id >= 0 && v.seen !== this.frame) {

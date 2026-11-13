@@ -121,6 +121,8 @@ interface ChestView {
   beacon: THREE.Mesh;
   open: boolean;
   t: number; // time since opened
+  mat: THREE.MeshStandardMaterial;
+  pad: THREE.Mesh;
 }
 interface HealView {
   group: THREE.Group;
@@ -163,6 +165,35 @@ const glowTex = (() => {
   return t;
 })();
 export { glowTex };
+const dullCache = new Map<THREE.Material, THREE.MeshStandardMaterial>();
+function dullCrateMat(m: THREE.MeshStandardMaterial) {
+  let d = dullCache.get(m);
+  if (!d) {
+    d = m.clone();
+    d.color.setHex(0x9c8f84);
+    dullCache.set(m, d);
+  }
+  return d;
+}
+function goldChestMat(crate: THREE.Object3D): THREE.MeshStandardMaterial {
+  let mat: THREE.MeshStandardMaterial | null = null;
+  crate.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh) return;
+    mat ??= (m.material as THREE.MeshStandardMaterial).clone();
+    mat.color.setHex(0xffd36a);
+    mat.emissive.setHex(0xb06a00);
+    mat.emissiveIntensity = 0.6;
+    m.material = mat;
+  });
+  return mat!;
+}
+const chestPadGeo = (() => {
+  const g = new THREE.RingGeometry(0.9, 1.25, 6);
+  g.rotateX(-Math.PI / 2);
+  return g;
+})();
+const chestPadMat = new THREE.MeshBasicMaterial({ color: 0xffc93c, transparent: true, opacity: 0.55, depthWrite: false });
 const beamGeo = new THREE.CylinderGeometry(0.12, 0.45, 4, 12, 1, true).translate(0, 2, 0);
 const beamMat = new THREE.MeshBasicMaterial({ color: 0xffc93c, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 
@@ -361,6 +392,13 @@ export class World {
         s = fitScale(name, r) * 1.1;
       }
       const m = model(name);
+      if (o.kind === "crate") {
+        // solid supply crates read as terrain: dull, desaturated wood/stone tint (chests are gold + glowing)
+        m.traverse((x) => {
+          const mm = x as THREE.Mesh;
+          if (mm.isMesh) mm.material = dullCrateMat(mm.material as THREE.MeshStandardMaterial);
+        });
+      }
       m.scale.setScalar(s);
       m.position.set(o.x * U, 0, o.y * U);
       m.rotation.y = (i * 2.399) % (Math.PI * 2);
@@ -477,7 +515,12 @@ export class World {
       crate.scale.setScalar(1.25);
       crate.rotation.y = (c.id * 1.7) % Math.PI;
       let lid: THREE.Object3D | null = null;
+      const mat = goldChestMat(crate);
       crate.traverse((o) => { if (o.name === "lid") lid = o; });
+      const pad = new THREE.Mesh(chestPadGeo, chestPadMat);
+      pad.position.y = 0.12;
+      pad.renderOrder = 2;
+      g.add(pad);
       g.add(crate);
       const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), new THREE.MeshBasicMaterial({ color: PAL.gold }));
       beacon.position.y = 1.5;
@@ -490,9 +533,9 @@ export class World {
       g.add(beam);
       g.position.set(c.x * U, 0, c.y * U);
       this.group.add(g);
-      this.chests[c.id] = { group: g, lid, beacon, open: c.open, t: c.open ? 99 : 0 };
+      this.chests[c.id] = { group: g, lid, beacon, open: c.open, t: c.open ? 99 : 0, mat, pad };
       if (c.open) this.applyOpen(this.chests[c.id], 99);
-      this.owned.push(beacon.geometry, beacon.material as THREE.Material, glow.material);
+      this.owned.push(beacon.geometry, beacon.material as THREE.Material, glow.material, mat);
     }
     for (const h of st.heals) {
       const g = new THREE.Group();
@@ -518,6 +561,8 @@ export class World {
 
   private applyOpen(c: ChestView, t: number) {
     c.beacon.visible = false;
+    c.pad.visible = false;
+    c.mat.emissiveIntensity = 0.1;
     (c.beacon.userData.beam as THREE.Object3D).visible = false;
     if (c.lid) {
       const k = Math.min(1, t / 0.5);
@@ -589,6 +634,8 @@ export class World {
       } else {
         v.beacon.position.y = 1.55 + Math.sin(time * 3 + c.id) * 0.12;
         v.beacon.rotation.y = time * 2;
+        v.mat.emissiveIntensity = 0.55 + Math.sin(time * 4 + c.id) * 0.3;
+        v.pad.rotation.y = time * 0.8;
       }
     }
     // heals

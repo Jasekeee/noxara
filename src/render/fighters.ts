@@ -5,6 +5,7 @@ import type { FighterState, WeaponKind } from "../sim/types";
 import { CHARS, WEAPON_MODEL, gltf, model } from "./assets";
 import { FIGHTER_COLORS, PAL } from "./palette";
 import { WEAPONS } from "../sim/rules";
+import { reloadProgress } from "../ui/hud";
 
 export const CHAR_SCALE = 2.8;
 
@@ -91,6 +92,12 @@ export class FighterView {
   tagAmmo: HTMLElement | null = null;
   private lastHpFrac = -1;
   private tagHidden: HTMLElement | null = null;
+  private tagRl!: HTMLElement;
+  private tagBv: HTMLElement | null = null;
+  private wasRl = false;
+  /** screen-space tag position, set by the game loop */
+  tagX = -9999;
+  tagY = 0;
   private wasHidden = false;
   private holdQ = new THREE.Quaternion();
 
@@ -194,6 +201,17 @@ export class FighterView {
     this.tagHp = document.createElement("i");
     hpb.appendChild(this.tagHp);
     this.tag.appendChild(hpb);
+    const rl = document.createElement("div");
+    rl.className = "rl";
+    this.tagRl = document.createElement("i");
+    rl.appendChild(this.tagRl);
+    this.tag.appendChild(rl);
+    if (f.bounty) {
+      this.tagBv = document.createElement("div");
+      this.tagBv.className = "bv";
+      this.tagBv.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg><span></span>';
+      this.tag.insertBefore(this.tagBv, this.tag.firstChild);
+    }
     tagsEl.appendChild(this.tag);
 
     this.cur.set(f.x / 1000, f.y / 1000);
@@ -280,7 +298,13 @@ export class FighterView {
     this.loco = l;
   }
 
-  update(dt: number, alpha: number, f: FighterState) {
+  setBountyValue(v: number) {
+    if (!this.tagBv) return;
+    const sp = this.tagBv.querySelector("span")!;
+    sp.textContent = v > 0 ? `${Math.round(v * 100) / 100} $BOUNTY` : "BOUNTY";
+  }
+
+  update(dt: number, alpha: number, f: FighterState, tick = 0) {
     const x = this.prev.x + (this.cur.x - this.prev.x) * alpha;
     const z = this.prev.y + (this.cur.y - this.prev.y) * alpha;
     const ox = this.pos.x, oz = this.pos.z;
@@ -342,6 +366,13 @@ export class FighterView {
         this.tagHidden.style.visibility = h ? "visible" : "hidden";
       }
     }
+    const rp = f.alive ? reloadProgress(f, tick) : null;
+    const isRl = rp !== null;
+    if (isRl !== this.wasRl) {
+      this.wasRl = isRl;
+      this.tag.classList.toggle("reloading", isRl);
+    }
+    if (isRl) this.tagRl.style.transform = `scaleX(${rp.toFixed(2)})`;
     const frac = Math.max(0, f.hp / Math.max(1, f.maxHp));
     if (frac !== this.lastHpFrac) {
       this.lastHpFrac = frac;

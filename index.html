@@ -32,13 +32,17 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3l7 7-2 2-7-7zM20 3l-7 7 2 2 7-7zM6.5 13.5l4 4-2.5 2.5-1.5-1.5-2 2-1.5-1.5 2-2L3.5 15.5zM17.5 13.5l-4 4 2.5 2.5 1.5-1.5 2 2 1.5-1.5-2-2 1.5-1.5z" /></svg>
             <b id="kills">0</b><span>kills</span>
           </div>
+          <div class="chip pot hidden" id="pot-chip" title="Prize pot ($BOUNTY) — paid to the winner">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /></svg>
+            <b id="pot">0</b><span>$BOUNTY pot</span>
+          </div>
         </div>
         <div class="hud-tc">
           <div id="storm-chip" class="storm-chip">
             <span class="storm-dot"></span><span id="storm-text">STORM 1</span><b id="match-time">3:00</b>
           </div>
           <div id="storm-warn" class="storm-warn hidden">OUTSIDE THE SAFE ZONE</div>
-          <div id="spec" class="spec hidden"></div>
+          <div id="spec" class="spec hidden"><span id="spec-text"></span><button id="spec-exit" class="spec-exit" aria-label="Leave spectating (Esc)">RESULTS <kbd>Esc</kbd></button></div>
         </div>
         <div class="hud-tr">
           <ol id="feed" aria-live="polite"></ol>
@@ -48,6 +52,7 @@
           <div class="weapon-card">
             <img id="weapon-icon" alt="" width="96" height="48" />
             <div class="weapon-meta">
+              <div id="watch-name" class="watch-name hidden"></div>
               <div id="weapon-name">POPPER</div>
               <div id="ammo" class="ammo"></div>
             </div>
@@ -64,6 +69,8 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke-width="2" stroke-linecap="round" /></svg>
         </button>
         <div id="hitmarker" aria-hidden="true"></div>
+        <div id="dmgdir" aria-hidden="true"></div>
+        <div id="reload-tip" class="reload-tip hidden">Reloading automatically…</div>
         <div id="bounty-arrow" class="hidden" aria-hidden="true" title="Bounty target">
           <div class="tip"></div><div class="ring"></div>
           <svg viewBox="0 0 24 24"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z" /></svg>
@@ -80,12 +87,23 @@
       <section id="title" class="screen" aria-labelledby="logo">
         <div class="title-inner">
           <h1 id="logo" class="logo"><span class="l1">BOUNTY</span><span class="l2">ROYALE</span></h1>
-          <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the bounty.</p>
+          <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the pot.</p>
           <button id="play" class="btn-primary" disabled>LOADING…</button>
           <div class="loadbar" aria-hidden="true"><div id="loadfill"></div></div>
           <p class="hint-line"><span class="kb"><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim · <kbd>click</kbd> shoot · hide in bushes</span><span class="tch">left thumb moves · right thumb aims &amp; shoots</span></p>
         </div>
+        <div class="lobby" aria-labelledby="lobby-title">
+          <div class="lobby-head">
+            <h2 id="lobby-title">TONIGHT'S FIGHTERS</h2>
+            <span id="net-mode" class="net-mode">connecting…</span>
+          </div>
+          <ol id="roster" class="roster" tabindex="0" aria-label="AI fighters and their wallets"></ol>
+        </div>
       </section>
+
+      <div id="dropping" class="dropping hidden" role="status" aria-live="polite">
+        <div class="drop-inner"><div class="drop-spin" aria-hidden="true"></div><b>DROPPING IN</b><span id="drop-sub">sealing the match seed on NEAR…</span></div>
+      </div>
 
       <!-- death / end -->
       <section id="end" class="screen hidden" aria-labelledby="end-title" role="dialog">
@@ -98,9 +116,11 @@
             <div><b id="end-dmg">0</b><span>damage</span></div>
             <div><b id="end-time">0:00</b><span>survived</span></div>
           </div>
+          <div id="ledger" class="ledger"></div>
           <div class="end-btns">
             <button id="again" class="btn-primary">PLAY AGAIN</button>
             <button id="spectate" class="btn-ghost">SPECTATE</button>
+            <button id="to-lobby" class="btn-ghost">FIGHTERS</button>
           </div>
         </div>
       </section>

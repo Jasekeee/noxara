@@ -1,7 +1,8 @@
 // Render each weapon model once into a small transparent PNG (HUD card + kill feed icons).
 import * as THREE from "three";
 import type { WeaponKind } from "../sim/types";
-import { WEAPON_MODEL, model } from "./assets";
+import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
+import { CHARS, WEAPON_MODEL, gltf, model } from "./assets";
 
 export function makeWeaponIcons(renderer: THREE.WebGLRenderer): Record<WeaponKind, string> {
   const W = 192, H = 96;
@@ -51,6 +52,54 @@ export function makeWeaponIcons(renderer: THREE.WebGLRenderer): Record<WeaponKin
   }
   renderer.setRenderTarget(prevTarget);
   renderer.setClearColor(0x000000, prevClear);
+  rt.dispose();
+  return out;
+}
+
+/** Head-and-shoulders portrait of every character (idle pose), as PNG data URLs, indexed like CHARS. */
+export function makePortraits(renderer: THREE.WebGLRenderer): string[] {
+  const S = 160;
+  const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a7aa8, 2.2));
+  const d = new THREE.DirectionalLight(0xfff0d6, 2.2);
+  d.position.set(1.5, 2.5, 3);
+  scene.add(d);
+  const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 20);
+  cam.position.set(0, 0.62, 2.0);
+  cam.lookAt(0, 0.42, 0);
+  const px = new Uint8Array(S * S * 4);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext("2d")!;
+  const out: string[] = [];
+  const prevTarget = renderer.getRenderTarget();
+  const prevAlpha = renderer.getClearAlpha();
+  renderer.setClearColor(0x000000, 0);
+  for (const c of CHARS) {
+    const g = gltf(`chars/${c}`);
+    const body = SkeletonUtils.clone(g.scene);
+    body.rotation.y = -0.35;
+    const mixer = new THREE.AnimationMixer(body);
+    const idle = g.animations.find((a) => a.name === "idle");
+    if (idle) {
+      mixer.clipAction(idle).play();
+      mixer.update(0.4);
+    }
+    scene.add(body);
+    renderer.setRenderTarget(rt);
+    renderer.clear();
+    renderer.render(scene, cam);
+    renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    const img = ctx.createImageData(S, S);
+    for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);
+    ctx.putImageData(img, 0, 0);
+    out.push(canvas.toDataURL("image/png"));
+    scene.remove(body);
+    mixer.stopAllAction();
+  }
+  renderer.setRenderTarget(prevTarget);
+  renderer.setClearColor(0x000000, prevAlpha);
   rt.dispose();
   return out;
 }
