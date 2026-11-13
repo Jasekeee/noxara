@@ -22,6 +22,7 @@ function scriptedHuman(seed: number) {
     if (tick % 7 === 0) {
       const a = rng.below(4096);
       cur = { mx: Math.trunc((icos(a) * 1000) / 1024), my: Math.trunc((isin(a) * 1000) / 1024), aim: rng.below(4096), fire: rng.chance(60) };
+      if (rng.chance(50)) cur.aimDist = rng.range(0, 12000);
     }
     return cur;
   };
@@ -198,6 +199,24 @@ describe("rules", () => {
     expect(m.state.fighters.filter((f) => f.placement === 1).length).toBe(1);
   });
 
+  it("grenades land at Input.aimDist (clamped to max range) and explode", () => {
+    for (const [want, expectD] of [[4000, 4600], [undefined, 9600], [50000, 9600], [200, 1600]] as const) {
+      const m = createMatch({ seed: 21, fighters: allHuman() });
+      const f = m.state.fighters[0];
+      f.x = 0; f.y = 0; f.weapon = "grenade"; f.ammo = 3;
+      for (const o of m.state.fighters) if (o.idx !== 0) { o.x = 30000; o.y = 0; }
+      m.map.obstacles.length = 0;
+      const inp: Input = { mx: 0, my: 0, aim: 0, fire: true };
+      if (want !== undefined) inp.aimDist = want;
+      let boom: SimEvent | undefined;
+      for (let i = 0; i < 30 && !boom; i++) {
+        boom = m.step(new Map([[0, i === 0 ? inp : { mx: 0, my: 0, aim: 0, fire: false }]])).find((e) => e.t === "explode");
+      }
+      expect(boom && boom.t === "explode").toBe(true);
+      if (boom && boom.t === "explode") expect(Math.abs(boom.x - expectD)).toBeLessThan(150);
+    }
+  });
+
   it("walking into a chest opens it and gives its weapon with full ammo", () => {
     const m = createMatch({ seed: 55, fighters: allHuman() });
     const c = m.state.chests[0];
@@ -275,7 +294,8 @@ describe("rules", () => {
     let hit: SimEvent | undefined;
     for (let i = 0; i < 10 && !hit; i++) hit = m.step(new Map([[0, { mx: 0, my: 0, aim: 0, fire: true }]])).find((e) => e.t === "hit");
     expect(hit && hit.t === "hit" && hit.who).toBe(1);
-    if (hit && hit.t === "hit") expect(hit.dmg).toBe(hit.crit ? 18 - 4 : 12 - 4);
+    const base = WEAPONS.popper.dmg;
+    if (hit && hit.t === "hit") expect(hit.dmg).toBe((hit.crit ? Math.trunc((base * 3) / 2) : base) - 4);
     const h = m.state.heals[0];
     b.hp = 90;
     b.x = h.x; b.y = h.y;
