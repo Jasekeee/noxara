@@ -97,6 +97,8 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
   "Lv N" badge in the lobby and HUD. Human skins 10–14 = female-c, male-d, female-f, male-g, soldier.
 - `?mock` fills the T3 client API locally (sign-in, market, history, leaderboards) for screen work only.
 
-## Screenshots (`docs/screens/`, JPEG q82, desktop 1440×900 + mobile 390×844)
-lobby-{desktop,mobile} · match-{desktop,mobile} · explosion-desktop · ledger-{desktop,mobile} ·
-fighters-{desktop,mobile} · sponsor-{desktop,mobile} · levelup-{desktop,mobile}
+## Screenshots (`docs/screens/`, JPEG q78, desktop 1440×900 + mobile 390×844, ~0.95 MB total)
+Refreshed after the NOXARA rename (2026-11-13):
+title-{desktop,mobile} (offline guest) · lobby-{desktop,mobile} (live wallets, NOX balances) · match-{desktop,mobile} ·
+ledger-{desktop,mobile} (testnet match, verified, NOX pot/bounty/house/burn) · fighters-{desktop,mobile} · sponsor-{desktop,mobile}.
+Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~109 KB).
