@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-13T20:01:25.898Z",
+  "generatedAt": "2026-11-13T20:46:09.834Z",
   "matches": 10000,
   "runs": 20,
   "seed": 1,
@@ -17,7 +17,6 @@
     "MAX_HOUSE_BPS": 1500,
     "BOUNTY_BPS": 1500,
     "BOUNTY_BONUS": 5,
-    "M_MIN_BPS": 5000,
     "M_MAX_BPS": 15000,
     "HOUSE_TARGET": 1000,
     "HOUSE_FLOOR": 500,
