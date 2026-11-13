@@ -12,10 +12,12 @@
 //    grenade 40 (→50 % at edge) r2.5u, lobbed to Input.aimDist (1..9 u, 0.1 u steps; absent = 9 u) over
 //    obstacles, fuse 16 t or on touching an enemy, 3 shots cd20 rl50; owners are immune to their grenades.
 //    Crit 8 % ×1.5. Weapon tier: +10 % dmg and −10 % reload time per tier; armor −2 per hit per level (min 1).
+//  - Reload: empty magazine -> weapon reload time (readyTick); a partly used one refills fully after
+//    1.2 s without firing (rules.ts IDLE_RELOAD; HUD progress from lastShotTick).
 //  - Regen: after 2.5 s without being hurt or shooting, +5 hp every 0.5 s (10 hp/s).
 //  - Bush stealth: hidden unless viewer ≤2.5 u, target shot ≤20 ticks ago, or was hurt ≤10 ticks ago.
-//  - Storm: 6 phases (rules.ts STORM_PHASES): 32 → 22 → 15 → 9.5 → 5.5 → 2.5 → 0 u, dps 5/8/11/14/18/24
-//    (applied every 10 ticks as ceil(dps/2), ignores armor). Storm hits emit "hit" with by = -1.
+//  - Storm: 6 phases (rules.ts STORM_PHASES): 32 → 22 → 15 → 9.5 → 5.5 → 2.5 → 0 u, dps 3/5/8/11/15/22
+//    (applied every 10 ticks as ceil(dps/2), ignores armor; none during the first 1 s outside). Storm hits emit "hit" with by = -1.
 //    Shrinks (s): 30–50, 75–95, 112–127, 137–150, 155–166 (2.5 u), 169–177 (closed). Each phase is
 //    announced (event "storm") when the previous one ends; the new centre drifts ≤70 % of the slack.
 //    state.storm.tx/ty = centre of the circle it is shrinking toward.
@@ -58,6 +60,8 @@ import {
   REGEN_HP,
   SPEED,
   STORM_EVERY,
+  STORM_GRACE,
+  IDLE_RELOAD,
   STORM_PHASES,
   WEAPONS,
   WEAPON_ORDER,
@@ -123,6 +127,7 @@ export function createMatch(cfg: MatchConfig): Match {
   let nextProj = 1;
   const lastBy: number[] = new Array(FIGHTERS).fill(-1); // last damager idx (-2 = storm)
   const lastWeapon: WeaponKind[] = new Array(FIGHTERS).fill("popper");
+  const stormOut: number[] = new Array(FIGHTERS).fill(-1); // tick each fighter stepped out of the zone
   const tiers: number[] = cfg.fighters.map((f) => f.upgrades.weaponTier);
   let fromCx = 0, fromCy = 0, fromR = map.radius;
 
@@ -349,11 +354,16 @@ export function createMatch(cfg: MatchConfig): Match {
       storm.cx = fromCx + Math.trunc(((storm.tx - fromCx) * k) / dur);
       storm.cy = fromCy + Math.trunc(((storm.ty - fromCy) * k) / dur);
     }
+    for (const f of fighters) {
+      const out = f.alive && dist2(f.x, f.y, storm.cx, storm.cy) > storm.r * storm.r;
+      if (!out) stormOut[f.idx] = -1;
+      else if (stormOut[f.idx] < 0) stormOut[f.idx] = t;
+    }
     if (t % STORM_EVERY === 0 && storm.dps > 0) {
       const amt = Math.trunc((storm.dps + 1) / 2);
       for (const f of fighters) {
         if (!f.alive) continue;
-        if (dist2(f.x, f.y, storm.cx, storm.cy) > storm.r * storm.r) {
+        if (dist2(f.x, f.y, storm.cx, storm.cy) > storm.r * storm.r && t - stormOut[f.idx] >= STORM_GRACE) {
           f.hp -= amt;
           f.lastHurtTick = t;
           ev.push({ t: "hit", who: f.idx, by: -1, dmg: amt, crit: false, x: f.x, y: f.y });
@@ -456,7 +466,9 @@ export function createMatch(cfg: MatchConfig): Match {
     // 3. Weapons (auto reload when empty).
     for (const f of fighters) {
       if (!f.alive) continue;
-      if (f.ammo === 0 && t >= f.readyTick) f.ammo = WEAPONS[f.weapon].mag;
+      const mag = WEAPONS[f.weapon].mag;
+      if (f.ammo === 0 && t >= f.readyTick) f.ammo = mag;
+      else if (f.ammo > 0 && f.ammo < mag && t - f.lastShotTick >= IDLE_RELOAD) f.ammo = mag; // idle reload
       if (inputs[f.idx].fire && t >= f.readyTick && f.ammo > 0) fire(f, f.aim, aimDistQ(inputs[f.idx].aimDist), ev);
     }
     stepProjectiles(ev);
@@ -498,7 +510,7 @@ export function createMatch(cfg: MatchConfig): Match {
     put(fromCx); put(fromCy); put(fromR);
     put(state.alive); bool(state.over); put(state.winner ?? -1);
     put(rng.s); put(nextProj);
-    for (let i = 0; i < FIGHTERS; i++) put(lastBy[i]);
+    for (let i = 0; i < FIGHTERS; i++) { put(lastBy[i]); put(stormOut[i]); }
     return h1.toString(16).padStart(8, "0") + h2.toString(16).padStart(8, "0");
   }
 

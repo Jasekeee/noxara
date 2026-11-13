@@ -16,7 +16,10 @@ export const HEAL_AMOUNT = 35;
 export const BULLET_R = 150;
 
 export const N_OBSTACLES = 18;
-export const N_CHESTS = 9;
+/** 1 central chest + 1 near each spawn */
+export const N_CHESTS = 11;
+/** every spawn has a chest within this distance (FP) */
+export const CHEST_NEAR_SPAWN = 6 * FP;
 export const N_HEALS = 6;
 
 /** Bush stealth: visible anyway within this distance, or this long after shooting / being hurt. */
@@ -102,15 +105,24 @@ export interface StormPhase {
 }
 const S = 20;
 export const STORM_PHASES: StormPhase[] = [
-  { announce: 1, shrinkStart: 30 * S, shrinkEnd: 50 * S, r: 22 * FP, dps: 5 },
-  { announce: 50 * S, shrinkStart: 75 * S, shrinkEnd: 95 * S, r: 15 * FP, dps: 8 },
-  { announce: 95 * S, shrinkStart: 112 * S, shrinkEnd: 127 * S, r: 9500, dps: 11 },
-  { announce: 127 * S, shrinkStart: 137 * S, shrinkEnd: 150 * S, r: 5500, dps: 14 },
-  { announce: 150 * S, shrinkStart: 155 * S, shrinkEnd: 166 * S, r: 2500, dps: 18 },
-  { announce: 166 * S, shrinkStart: 169 * S, shrinkEnd: 177 * S, r: 0, dps: 24 },
+  { announce: 1, shrinkStart: 30 * S, shrinkEnd: 50 * S, r: 22 * FP, dps: 3 },
+  { announce: 50 * S, shrinkStart: 75 * S, shrinkEnd: 95 * S, r: 15 * FP, dps: 5 },
+  { announce: 95 * S, shrinkStart: 112 * S, shrinkEnd: 127 * S, r: 9500, dps: 8 },
+  { announce: 127 * S, shrinkStart: 137 * S, shrinkEnd: 150 * S, r: 5500, dps: 11 },
+  { announce: 150 * S, shrinkStart: 155 * S, shrinkEnd: 166 * S, r: 2500, dps: 15 },
+  { announce: 166 * S, shrinkStart: 169 * S, shrinkEnd: 177 * S, r: 0, dps: 22 },
 ];
 /** Storm damage is applied every STORM_EVERY ticks (= dps / 2, rounded up). */
 export const STORM_EVERY = 10;
+/** stepping out of the safe zone: no storm damage for the first STORM_GRACE ticks (1 s) */
+export const STORM_GRACE = 20;
+
+/**
+ * Idle reload (Brawl-Stars-like): a partly used magazine refills completely once the fighter has not
+ * fired for IDLE_RELOAD ticks (1.2 s). Progress for the HUD = (tick - lastShotTick) / IDLE_RELOAD while
+ * 0 < ammo < mag. An EMPTY magazine reloads until readyTick (the weapon's reload time).
+ */
+export const IDLE_RELOAD = 24;
 
 /** The sim's storm object carries the target centre too (tx, ty) so the renderer/AI can draw/plan it. */
 export type StormX = Storm & { tx: number; ty: number };

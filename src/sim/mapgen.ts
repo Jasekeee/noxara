@@ -1,7 +1,7 @@
 // Seeded island generation: obstacles, bushes, chests, heals and spawns. Pure + deterministic.
 import { FIGHTERS, type Bush, type Chest, type Heal, type MapData, type Obstacle, type ObstacleKind, type WeaponKind } from "./types";
-import { FP, Rng, dist2, icos, isin, mixSeed } from "./fixed";
-import { CHEST_LOOT, FIGHTER_R, HEAL_AMOUNT, ISLAND_R, N_CHESTS, N_HEALS, N_OBSTACLES, SPAWN_RING } from "./rules";
+import { FP, Rng, dist2, icos, isin, isqrt, mixSeed } from "./fixed";
+import { CHEST_LOOT, CHEST_NEAR_SPAWN, FIGHTER_R, HEAL_AMOUNT, ISLAND_R, N_CHESTS, N_HEALS, N_OBSTACLES, SPAWN_RING } from "./rules";
 
 export interface GeneratedWorld {
   map: MapData;
@@ -82,15 +82,16 @@ export function generateWorld(seed: number): GeneratedWorld {
     }
   };
 
-  // Chests: one in the middle, the rest spread in sectors on an inner ring so every spawn has loot
-  // nearby (early game = looting, not a brawl in the centre).
-  const placeNear = (cx: number, cy: number, spread: number): { x: number; y: number } => {
-    for (let tries = 0; tries < 400; tries++) {
-      const sp = spread + Math.trunc(tries / 40) * 1000;
+  // Chests: one in the middle + one per spawn, 3–6 u from it toward the centre, so every fighter
+  // (a new player too) has loot right next to its spawn and the opening isn't a brawl for chests.
+  const placeNear = (cx: number, cy: number, spread: number, home: { x: number; y: number } | null): { x: number; y: number } => {
+    for (let tries = 0; tries < 600; tries++) {
+      const sp = spread + Math.trunc(tries / 60) * 500;
       const x = cx + rng.range(-sp, sp), y = cy + rng.range(-sp, sp);
       if (x * x + y * y > sq(R - 4 * FP)) continue;
+      if (home && dist2(home.x, home.y, x, y) > sq(CHEST_NEAR_SPAWN)) continue;
       if (obstacles.some((o) => dist2(o.x, o.y, x, y) < sq(o.r + FIGHTER_R + 1200))) continue;
-      if (items.some((q) => dist2(q.x, q.y, x, y) < sq(4 * FP))) continue;
+      if (items.some((q) => dist2(q.x, q.y, x, y) < sq(tries < 300 ? 4 * FP : 2 * FP))) continue;
       if (spawns.some((s) => dist2(s.x, s.y, x, y) < sq(3 * FP))) continue;
       items.push({ x, y });
       return { x, y };
@@ -100,11 +101,12 @@ export function generateWorld(seed: number): GeneratedWorld {
   const chests: Chest[] = [];
   for (let i = 0; i < N_CHESTS; i++) {
     let p: { x: number; y: number };
-    if (i === 0) p = placeNear(0, 0, 2500);
+    if (i === 0) p = placeNear(0, 0, 2500, null);
     else {
-      const a = rot + Math.trunc(((2 * i - 1) * 4096) / (2 * (N_CHESTS - 1)));
-      const rr = rng.range(14 * FP, 21 * FP);
-      p = placeNear(Math.trunc((icos(a) * rr) / 1024), Math.trunc((isin(a) * rr) / 1024), 2000);
+      const s = spawns[(i - 1) % FIGHTERS];
+      const d = isqrt(s.x * s.x + s.y * s.y) || 1;
+      const k = 4500;
+      p = placeNear(s.x - Math.trunc((s.x * k) / d), s.y - Math.trunc((s.y * k) / d), 1200, s);
     }
     chests.push({ id: i, x: p.x, y: p.y, open: false, weapon: pickLoot(rng) });
   }

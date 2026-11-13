@@ -6,7 +6,7 @@ import { Recorder, replayRecord } from "./record";
 import { botOnlyRoster, t1Roster } from "./roster";
 import { botInput } from "./ai";
 import { simulateBots } from "./headless";
-import { FIGHTER_R, WEAPONS } from "./rules";
+import { CHEST_NEAR_SPAWN, FIGHTER_R, IDLE_RELOAD, N_CHESTS, STORM_GRACE, WEAPONS } from "./rules";
 
 const NONE = new Map<number, Input>();
 
@@ -196,7 +196,9 @@ describe("map generation", () => {
       expect(map.spawns.length).toBe(FIGHTERS);
       expect(map.obstacles.length).toBeGreaterThanOrEqual(15);
       expect(map.bushes.length).toBeGreaterThanOrEqual(12);
-      expect(m.state.chests.length).toBe(9);
+      expect(m.state.chests.length).toBe(N_CHESTS);
+      // fairness: a lootable chest within 6 u of every spawn
+      for (const sp of map.spawns) expect(m.state.chests.some((c) => dist2(c.x, c.y, sp.x, sp.y) <= CHEST_NEAR_SPAWN ** 2)).toBe(true);
       expect(m.state.heals.length).toBe(6);
       for (const s of map.spawns) {
         expect(s.x * s.x + s.y * s.y).toBeLessThan((map.radius - FIGHTER_R) ** 2);
@@ -253,6 +255,45 @@ describe("rules", () => {
       expect(boom && boom.t === "explode").toBe(true);
       if (boom && boom.t === "explode") expect(Math.abs(boom.x - expectD)).toBeLessThan(150);
     }
+  });
+
+  it("a partly used magazine refills after IDLE_RELOAD ticks without firing; an empty one after the reload", () => {
+    const m = createMatch({ seed: 31, fighters: allHuman() });
+    const f = m.state.fighters[0];
+    const fire = (on: boolean) => m.step(new Map([[0, { mx: 0, my: 0, aim: 0, fire: on }]]));
+    fire(true);
+    expect(f.ammo).toBe(WEAPONS.popper.mag - 1);
+    const shotAt = f.lastShotTick;
+    while (m.state.tick < shotAt + IDLE_RELOAD - 1) fire(false);
+    expect(f.ammo).toBe(WEAPONS.popper.mag - 1);
+    fire(false);
+    expect(f.ammo).toBe(WEAPONS.popper.mag);
+    // empty the magazine: refills at readyTick (reload), not earlier
+    for (let i = 0; i < 200 && f.ammo > 0; i++) fire(true);
+    expect(f.ammo).toBe(0);
+    const ready = f.readyTick;
+    expect(ready - m.state.tick).toBe(WEAPONS.popper.reload);
+    while (m.state.tick < ready - 1) fire(false);
+    expect(f.ammo).toBe(0);
+    fire(false);
+    expect(f.ammo).toBe(WEAPONS.popper.mag);
+  });
+
+  it("storm: no damage during the first second outside, then damage", () => {
+    const m = createMatch({ seed: 32, fighters: allHuman() });
+    const f = m.state.fighters[0];
+    while (m.state.storm.r >= m.map.radius - 2000) m.step(NONE); // wait for phase 1 to shrink a bit
+    // stand still outside the zone (spawn ring is 24 u, shrinking circle passes it eventually)
+    let firstOut = -1, firstHit = -1;
+    for (let i = 0; i < 2000 && firstHit < 0 && f.alive; i++) {
+      const st = m.state.storm;
+      const outside = dist2(f.x, f.y, st.cx, st.cy) > st.r * st.r;
+      const ev = m.step(NONE);
+      if (outside && firstOut < 0) firstOut = m.state.tick;
+      if (ev.some((e) => e.t === "hit" && e.who === 0 && e.by === -1)) firstHit = m.state.tick;
+    }
+    expect(firstOut).toBeGreaterThan(0);
+    expect(firstHit - firstOut).toBeGreaterThanOrEqual(STORM_GRACE - 1);
   });
 
   it("walking into a chest opens it and gives its weapon with full ammo", () => {
