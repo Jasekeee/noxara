@@ -379,32 +379,42 @@ fn expired_matches_are_swept_by_anyone() {
     assert_eq!(bal(&c, ME), 0);
     assert!(c.get_fighters().iter().all(|f| f.balance.0 == STARTER && f.fighter.escrowed.0 == 0));
     assert_eq!(c.get_player(acc(ALICE)).unwrap().pending, None);
-    assert!(c.pending.is_empty());
+    assert!(c.pending_free.is_empty() && c.pending_paid == 0);
     assert_supply(&c);
 }
 
 #[test]
-fn pending_matches_are_capped_and_lazily_swept() {
-    // review fix #2: unbounded pending matches can't drain the bots
+fn free_matches_are_capped_and_lazily_swept_but_never_block_paid_play() {
+    // review fixes #2 + DoS: free matches have their own capped pool with a short expiry
     let mut c = setup();
-    for i in 0..MAX_PENDING {
+    ctx("owner.test", 150, NearToken::from_yoctonear(0));
+    c.set_max_free(5);
+    for i in 0..5 {
         let who = format!("g-{i:04}.relay.test");
         ctx(RELAY, 150, STORAGE_DEPOSIT);
         c.storage_deposit(Some(acc(&who)), None);
         start(&mut c, &who, 200);
     }
-    assert_eq!(c.pending.len(), MAX_PENDING);
+    assert_eq!(c.pending_free.len(), 5);
     ctx(RELAY, 150, STORAGE_DEPOSIT);
     c.storage_deposit(Some(acc("g-late.relay.test")), None);
     ctx("g-late.relay.test", 300, NearToken::from_yoctonear(0));
     let full = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let _ = c.start_match();
     }));
-    assert!(full.is_err(), "the island is full");
-    // once the oldest expire, the next start sweeps them itself
-    let s = start(&mut c, "g-late.relay.test", 200 + EXPIRY_BLOCKS + 1);
+    assert!(full.is_err(), "the free pool is full");
+    // a paying player still gets in
+    let house = c.house.clone();
+    c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
+    let s = start(&mut c, ALICE, 301);
+    assert_eq!(s.player_paid.0, ENTRY_FEE);
+    assert_eq!(c.pending_paid, 1);
+    // once the oldest free ones expire, the next free start sweeps them itself
+    let s = start(&mut c, "g-late.relay.test", 200 + EXPIRY_FREE_BLOCKS + 1);
     assert!(s.seed > 0);
-    assert_eq!(c.pending.len(), MAX_PENDING - 1, "two expired swept, one added");
+    assert_eq!(c.pending_free.len(), 3, "three expired swept, one added");
+    // the paid match (longer expiry) was not swept
+    assert_eq!(c.pending_paid, 1);
     assert_supply(&c);
 }
 

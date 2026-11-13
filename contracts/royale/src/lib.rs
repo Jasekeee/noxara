@@ -9,12 +9,15 @@
 //! * The match is played off-chain with the deterministic TS simulation (`src/sim`).
 //! * `settle_match` (ONLY the match-server account, after it re-ran the recorded match): pays the
 //!   pot, the bounty, updates records, then runs the bot economy (upgrades, retirements, rookies).
-//! * Lazy expiry: a match never settled can be swept by anyone after `EXPIRY_BLOCKS` (start_match
-//!   also sweeps the oldest expired ones). Starting a new match abandons the player's previous one.
+//! * Lazy expiry: a match never settled can be swept by anyone after its expiry (`EXPIRY_BLOCKS`
+//!   for paid matches, the shorter `EXPIRY_FREE_BLOCKS` for free ones; start_match also sweeps the
+//!   oldest expired free ones). Starting a new match abandons the player's previous one.
 //!   Bots' entries are always refunded; once the seed is fixed the PLAYER's entry is forfeited to
 //!   the house and the match counts as a loss (no free option on a seed you didn't like).
-//! * At most `MAX_PENDING` matches are unsettled at once (one per player), and a bot whose wallet is
-//!   low only because its entries sit in escrow is never retired for it.
+//! * One unsettled match per player. Free matches (guests, players without $BOUNTY) share a capped
+//!   pool (`max_free`, default `MAX_PENDING_FREE`) so they can't lock anyone out of paid play; paid
+//!   matches have their own, much larger cap (`MAX_PENDING_PAID`) and cost the player an entry.
+//!   A bot whose wallet is low only because its entries sit in escrow is never retired for it.
 //! * Only a real (non-guest) player who paid the entry can win the pot or a bounty; otherwise that
 //!   share goes to the house.
 //!
@@ -52,10 +55,14 @@ pub const ARMOR_PRICES: [u128; 2] = [160 * ONE, 320 * ONE];
 pub const SKIN_PRICE: u128 = 150 * ONE;
 pub const SKINS: u8 = 12;
 
-/// ~10 minutes at ~1 block/s; a match lasts 3 minutes.
-pub const EXPIRY_BLOCKS: u64 = 600;
-/// Unsettled matches at once (each one escrows an entry from every bot).
-pub const MAX_PENDING: usize = 64;
+/// ~12-20 minutes (testnet blocks are ~0.6-1 s); a match lasts 3 minutes.
+pub const EXPIRY_BLOCKS: u64 = 1_200;
+/// Free matches recycle faster (a match is 3 minutes of play).
+pub const EXPIRY_FREE_BLOCKS: u64 = 500;
+/// Default cap on unsettled FREE matches (guests / players who paid nothing); owner-adjustable.
+pub const MAX_PENDING_FREE: u32 = 100;
+/// Cap on unsettled PAID matches (each one costs its player an entry that is forfeited if abandoned).
+pub const MAX_PENDING_PAID: u32 = 1_000;
 /// Most the owner can hand out from the house treasury per `house_grant` call.
 pub const MAX_GRANT: u128 = 100 * ONE;
 pub const RECENT_MATCHES: usize = 50;
@@ -303,8 +310,11 @@ pub struct ConfigView {
     pub armor_prices: Vec<U128>,
     pub skin_price: U128,
     pub expiry_blocks: u64,
-    pub pending_matches: u32,
-    pub max_pending: u32,
+    pub expiry_free_blocks: u64,
+    pub pending_free: u32,
+    pub max_free: u32,
+    pub pending_paid: u32,
+    pub max_paid: u32,
     pub storage_deposit: NearToken,
     pub block_height: U64,
 }
@@ -328,8 +338,11 @@ pub struct Contract {
     matches: LookupMap<u64, VMatch>,
     /// settled match ids, oldest first (bounded: older settled matches are pruned)
     recent: Vec<u64>,
-    /// unsettled match ids, oldest first (at most `MAX_PENDING`)
-    pending: Vec<u64>,
+    /// unsettled FREE match ids, oldest first (at most `max_free`)
+    pending_free: Vec<u64>,
+    max_free: u32,
+    /// number of unsettled PAID matches
+    pending_paid: u32,
     leaderboard: LazyOption<Vec<LeaderEntry>>,
     next_match_id: u64,
     matches_settled: u64,
@@ -359,7 +372,9 @@ impl Contract {
             players: LookupMap::new(Key::Players),
             matches: LookupMap::new(Key::Matches),
             recent: vec![],
-            pending: vec![],
+            pending_free: vec![],
+            max_free: MAX_PENDING_FREE,
+            pending_paid: 0,
             leaderboard: LazyOption::new(Key::Leaderboard, Some(vec![])),
             next_match_id: 1,
             matches_settled: 0,
@@ -404,21 +419,27 @@ impl Contract {
         let mut p = self
             .load_player(&id)
             .unwrap_or_else(|| env::panic_str("register first: storage_deposit (guests: the relayer prepays it)"));
-        self.sweep_expired(2);
+        self.sweep_expired(3);
         // one live match per player: starting again abandons the previous one (bots refunded; the
         // player's entry is forfeited once the seed was fixed)
         if let Some(old) = p.pending {
             self.close_unsettled(old.0, "abandoned");
             p = self.load_player(&id).unwrap();
         }
-        require!(self.pending.len() < MAX_PENDING, "the island is full: try again in a minute");
         let guest = self.is_guest(&id);
+        // free and paid matches have separate pools: free players can never crowd out paying ones
+        let will_pay = !guest && self.balance(&id) >= ENTRY_FEE;
+        if will_pay {
+            require!(self.pending_paid < MAX_PENDING_PAID, "too many paid matches in flight: try again in a minute");
+        } else {
+            require!((self.pending_free.len() as u32) < self.max_free, "the free island is full: try again in a minute");
+        }
         let me = env::current_account_id();
         let entropy = env::random_seed_array();
         let mut pot = 0u128;
         // a real player pays the entry if they can (guests never pay and never win)
         let mut player_paid = 0u128;
-        if !guest && self.balance(&id) >= ENTRY_FEE {
+        if will_pay {
             self.token.internal_transfer(&id, &me, ENTRY_FEE, Some("match entry".into()));
             player_paid = ENTRY_FEE;
             pot += ENTRY_FEE;
@@ -471,7 +492,11 @@ impl Contract {
             pot: U128(pot),
             result: None,
         });
-        self.pending.push(match_id);
+        if will_pay {
+            self.pending_paid += 1;
+        } else {
+            self.pending_free.push(match_id);
+        }
         p.pending = Some(U64(match_id));
         self.save_player(&id, p);
         event("match_start", &near_sdk::serde_json::json!({ "match_id": U64(match_id), "player": id, "guest": guest, "pot": U128(pot), "bounty_idx": bounty_idx }));
@@ -625,9 +650,9 @@ impl Contract {
         event("match_settled", &near_sdk::serde_json::json!({ "match_id": match_id, "winner": winner, "input_log_hash": result.input_log_hash, "result_hash": result.result_hash }));
         m.status = MatchStatus::Settled;
         m.result = Some(result.clone());
+        self.unlist_pending(&m);
         self.save_match(m);
         self.matches_settled += 1;
-        self.pending.retain(|x| *x != match_id.0);
         self.recent.push(match_id.0);
         if self.recent.len() > RECENT_MATCHES {
             let old = self.recent.remove(0);
@@ -640,7 +665,7 @@ impl Contract {
     /// are refunded, the player's is forfeited to the house if the seed was fixed, nothing is minted.
     pub fn sweep_match(&mut self, match_id: U64) -> bool {
         let Some(m) = self.load_match(match_id.0) else { return false };
-        if m.status != MatchStatus::Pending || env::block_height() <= m.start_block.0 + EXPIRY_BLOCKS {
+        if m.status != MatchStatus::Pending || env::block_height() <= m.start_block.0 + expiry_of(&m) {
             return false;
         }
         self.close_unsettled(match_id.0, "expired");
@@ -660,6 +685,13 @@ impl Contract {
     }
 
     // ------------------------------------------------------------------ admin
+
+    /// Owner: size of the free-match pool (paid matches are never affected).
+    pub fn set_max_free(&mut self, max_free: u32) {
+        require!(env::predecessor_account_id() == self.owner, "owner only");
+        require!(max_free <= MAX_PENDING_FREE * 4, "too large");
+        self.max_free = max_free;
+    }
 
     pub fn set_server(&mut self, server: AccountId) {
         require!(env::predecessor_account_id() == self.owner, "owner only");
@@ -743,8 +775,11 @@ impl Contract {
             armor_prices: ARMOR_PRICES.iter().map(|p| U128(*p)).collect(),
             skin_price: U128(SKIN_PRICE),
             expiry_blocks: EXPIRY_BLOCKS,
-            pending_matches: self.pending.len() as u32,
-            max_pending: MAX_PENDING as u32,
+            expiry_free_blocks: EXPIRY_FREE_BLOCKS,
+            pending_free: self.pending_free.len() as u32,
+            max_free: self.max_free,
+            pending_paid: self.pending_paid,
+            max_paid: MAX_PENDING_PAID,
             storage_deposit: STORAGE_DEPOSIT,
             block_height: U64(env::block_height()),
         }
@@ -883,20 +918,28 @@ impl Contract {
             }
             self.save_player(&m.player, p);
         }
-        self.pending.retain(|x| *x != match_id);
+        self.unlist_pending(&m);
         self.matches.remove(&match_id);
         event("match_closed", &near_sdk::serde_json::json!({ "match_id": U64(match_id), "reason": why, "seeded": seeded, "player_forfeited": if seeded { m.player_paid } else { U128(0) } }));
     }
 
-    /// Lazy expiry: close up to `n` of the oldest unsettled matches that have expired.
+    fn unlist_pending(&mut self, m: &MatchV1) {
+        if m.player_paid.0 > 0 {
+            self.pending_paid = self.pending_paid.saturating_sub(1);
+        } else {
+            self.pending_free.retain(|x| *x != m.id.0);
+        }
+    }
+
+    /// Lazy expiry: close up to `n` of the oldest unsettled FREE matches that have expired.
     fn sweep_expired(&mut self, n: usize) {
         for _ in 0..n {
-            let Some(&id) = self.pending.first() else { return };
+            let Some(&id) = self.pending_free.first() else { return };
             match self.load_match(id) {
-                Some(m) if env::block_height() <= m.start_block.0 + EXPIRY_BLOCKS => return,
+                Some(m) if env::block_height() <= m.start_block.0 + expiry_of(&m) => return,
                 Some(_) => self.close_unsettled(id, "expired"),
                 None => {
-                    self.pending.remove(0);
+                    self.pending_free.remove(0);
                 }
             }
         }
@@ -996,6 +1039,10 @@ impl Contract {
         lb.truncate(LEADERBOARD_SIZE);
         self.leaderboard.set(Some(lb));
     }
+}
+
+fn expiry_of(m: &MatchV1) -> u64 {
+    if m.player_paid.0 > 0 { EXPIRY_BLOCKS } else { EXPIRY_FREE_BLOCKS }
 }
 
 /// Only a real (non-guest) player who paid the entry can win the pot or a bounty.

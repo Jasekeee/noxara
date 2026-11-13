@@ -262,3 +262,30 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     assert_eq!(meta["symbol"], "BOUNTY");
     Ok(())
 }
+
+#[tokio::test]
+async fn full_free_pool_never_blocks_a_paying_player() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    wd.owner.call(c.id(), "set_max_free").args_json(json!({"max_free": 2})).transact().await?.into_result()?;
+    let g1 = guest(&wd, "g-0001").await?;
+    let g2 = guest(&wd, "g-0002").await?;
+    let g3 = guest(&wd, "g-0003").await?;
+    start(&g1, c).await?;
+    start(&g2, c).await?;
+    let r = g3.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("free island is full"));
+    // a paying player is unaffected
+    let alice = wd.w.root_account()?.create_subaccount("alice").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    alice.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": alice.id(), "amount": (20 * ONE).to_string()})).transact().await?.into_result()?;
+    let (s, _) = start(&alice, c).await?;
+    assert_eq!(s["player_paid"], (10 * ONE).to_string());
+    let cfg: Value = c.view("get_config").await?.json()?;
+    assert_eq!((cfg["pending_free"].as_u64(), cfg["pending_paid"].as_u64()), (Some(2), Some(1)));
+    // settling a free match frees its slot
+    let (r, _) = settle(&wd.server, c, &json!("1"), 3, None).await?;
+    r.map_err(anyhow::Error::msg)?;
+    start(&g3, c).await?;
+    Ok(())
+}
