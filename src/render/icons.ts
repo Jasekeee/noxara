@@ -96,6 +96,7 @@ export async function makePortraits(renderer: THREE.WebGLRenderer, names: string
     ctx.putImageData(img, 0, 0);
     out.push(canvas.toDataURL("image/png"));
     scene.remove(body);
+    await new Promise((r) => setTimeout(r, 0));
     mixer.stopAllAction();
   }
   renderer.setRenderTarget(prevTarget);

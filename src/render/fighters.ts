@@ -50,6 +50,9 @@ const crownGeo = (() => {
 const crownMat = new THREE.MeshStandardMaterial({ color: PAL.gold, emissive: 0xb07000, emissiveIntensity: 0.6, metalness: 0.2, roughness: 0.35, side: THREE.DoubleSide });
 const gemGeo = new THREE.OctahedronGeometry(0.09, 0);
 const gemMat = new THREE.MeshBasicMaterial({ color: 0xff3d6e });
+const shieldGeo = new THREE.IcosahedronGeometry(1.15, 2);
+const shieldMat = new THREE.MeshBasicMaterial({ color: 0x7ff6ff, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false });
+const shieldEdgeMat = new THREE.MeshBasicMaterial({ color: 0xbffcff, transparent: true, opacity: 0.35, wireframe: true, depthWrite: false });
 const aimGeo = (() => {
   const g = new THREE.PlaneGeometry(0.22, 1, 1, 1);
   g.translate(0, 0.5, 0);
@@ -296,6 +299,35 @@ export class FighterView {
     to.reset().play();
     from.crossFadeTo(to, 0.18, true);
     this.loco = l;
+  }
+
+  private shield: THREE.Group | null = null;
+  private shieldK = 0;
+  /** spawn-protection bubble (pops when it ends) */
+  setShield(on: boolean, time: number) {
+    if (on && !this.shield) {
+      this.shield = new THREE.Group();
+      this.shield.add(new THREE.Mesh(shieldGeo, shieldMat), new THREE.Mesh(shieldGeo, shieldEdgeMat));
+      this.shield.position.y = 1.0;
+      this.shield.renderOrder = 6;
+      this.root.add(this.shield);
+      this.shieldK = 1;
+    }
+    if (!this.shield) return;
+    if (on) {
+      const p = 1 + Math.sin(time * 6 + this.idx) * 0.04;
+      this.shield.scale.set(p, p * 1.12, p);
+      this.shield.rotation.y = time * 0.6;
+    } else {
+      this.shieldK -= 0.06;
+      const k = Math.max(0, this.shieldK);
+      this.shield.scale.setScalar(1 + (1 - k) * 0.6);
+      this.shield.visible = k > 0;
+      if (k <= 0) {
+        this.shield.removeFromParent();
+        this.shield = null;
+      }
+    }
   }
 
   setBountyValue(v: number) {

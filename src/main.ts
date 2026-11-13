@@ -5,7 +5,7 @@ import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
-import { WEAPONS } from "./sim/rules";
+import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
 import { HUMAN_SKIN_IDS, charFor, loadAll } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
@@ -22,7 +22,7 @@ import { Pages } from "./ui/pages";
 import { levelBadge, localXp, renderXp, setLocalXp } from "./ui/progress";
 import { levelProgress, upgradesForLevel, xpForMatch } from "./sim/progression";
 import type { MatchConfig } from "./sim/types";
-import { lobbySkeleton, renderLobby } from "./ui/lobby";
+import { diffLines, loadSnap, lobbySkeleton, renderLobby, saveSnap, type Snap } from "./ui/lobby";
 import { renderLedger } from "./ui/ledger";
 import { fmt } from "./ui/dom";
 
@@ -38,6 +38,9 @@ const SPEED = Math.max(0.25, Math.min(16, Number(params.get("speed") ?? 1) || 1)
 const $ = (id: string) => document.getElementById(id)!;
 
 // ------------------------------------------------------------------ renderer + scene
+// Let the title paint first, and keep GPU probing / context creation in their own short tasks.
+const yieldTask = () => new Promise<void>((r) => setTimeout(r, 0));
+await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const canvas = $("view") as HTMLCanvasElement;
 // Software rasterizers (SwiftShader / llvmpipe, e.g. headless CI or blocklisted GPUs) start in low quality.
 const SOFTWARE_GL = (() => {
@@ -52,6 +55,7 @@ const SOFTWARE_GL = (() => {
     return false;
   }
 })();
+await yieldTask();
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: !SOFTWARE_GL, powerPreference: "high-performance" });
 const FORCED_Q = params.has("q") ? Math.max(0, Math.min(4, Number(params.get("q")) || 0)) : -1;
 const BASE_DPR = Math.min(2, devicePixelRatio || 1);
@@ -150,7 +154,8 @@ let spectating = false;
 let matchStartT = 0;
 let stormTickT = 0;
 let introT = 0;
-const INTRO = 1.6;
+const INTRO = 1.0;
+let countShown = -1;
 let lastAmmo = -1;
 let myKillTimes: number[] = [];
 const humanInput: Input = { mx: 0, my: 0, aim: 0, fire: false };
@@ -203,6 +208,7 @@ async function refreshLobby() {
   const mode = $("net-mode");
   if (!c) {
     mode.textContent = "offline practice";
+    await refreshAccount();
     return;
   }
   const list = await withTimeout(c.fighters(), 8000);
@@ -217,8 +223,43 @@ async function refreshLobby() {
   const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
   mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
   mode.classList.toggle("chain", c.mode === "chain");
-  if (fighters.length && portraits.length) renderLobby($("roster"), fighters, portraits);
+  if (fighters.length && portraits.length) renderLobby($("roster"), fighters, portraits, prevSnap);
+  renderTicker();
+  rebuildPreview();
   await refreshAccount();
+}
+
+// ------------------------------------------------------------------ lobby change feed
+let prevSnap: Snap | null = loadSnap();
+let lastSettleLines: string[] | null = null;
+function settleLines(r: SettleResult): string[] {
+  const out: string[] = [];
+  const prize = r.payouts.find((p) => p.reason === "prize");
+  if (prize) out.push(`${prize.name} won ${fmt(prize.amount)}`);
+  for (const p of r.payouts.filter((x) => x.reason === "bounty")) out.push(`${p.name} claimed a ${fmt(p.amount)} bounty`);
+  for (const n of r.retired) out.push(`${n} went broke`);
+  for (const n of r.rookies) out.push(`${n} joined as a rookie`);
+  for (const u of r.upgrades) out.push(`${u.name} bought ${/^armou?r/i.test(u.what) ? "armor" : /^weapon/i.test(u.what) ? "a weapon upgrade" : u.what}`);
+  return out;
+}
+function renderTicker() {
+  const lines = lastSettleLines ?? diffLines(prevSnap, fighters);
+  $("ticker").classList.toggle("hidden", !lines.length);
+  $("ticker-text").textContent = lines.join(" · ");
+}
+addEventListener("pagehide", () => saveSnap(fighters));
+
+/** Title-screen island: in chain mode the fighters walking around are tonight's real roster. */
+function rebuildPreview() {
+  if (phase !== "title" || starting || !fighters.length || !portraits.length || !client || client.mode !== "chain") return;
+  const active = fighters.filter((f) => f.status === "active").sort((a, b) => a.slot - b.slot);
+  if (active.length !== 9) return;
+  const cfg = localStart().cfg;
+  if (match) cfg.seed = match.cfg.seed; // keep the same island, just swap in the live fighters
+  active.forEach((f, i) => {
+    cfg.fighters[i + 1] = { id: f.account, name: f.name, personality: f.personality, human: false, upgrades: { ...f.upgrades }, bounty: f.bounty };
+  });
+  buildMatch(cfg);
 }
 
 // ------------------------------------------------------------------ account / level
@@ -227,7 +268,8 @@ async function refreshAccount() {
   const c = client;
   const t3 = isT3(c) && c.mode === "chain";
   const guest = !c || c.isGuest();
-  $("signin").classList.toggle("hidden", !t3 || !guest);
+  // the sign-in entry is always offered to guests in chain mode (it explains itself if wallets aren't live yet)
+  $("signin").classList.toggle("hidden", !c || c.mode !== "chain" || !guest);
   $("acct-chip").classList.toggle("hidden", !t3 || guest);
   $("nav-sponsor").classList.toggle("hidden", !t3);
   if (t3 && !guest) {
@@ -242,7 +284,10 @@ async function refreshAccount() {
 }
 async function signIn() {
   const c = client;
-  if (!isT3(c)) return;
+  if (!isT3(c)) {
+    toast("NEAR wallet sign-in opens with the next island update — until then you play as a guest (no tokens).");
+    return;
+  }
   const btn = $("signin") as HTMLButtonElement;
   btn.disabled = true;
   try {
@@ -336,6 +381,10 @@ async function startMatch() {
   starting = true;
   endOpen = false;
   iClaimedBounty = false;
+  if (fighters.length) {
+    saveSnap(fighters);
+    prevSnap = loadSnap();
+  }
   phase = "playing"; // the drop-in is part of the match flow (tick stays 0 until the island is built)
   sfx.start();
   sfx.ui();
@@ -356,6 +405,7 @@ async function startMatch() {
   phase = "playing";
   matchStartT = time;
   introT = INTRO;
+  countShown = -1;
   myKillTimes = [];
   lastAmmo = -1;
   const st = current;
@@ -614,6 +664,7 @@ function stepSim() {
         .then((r) => {
           if (current !== cur) return;
           settleState = r;
+          if (r.verified) lastSettleLines = settleLines(r);
           if (endShown) drawLedger();
           void refreshLobby();
         })
@@ -654,6 +705,7 @@ function drawLedger() {
     portraits,
     explorerTx: (h) => client?.explorerTx(h) ?? "#",
     explorerAccount: (a) => client?.explorerAccount(a) ?? "#",
+    onSignIn: () => void signIn().then(() => drawLedger()),
   });
 }
 
@@ -770,11 +822,7 @@ function frame(now: number) {
 
   if (introT > 0) {
     introT -= rdt;
-    if (introT <= 0) {
-      hud.popup("GO!");
-      sfx.ui();
-      matchStartT = time;
-    }
+    if (introT <= 0) matchStartT = time;
   }
   if (match && (phase === "playing" || phase === "over") && introT <= 0 && !starting) {
     acc += dt * SPEED;
@@ -798,6 +846,18 @@ function frame(now: number) {
     }
     if (meDeadAt >= 0 && !endShown && time - meDeadAt > 1.8 && !AUTOPLAY) showEnd(false);
 
+    // spawn protection: shield bubbles + 3-2-1-GO aligned with the sim's SPAWN_PROTECT window
+    const prot = st.tick <= SPAWN_PROTECT && phase === "playing" && !starting;
+    if (phase === "playing" && !starting && introT <= 0) {
+      const n = st.tick > SPAWN_PROTECT ? 0 : Math.max(1, Math.ceil((SPAWN_PROTECT - st.tick + 1) / TICK_HZ));
+      if (n !== countShown) {
+        if (countShown !== -1 || n > 0) {
+          if (n > 0) { hud.popup(String(n), "count"); sfx.countTick(false); }
+          else if (countShown > 0) { hud.popup("GO!"); sfx.countTick(true); }
+        }
+        countShown = n;
+      }
+    }
     // fighters
     const mobileHud = innerWidth <= 720 || controls.touchMode;
     const hudTop = mobileHud ? 140 : 92;
@@ -806,6 +866,7 @@ function frame(now: number) {
     for (const f of st.fighters) {
       const v = views[f.idx];
       v.update(dt, alpha, f, st.tick);
+      v.setShield(prot && f.alive, time);
       const vis = f.idx === 0 || !f.alive || canSeeNow(f.idx) || v.dead;
       v.root.visible = vis && !(v.dead && v.deadT > 1.9);
       if (!vis && f.alive && v.speed > 0.5) rustlers.push(v.pos);
@@ -864,13 +925,13 @@ function frame(now: number) {
       hud.update(match, me, st.fighters[watch]);
       hud.updateHints(controls.used, time - matchStartT);
       miniT -= rdt;
-      if (miniT <= 0) { hud.minimap(match, 0, visibleNow); miniT = 0.1; }
+      if (miniT <= 0) { hud.minimap(match, 0, visibleNow); miniT = 0.05; }
     }
   }
 
   // camera placement
   const portrait = camera.aspect < 1;
-  let dist = CAM_DIST || (portrait ? 25 * Math.pow(1 / camera.aspect, 0.5) : 25);
+  let dist = CAM_DIST || (portrait ? 25 * Math.pow(1 / camera.aspect, 0.5) * 1.3 : 25);
   if (introT > 0) {
     const k = introT / INTRO;
     dist *= 1 + k * k * 1.8;
@@ -889,6 +950,9 @@ function frame(now: number) {
     camera.position.set(camTarget.x + shakeOff.x, Math.sin(PITCH) * dist + shakeOff.y, camTarget.z + Math.cos(PITCH) * dist + shakeOff.z);
     camera.lookAt(camLook.x + shakeOff.x * 0.5, 0, camLook.z + shakeOff.z * 0.5);
   }
+  const fog = scene.fog as THREE.Fog;
+  fog.near = Math.max(48, dist + 14);
+  fog.far = fog.near + 70;
   sun.position.set(camTarget.x + 12, 30, camTarget.z + 8);
   sun.target.position.set(camTarget.x, 0, camTarget.z);
 
@@ -896,7 +960,7 @@ function frame(now: number) {
   fx.update(dt, alpha, time);
   hud.updateFloaters(rdt, project);
   const t1 = performance.now();
-  renderer.render(scene, camera);
+  if (sceneReady) renderer.render(scene, camera);
   const t2 = performance.now();
   cpuMs += (t1 - t0 - cpuMs) * 0.05;
   gpuMs += (t2 - t1 - gpuMs) * 0.05;
@@ -937,23 +1001,35 @@ function updateBountyArrow(f: { idx: number } | null) {
 }
 
 // ------------------------------------------------------------------ boot
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+let sceneReady = false;
 async function boot() {
   lobbySkeleton($("roster"));
   void clientP.then(() => refreshLobby());
   const fill = $("loadfill");
   await loadAll((p) => (fill.style.width = `${Math.round(p * 100)}%`));
-  hud.icons = await makeWeaponIcons(renderer);
-  portraits = await makePortraits(renderer);
-  skinPortraits = await makePortraits(renderer, HUMAN_SKIN_IDS.map((id) => charFor(0, id)));
-  hud.portraits = portraits;
-  if (fighters.length) renderLobby($("roster"), fighters, portraits);
+  await nextFrame();
   buildMatch(localStart().cfg);
+  await nextFrame();
+  // compile shaders without blocking the main thread (KHR_parallel_shader_compile when available)
+  await renderer.compileAsync(scene, camera).catch(() => undefined);
+  sceneReady = true;
+  await nextFrame();
   const play = $("play") as HTMLButtonElement;
   play.disabled = false;
   play.textContent = "PLAY";
   $("loadfill").parentElement!.classList.add("done");
   if (SKIP_TITLE || AUTOPLAY) void startMatch();
   else play.focus();
+  // after first paint: HUD icons and portraits, one small chunk per frame
+  hud.icons = await makeWeaponIcons(renderer);
+  await nextFrame();
+  portraits = await makePortraits(renderer);
+  hud.portraits = portraits;
+  if (fighters.length) renderLobby($("roster"), fighters, portraits, prevSnap);
+  rebuildPreview();
+  await nextFrame();
+  skinPortraits = await makePortraits(renderer, HUMAN_SKIN_IDS.map((id) => charFor(0, id)));
 }
 
 if (E2E) {

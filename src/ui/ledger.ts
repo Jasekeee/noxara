@@ -15,6 +15,7 @@ export interface LedgerInput {
   portraits: string[];
   explorerTx: (h: string) => string;
   explorerAccount: (a: string) => string;
+  onSignIn?: () => void;
 }
 
 function link(text: string, href: string): HTMLAnchorElement {
@@ -59,7 +60,8 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   const failed = s0 !== null && s0 !== "pending" && !s0.verified && s0.payouts.length === 0;
   const s = failed ? null : s0;
   if (s === "pending" || s === null) {
-    row(ICON.coin, s === "pending" ? `Pot → ${wName}` : `Pot (unsettled) → ${wName}`, L.start.pot, "pot");
+    // never guess the payee before the chain says so (guests' wins go to the house, for example)
+    row(ICON.coin, s === "pending" ? "Pot — pending settlement…" : "Pot — not settled", L.start.pot, "pot");
     if (L.start.bountyIdx !== null && L.start.bountyValue > 0) {
       const bi = L.start.bountyIdx;
       row(ICON.crown, L.placements[bi] === 1 ? `${L.names[bi]} kept the bounty` : `Bounty on ${L.names[bi]}`, L.start.bountyValue, "bounty");
@@ -69,7 +71,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     else el.appendChild(h("p", "lg-note warn", "Not settled on chain this time — the server could not verify the match. Wallets are unchanged."));
   } else {
     const prize = s.payouts.find((p) => p.reason === "prize") ?? s.payouts.find((p) => p.reason === "house" && p.amount > 0);
-    if (prize) row(ICON.coin, `Pot → ${prize.name}`, prize.amount, "pot");
+    if (prize) row(ICON.coin, prize.reason === "house" ? (w === 0 && L.guest ? "Pot → the House (guests play for glory)" : `Pot → ${prize.name}`) : `Pot → ${prize.name}`, prize.amount, "pot");
     for (const p of s.payouts.filter((x) => x.reason === "bounty")) row(ICON.crown, `Bounty claimed by ${p.name}`, p.amount, "bounty");
     if (!s.payouts.some((x) => x.reason === "bounty") && L.start.bountyIdx !== null) {
       const carrier = L.names[L.start.bountyIdx];
@@ -89,7 +91,11 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     if (s.verified) el.appendChild(h("div", "lg-verified", undefined, icon(ICON.check), h("span", "", "Verified — the server replayed every input and got the same result")));
   }
 
-  if (L.guest) el.appendChild(h("p", "lg-note", "Guests play for glory — sign in with NEAR to earn $BOUNTY."));
+  if (L.guest) {
+    const btn = h("button", "btn-near wide", undefined, h("span", "", "Sign in with NEAR"), h("small", "", "next time this pot could be yours"));
+    if (L.onSignIn) btn.addEventListener("click", L.onSignIn);
+    el.appendChild(h("div", "lg-signin", undefined, h("p", "lg-note", "Guests play for glory — sign in with NEAR to earn $BOUNTY."), btn));
+  }
 
   // explorer drawer
   const det = h("details", "lg-near");
@@ -99,6 +105,12 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   if (s && s !== "pending" && s.tx) box.appendChild(link("settle_match tx", L.explorerTx(s.tx)));
   if (w !== null && w > 0 && L.accounts[w]) box.appendChild(link(`${wName}'s wallet`, L.explorerAccount(L.accounts[w])));
   if (L.start.bountyIdx !== null && L.accounts[L.start.bountyIdx]) box.appendChild(link(`${L.names[L.start.bountyIdx]}'s wallet`, L.explorerAccount(L.accounts[L.start.bountyIdx])));
+  // one link per account / tx
+  const seen = new Set<string>();
+  for (const a of [...box.querySelectorAll("a")]) {
+    if (seen.has(a.href)) a.remove();
+    else seen.add(a.href);
+  }
   if (box.children.length) {
     det.appendChild(box);
     el.appendChild(det);
