@@ -90,3 +90,7 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
 - Progression: cyan XP bar on the end card (fills, level tile pops, "LEVEL N!" banner + 5-note arpeggio, unlock lines);
   "Lv N" badge in the lobby and HUD. Human skins 10–14 = female-c, male-d, female-f, male-g, soldier.
 - `?mock` fills the T3 client API locally (sign-in, market, history, leaderboards) for screen work only.
+
+## Screenshots (`docs/screens/`, JPEG q82, desktop 1440×900 + mobile 390×844)
+lobby-{desktop,mobile} · match-{desktop,mobile} · explosion-desktop · ledger-{desktop,mobile} ·
+fighters-{desktop,mobile} · sponsor-{desktop,mobile} · levelup-{desktop,mobile}

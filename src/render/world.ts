@@ -211,14 +211,18 @@ export class World {
   /** callback for burst particles: (x, z, kind) */
   onBurst: (x: number, z: number, kind: "chest" | "heal") => void = () => {};
 
-  constructor(private match: Match) {
+  private lazyParts = false;
+  /** lazy: build bushes + decor later with finish() (keeps the boot task short) */
+  constructor(private match: Match, lazy = false) {
     const map = match.map;
     this.radius = map.radius * U;
     const seed = match.cfg.seed;
     this.buildIsland(map, seed);
     this.buildObstacles(map);
-    this.buildBushes(map, seed);
-    this.buildDecor(map, seed);
+    if (!lazy) {
+      this.buildBushes(map, seed);
+      this.buildDecor(map, seed);
+    } else this.lazyParts = true;
     this.buildPickups();
     if (new URLSearchParams(location.search).has("debugcol")) {
       const mk = (x: number, y: number, r: number, c: number) => {
@@ -302,6 +306,16 @@ export class World {
     this.nextRing.renderOrder = 4;
     this.group.add(this.nextRing);
     this.owned.push(wallGeo, wallMat, gGeo, gMat, ringGeo, this.nextRing.material as THREE.Material);
+  }
+
+  async finish() {
+    if (!this.lazyParts) return;
+    this.lazyParts = false;
+    const y = () => new Promise<void>((r) => setTimeout(r, 0));
+    await y();
+    this.buildBushes(this.match.map, this.match.cfg.seed);
+    await y();
+    this.buildDecor(this.match.map, this.match.cfg.seed);
   }
 
   private buildIsland(map: MapData, seed: number) {
