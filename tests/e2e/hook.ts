@@ -28,15 +28,58 @@ export async function requireHook(page: Page, timeout = 20_000): Promise<void> {
 
 export const phase = (page: Page) => page.evaluate(() => window.__br!.phase());
 
-/** Collects console errors and uncaught page errors from the moment it is attached. */
+/** Hosts the client talks to in chain mode (relayer, NEAR RPC, wallet). */
+const CHAIN_HOSTS = [
+  new URL(process.env.BR_RELAYER ?? "http://127.0.0.1:8788").host,
+  "test.rpc.fastnear.com",
+  "rpc.testnet.near.org",
+  "testnet.mynearwallet.com",
+];
+const isChainUrl = (u: string) => {
+  try {
+    return CHAIN_HOSTS.includes(new URL(u).host);
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Collects console errors and uncaught page errors from the moment it is attached. Console errors
+ * caused by a request that `isolateFromChain` blocked are the known offline fallback and are not counted
+ * (those attempts are reported separately); every other error is.
+ */
 export function collectErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on("console", (m) => {
-    if (m.type() === "error") errors.push(`console.error: ${m.text()}`);
+    if (m.type() !== "error") return;
+    if (isChainUrl(m.location().url)) return;
+    errors.push(`console.error: ${m.text()}`);
   });
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
   return errors;
 }
+
+/**
+ * Non-chain specs must never depend on the relayer / testnet (rate limits and latency made them flaky).
+ * Blocks those hosts and returns the URLs the page tried to reach (expected: none with ?seed / ?offline).
+ */
+export async function isolateFromChain(page: Page): Promise<string[]> {
+  const attempts: string[] = [];
+  await page.route(
+    (url) => isChainUrl(url.href),
+    (route) => {
+      attempts.push(`${route.request().method()} ${route.request().url()}`);
+      return route.abort("internetdisconnected");
+    },
+  );
+  return attempts;
+}
+
+/**
+ * URL for an offline, deterministic page: `?offline` (client never touches the network) plus `?seed=7`,
+ * which already means "local match, no network" in builds that predate `?offline`.
+ */
+export const offlineUrl = (extra = "") => `/?e2e&offline&seed=7${extra ? `&${extra}` : ""}`;
 
 export async function hasHorizontalScroll(page: Page): Promise<boolean> {
   return page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth);

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { phase, requireHook } from "./hook";
+import { isolateFromChain, offlineUrl, phase, requireHook } from "./hook";
 
 // Headless Chromium without a GPU renders WebGL in software, so numbers are pessimistic.
 // Real-hardware target is 60 FPS; set BR_MIN_FPS=45 (or 55) on a machine with a GPU.
@@ -7,7 +7,8 @@ const MIN_FPS = Number(process.env.BR_MIN_FPS ?? 30);
 
 test("perf: average fps over 5 s of play", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop", "fps budget is measured on the desktop project only");
-  await page.goto("/?e2e&autoplay&seed=7&bots=1");
+  await isolateFromChain(page);
+  await page.goto(offlineUrl("autoplay&bots=1"));
   await requireHook(page);
   await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("playing");
   await page.waitForTimeout(2_000); // let shaders compile / assets settle

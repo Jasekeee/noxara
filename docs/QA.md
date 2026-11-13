@@ -27,7 +27,7 @@ around 3 slots × 10 %), so the gate uses 300.
 | E2E (Playwright) | `npx playwright test` (= `npm run test:e2e`) | see below | client test hook (`?e2e`, Agent A) |
 | Checkpoint media | dev server running, then `node tools/capture.ts [--seconds 45] [--until-over] [--headed]` | `docs/screens/`: desktop title + 5 s / 20 s / 40 s screenshots, `match-desktop.webm` (1440×900), mobile 390×844 title + in-play | dev server on 5184, client |
 | Lighthouse | see below | performance ≥80, accessibility ≥95 (CLAUDE.md gates) | production build |
-| axe (WCAG A/AA) | `npx playwright test a11y` | no axe violations on title and in-match HUD | **dependency request:** `@axe-core/playwright@4.14.0` (devDependency) — the test skips until installed |
+| axe (WCAG A/AA) | `npx playwright test a11y` | no axe violations on title and in-match HUD | `@axe-core/playwright@4.14.0` (installed) |
 
 ## Determinism suite (`tests/unit/determinism.test.ts`)
 - Same `MatchConfig` run twice → identical `hash()` every 100 ticks and at the end (scripted human, and
@@ -49,7 +49,11 @@ taken when `state.tick === t`, and run until `state.over` (cap `MATCH_TICKS`).
 
 ## E2E (`tests/e2e/`, projects `desktop` 1440×900 and `mobile` Pixel 7 at 390×844)
 Playwright starts `npx vite --host 127.0.0.1 --port 5184 --strictPort` itself, or reuses one already running.
-Every test waits up to 20 s for `window.__br`; if the client doesn't expose it, the test is **skipped**
+**Non-chain specs never touch the network:** they load `/?e2e&offline&seed=7…` (`?seed` already means
+"local match, no network"; `?offline` is the explicit switch) and `isolateFromChain()` aborts any request
+to the relayer / NEAR RPC / wallet hosts and asserts there were none. Console errors from such a blocked
+request are the only errors tolerated; any other console or page error fails the test. Only
+`chain.spec.ts` (opt-in) talks to testnet. Every test waits up to 20 s for `window.__br`; if the client doesn't expose it, the test is **skipped**
 with "window.__br test hook missing" (that is the state before Agent A's merge).
 - `match.spec.ts` — `/?e2e&autoplay&seed=7&bots=1` reaches `phase() === "over"` within 240 s,
   `placement()` is 1..10, `record()` is exposed, zero console errors / page errors, no horizontal scroll.
@@ -71,7 +75,12 @@ with "window.__br test hook missing" (that is the state before Agent A's merge).
 - `a11y.spec.ts` — axe WCAG 2.0/2.1 A+AA on title and HUD (needs `@axe-core/playwright@4.14.0`).
 
 `BR_PORT=5186` runs Playwright's own dev server on another port (default 5184, e.g. when a judge is
-playing there). Run one project: `npx playwright test --project=desktop`. HTML report: `npx playwright show-report`.
+playing there). Run one project: `npx playwright test --project=desktop`.
+
+**Stability (2026-11-13 17:32–17:48 UTC, main d288401, `BR_PORT=5186`):** whole suite 3× in a row,
+desktop + mobile: **11 passed / 3 skipped each run, 0 failures, 0 flakes** (skips = chain ×2 opt-in,
+perf on mobile). Match always ends at tick 2725, placement 2 (deterministic seed 7); desktop fps avg
+55.0 / 54.8 / 53.6 (min 36–42) headless. HTML report: `npx playwright show-report`.
 
 ## Lighthouse (13.6.0, desktop + mobile)
 ```sh
@@ -89,24 +98,30 @@ CHROME_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
 and prints the scores with PASS/FAIL against accessibility ≥95 and performance ≥80. Use
 `BR_URL=http://127.0.0.1:5186` for a preview on another port.
 
-### Results (2026-11-13 16:40 UTC, main d0425f9, `vite preview` on 5186, page `/`, 3 runs)
+### Results (2026-11-13 17:50 UTC, main d288401, `vite preview` on 5186, page `/`, 3 runs back to back)
 | | Performance | Accessibility | Best practices |
 |---|---|---|---|
-| Desktop | **76** / 100 / 100 | 100 | 96 |
-| Mobile | 88 / 81 / 92 | 100 | 96 |
+| Desktop | **70** / 100 / 100 | 100 | 96 |
+| Mobile | 83 / 99 / 99 | 100 | 96 |
 
-- **Flag:** performance is noisy around the gate: desktop dipped to 76 (<80) once, mobile to 81. The cost is
-  almost all **Total Blocking Time** (0–480 ms): ~1.9 s of script evaluation in the 793 KB (215 KB gzip)
-  main bundle right after load, as 3 long tasks (534 / 207 / 159 ms on desktop) — model parsing, portrait
-  rendering and building the first match / shader compile on the main thread during boot. Next: yield
-  between those steps (`await` a frame or `scheduler.yield()` between loading, portraits and `buildMatch`),
-  or defer portraits/`buildMatch` until after first paint.
-- Mobile CLS 0.106 (score 0.88): the `.lobby` roster grows when the chain fighters arrive — reserve its
-  height up front.
-- Payload 3.4 MB: ten character `.glb` files of ~255–267 KB each lead the list (fine for a game; could be
-  compressed with meshopt/Draco).
-- Best practices 96 = console errors, which here come only from the QA port: the relayer refuses CORS
-  from 5186, so on 5184 that audit should pass. LCP 0.2–0.8 s, FCP 0.8 s are good.
+| Run | Desktop TBT · LCP · CLS | Mobile TBT · LCP · CLS |
+|---|---|---|
+| 1 (first after the preview server started) | 1,240 ms · 0.5 s · 0 | 630 ms · 2.0 s · 0.045 |
+| 2 | 0 ms · 0.2 s · 0 | 80 ms · 0.8 s · 0.04 |
+| 3 | 0 ms · 0.2 s · 0 | 120 ms · 0.8 s · 0.04 |
+
+- **Flag:** warm runs are well over the gate (desktop 100, mobile 99; much better than d0425f9's 76–100 /
+  81–92 thanks to the chunked boot and CLS reservations). The **first run after the server starts** still
+  fails desktop (70): Total Blocking Time 1.24 s, i.e. boot-time script work in the 828 KB (226 KB gzip)
+  bundle (model parsing, shader compile, first `buildMatch`) landing as long tasks on a cold cache. If a
+  judge's first load matters: split three.js + game code from the lobby, or start `compileAsync`/`buildMatch`
+  after first input / `requestIdleCallback`.
+- Mobile CLS is down to 0.04 (was 0.106).
+- Best practices 96 = console errors that exist only on the QA port: the relayer refuses CORS from 5186
+  (`/api/health` blocked). On 5184 this audit should pass.
+- Accessibility 100 on every run.
+
+### Earlier (16:40 UTC, d0425f9): desktop 76 / 100 / 100, mobile 88 / 81 / 92, a11y 100, BP 96.
 
 ## Checkpoint (18:00 UTC) recipe
 ```sh
@@ -119,7 +134,6 @@ node tools/make-record.ts && npm run verify-match demo-1     # verifiable match
 ```
 
 ## Requests to the lead
-- devDependency `@axe-core/playwright@4.14.0` (axe test). Still not installed: README says `test:e2e`
-  includes "axe a11y" but the a11y spec currently SKIPs.
+- (done) `@axe-core/playwright@4.14.0` is installed; the a11y spec runs and passes.
 - There is no `@types/node`; `tools/node-shim.d.ts` declares the few Node APIs the tools use. If the lead
   adds `@types/node`, delete the shim (they would conflict).
