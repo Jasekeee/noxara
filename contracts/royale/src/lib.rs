@@ -41,17 +41,19 @@ pub const BOTS: usize = 9;
 
 /// 1 $BOUNTY (18 decimals).
 pub const ONE: u128 = 1_000_000_000_000_000_000;
-pub const ENTRY_FEE: u128 = 10 * ONE;
-pub const POT_TOP_UP: u128 = 20 * ONE;
+// Economy constants tuned with scripts/econ-sim.ts against docs/balance.json (200 matches: ~1
+// retirement per 17-25 matches, the strongest bot reaches weapon tier 2 around match 10-13).
+pub const ENTRY_FEE: u128 = 4 * ONE;
+pub const POT_TOP_UP: u128 = 30 * ONE;
 pub const BURN_BPS: u128 = 200; // 2% of every pot is burned
 pub const HOUSE_BPS: u128 = 500; // 5% of every pot goes to the house treasury
-pub const BOUNTY_BPS: u128 = 2_500; // killing the bounty carrier takes 25% of its wallet
+pub const BOUNTY_BPS: u128 = 1_500; // killing the bounty carrier takes 15% of its wallet
 pub const STARTER: u128 = 100 * ONE; // genesis wallet of each bot; rookie grant (from the house)
 pub const HOUSE_GENESIS: u128 = 2_000 * ONE;
 /// A bot only buys an upgrade if it keeps at least this much afterwards.
-pub const RESERVE: u128 = 40 * ONE;
-pub const WEAPON_PRICES: [u128; 2] = [120 * ONE, 240 * ONE];
-pub const ARMOR_PRICES: [u128; 2] = [160 * ONE, 320 * ONE];
+pub const RESERVE: u128 = 50 * ONE;
+pub const WEAPON_PRICES: [u128; 2] = [60 * ONE, 120 * ONE];
+pub const ARMOR_PRICES: [u128; 2] = [90 * ONE, 180 * ONE];
 pub const SKIN_PRICE: u128 = 150 * ONE;
 pub const SKINS: u8 = 12;
 
@@ -77,17 +79,18 @@ pub const NPC_NEAR: NearToken = NearToken::from_millinear(1);
 const GAS_RESOLVE: Gas = Gas::from_tgas(10);
 
 pub const PERSONALITIES: [&str; 6] = ["aggressive", "camper", "sniper", "looter", "coward", "balanced"];
-/// The genesis nine (names match the client roster; personalities are the bots' play styles).
+/// The genesis nine for a fresh deploy (= src/sim/roster.ts t1Roster(); skins slot + 1). The live
+/// testnet contract was created with an earlier nine (Bramble, Ox, ...) and kept them on migration.
 pub const GENESIS: [(&str, &str, &str); BOTS] = [
-    ("bramble", "Bramble", "camper"),
-    ("ox", "Ox", "aggressive"),
-    ("pip", "Pip", "coward"),
-    ("vex", "Vex", "sniper"),
-    ("moss", "Moss", "looter"),
-    ("juno", "Juno", "balanced"),
-    ("rook", "Rook", "aggressive"),
-    ("tink", "Tink", "looter"),
-    ("sable", "Sable", "sniper"),
+    ("brindle", "Brindle", "aggressive"),
+    ("quillon", "Quillon", "camper"),
+    ("vesper", "Vesper", "sniper"),
+    ("magpie", "Magpie", "looter"),
+    ("tallow", "Tallow", "coward"),
+    ("dorrit", "Dorrit", "balanced"),
+    ("zinnia", "Zinnia", "aggressive"),
+    ("okapi", "Okapi", "camper"),
+    ("fenwick", "Fenwick", "balanced"),
 ];
 pub const ROOKIE_NAMES: [&str; 24] = [
     "ash", "bolt", "clove", "dash", "ember", "fizz", "gale", "hex", "ivy", "jinx", "kit", "lark", "nyx", "onyx", "pep",
@@ -395,7 +398,7 @@ impl Contract {
                 name: name.to_string(),
                 personality: personality.to_string(),
                 slot: slot as u8,
-                upgrades: Upgrades { weapon_tier: 0, armor: 0, skin: slot as u8 },
+                upgrades: Upgrades { weapon_tier: 0, armor: 0, skin: slot as u8 + 1 },
                 record: Record::default(),
                 active: true,
                 generation: 0,

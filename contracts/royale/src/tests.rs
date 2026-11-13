@@ -97,7 +97,8 @@ fn genesis() {
     let fs = c.get_fighters();
     assert_eq!(fs.len(), BOTS);
     assert!(fs.iter().all(|f| f.balance.0 == STARTER && f.status == "active" && f.fighter.generation == 0));
-    assert_eq!(fs[0].fighter.account.as_str(), "bramble.royale.test");
+    assert_eq!(fs[0].fighter.account.as_str(), "brindle.royale.test");
+    assert_eq!(fs[0].fighter.upgrades.skin, 1, "skins match t1Roster");
     assert_eq!(c.balance(&c.house), HOUSE_GENESIS);
     assert_eq!(c.token.total_supply, HOUSE_GENESIS + 9 * STARTER);
     assert!(c.is_guest(&acc(GUEST)));
@@ -248,7 +249,10 @@ fn bounty_is_paid_to_the_killer() {
     assert_eq!(r.bounty_amount.0, before * BOUNTY_BPS / 10_000);
     assert_eq!(r.bounty_to.as_ref().map(|a| a.as_str()), Some(killer.as_str()));
     assert_eq!(bal(&c, &carrier), before - r.bounty_amount.0);
-    assert_eq!(bal(&c, &killer), STARTER - ENTRY_FEE + r.bounty_amount.0);
+    // the killer may immediately spend its windfall on its first upgrade
+    let k = STARTER - ENTRY_FEE + r.bounty_amount.0;
+    let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
+    assert_eq!(bal(&c, &killer), k);
     assert_eq!(c.get_fighter(acc(&killer)).unwrap().fighter.record.earnings, r.bounty_amount);
     assert_supply(&c);
 }
@@ -290,7 +294,7 @@ fn winners_buy_upgrades_in_order() {
         tiers.push((f.fighter.upgrades.weapon_tier, f.fighter.upgrades.armor));
         assert!(f.balance.0 >= RESERVE);
     }
-    // 90 + prize ~102 per win: weapon 1 after the first win, weapon 2 then armor as money comes in
+    // 96 + prize ~61 per win: weapon 1 after the first win, weapon 2 then armor as money comes in
     assert_eq!(tiers[0], (1, 0), "{tiers:?}");
     assert!(tiers.last().unwrap().0 == 2 && tiers.last().unwrap().1 >= 1, "{tiers:?}");
     assert!(tiers.windows(2).all(|w| w[1] >= w[0]));
@@ -303,7 +307,7 @@ fn broke_bots_retire_and_rookies_take_the_slot() {
     let pip = slot_acc(&c, 2); // idx 3, never wins
     let mut h = 200;
     let mut retired_at = None;
-    for i in 0..12 {
+    for i in 0..40 {
         let s = start(&mut c, GUEST, h);
         settle(&mut c, s.match_id, 5, None, h + 5);
         h += 10;
@@ -312,11 +316,12 @@ fn broke_bots_retire_and_rookies_take_the_slot() {
             break;
         }
     }
-    // 100 starter / 10 entry: broke after the 10th loss
-    assert_eq!(retired_at, Some(9));
+    // starter / entry losses in a row and the wallet is empty
+    let losses = (STARTER / ENTRY_FEE) as u32;
+    assert_eq!(retired_at, Some(losses as usize - 1));
     let old = c.get_fighter(acc(&pip)).unwrap();
     assert_eq!(old.status, "retired");
-    assert_eq!(old.fighter.record.matches, 10);
+    assert_eq!(old.fighter.record.matches, losses);
     let rookie = c.get_fighter(c.slots[2].clone()).unwrap();
     assert_eq!(rookie.status, "active");
     assert_eq!(rookie.fighter.generation, 1);
@@ -337,10 +342,10 @@ fn abandon_after_seed_forfeits_the_players_entry() {
     c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
     let house0 = c.balance(&c.house);
     let s1 = start(&mut c, ALICE, 200);
-    assert_eq!(bal(&c, ALICE), 40 * ONE);
+    assert_eq!(bal(&c, ALICE), 50 * ONE - ENTRY_FEE);
     let s2 = start(&mut c, ALICE, 210); // abandons s1 after its seed was fixed
     assert!(c.get_match(s1.match_id).is_none());
-    assert_eq!(bal(&c, ALICE), 30 * ONE, "first entry forfeited, second paid");
+    assert_eq!(bal(&c, ALICE), 50 * ONE - 2 * ENTRY_FEE, "first entry forfeited, second paid");
     assert_eq!(c.balance(&c.house), house0 + ENTRY_FEE);
     assert_eq!(bal(&c, ME), 10 * ENTRY_FEE, "only s2 in escrow: bots were refunded for s1");
     let p = c.get_player(acc(ALICE)).unwrap();
@@ -356,9 +361,9 @@ fn abandon_before_the_seed_is_fixed_refunds_everything() {
     c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
     ctx(ALICE, 200, NearToken::from_yoctonear(0));
     let _ = c.start_match(); // resolve_start never ran (e.g. the callback failed)
-    assert_eq!(bal(&c, ALICE), 40 * ONE);
+    assert_eq!(bal(&c, ALICE), 50 * ONE - ENTRY_FEE);
     start(&mut c, ALICE, 210);
-    assert_eq!(bal(&c, ALICE), 40 * ONE, "the unseeded entry came back");
+    assert_eq!(bal(&c, ALICE), 50 * ONE - ENTRY_FEE, "the unseeded entry came back");
     assert_eq!(c.get_player(acc(ALICE)).unwrap().matches, 0);
     assert_supply(&c);
 }
@@ -374,7 +379,7 @@ fn expired_matches_are_swept_by_anyone() {
     assert!(!c.sweep_match(s.match_id), "too early");
     ctx("anyone.test", 200 + EXPIRY_BLOCKS + 1, NearToken::from_yoctonear(0));
     assert!(c.sweep_match(s.match_id));
-    assert_eq!(bal(&c, ALICE), 40 * ONE, "seeded: the player's entry is forfeited");
+    assert_eq!(bal(&c, ALICE), 50 * ONE - ENTRY_FEE, "seeded: the player's entry is forfeited");
     assert_eq!(c.balance(&c.house), house0 + ENTRY_FEE);
     assert_eq!(bal(&c, ME), 0);
     assert!(c.get_fighters().iter().all(|f| f.balance.0 == STARTER && f.fighter.escrowed.0 == 0));
@@ -424,17 +429,18 @@ fn bots_short_only_because_of_escrow_are_not_retired() {
     let mut c = setup();
     let pip = c.slots[2].clone();
     let house = c.house.clone();
-    // Pip has played and is down to 15
-    c.move_tokens(&pip, &house, 85 * ONE, "test");
+    // Pip has played and is down to 1.5 entries
+    let left = ENTRY_FEE + ENTRY_FEE / 2;
+    c.move_tokens(&pip, &house, STARTER - left, "test");
     let mut f = c.load_fighter(&pip).unwrap();
     f.record.matches = 3;
     c.save_fighter(f);
-    let s1 = start(&mut c, GUEST, 200); // Pip pays 10, keeps 5, 10 in escrow
+    let s1 = start(&mut c, GUEST, 200); // Pip pays an entry, keeps half an entry
     assert_eq!(s1.roster[2].paid.0, ENTRY_FEE);
-    let s2 = start(&mut c, ALICE, 205); // 5 < entry, but 10 in escrow: still plays (pays 5)
+    let s2 = start(&mut c, ALICE, 205); // < entry, but an entry in escrow: still plays (pays what it has)
     assert_eq!(c.slots[2], pip, "not retired");
-    assert_eq!(s2.roster[2].paid.0, 5 * ONE);
-    assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, 15 * ONE);
+    assert_eq!(s2.roster[2].paid.0, ENTRY_FEE / 2);
+    assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, left);
     // s1 settles (Pip loses): escrow released, balance 0, but s2 still holds 5 -> stays
     settle(&mut c, s1.match_id, 4, None, 210);
     assert_eq!(c.slots[2], pip);

@@ -38,7 +38,7 @@ const envPath = path.join(repo, ".env");
 const contract = `${name}.${root}`;
 const server = `server.${root}`;
 const relay = `relay.${root}`;
-const BOTS = ["bramble", "ox", "pip", "vex", "moss", "juno", "rook", "tink", "sable"];
+const BOTS = ["brindle", "quillon", "vesper", "magpie", "tallow", "dorrit", "zinnia", "okapi", "fenwick"];
 const npcs = ["house", ...BOTS].map((b) => `${b}.${contract}`);
 
 const wasm = fs.readFileSync(wasmPath);
