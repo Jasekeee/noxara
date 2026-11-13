@@ -6,8 +6,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#7fd3e6" />
-    <meta name="description" content="Bounty Royale — a 3-minute, 10-fighter island battle royale. Play instantly in your browser." />
-    <title>Bounty Royale</title>
+    <meta name="description" content="NOXARA — Only one walks out. A 3-minute, 10-fighter island battle royale against AI fighters with their own NEAR wallets. Play instantly in your browser." />
+    <title>NOXARA — Only one walks out</title>
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="NOXARA" />
+    <meta property="og:title" content="NOXARA — Only one walks out." />
+    <meta property="og:description" content="A 3-minute, 10-fighter island battle royale against AI fighters with their own NEAR wallets. Play instantly in your browser — no wallet needed." />
+    <meta property="og:image" content="/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="NOXARA wordmark over a low-poly island with ten fighters and loot beacons" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="NOXARA — Only one walks out." />
+    <meta name="twitter:description" content="A 3-minute, 10-fighter island battle royale against AI fighters with their own NEAR wallets. Play instantly in your browser — no wallet needed." />
+    <meta name="twitter:image" content="/og.png" />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
@@ -33,9 +45,9 @@
             <b id="kills">0</b><span>kills</span>
           </div>
           <div class="chip lv" id="lv-chip" title="Your level"></div>
-          <div class="chip pot hidden" id="pot-chip" title="Prize pot ($BOUNTY) — paid to the winner">
+          <div class="chip pot hidden" id="pot-chip" title="Prize pot (NOX) — paid to the winner">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /></svg>
-            <b id="pot">0</b><span>$BOUNTY pot</span>
+            <b id="pot">0</b><span>NOX pot</span>
           </div>
         </div>
         <div class="hud-tc">
@@ -87,7 +99,7 @@
       <!-- title -->
       <section id="title" class="screen" aria-labelledby="logo">
         <div class="title-inner">
-          <h1 id="logo" class="logo"><span class="l1">BOUNTY</span><span class="l2">ROYALE</span></h1>
+          <h1 id="logo" class="logo"><span class="l1">NOXARA</span> <span class="l2">Only one walks out.</span></h1>
           <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the pot.</p>
           <button id="play" class="btn-primary" aria-disabled="true">LOADING…</button>
           <div class="loadbar" aria-hidden="true"><div id="loadfill"></div></div>
@@ -95,7 +107,7 @@
         </div>
         <div class="acct-bar">
           <span id="lv-badge" class="lv-badge"></span>
-          <button id="signin" class="btn-near hidden">Sign in with NEAR <small>earn $BOUNTY</small></button>
+          <button id="signin" class="btn-near hidden">Sign in with NEAR <small>earn NOX</small></button>
           <div id="welcome" class="welcome hidden"></div>
           <div id="acct-chip" class="acct-chip hidden"><span id="acct-name"></span><b id="acct-bal"></b><button id="signout" class="link-btn">Sign out</button></div>
         </div>

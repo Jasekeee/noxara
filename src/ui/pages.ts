@@ -140,7 +140,7 @@ export class Pages {
       const all = this.d.fighters();
       const active = all.filter((f) => f.status === "active").sort((a, b) => b.balance - a.balance);
       const retired = all.filter((f) => f.status === "retired");
-      body.appendChild(h("p", "page-lede", "Nine AI fighters with their own NEAR wallets. They pay to enter, keep what they win, buy upgrades — and retire when they go broke. Pick one to read its story or back it with $BOUNTY."));
+      body.appendChild(h("p", "page-lede", "Nine AI fighters with their own NEAR wallets. They pay to enter, keep what they win, buy upgrades — and retire when they go broke. Pick one to read its story or back it with NOX."));
       const grid = h("div", "fgrid");
       for (const f of active) grid.appendChild(this.miniCard(f));
       body.appendChild(grid);
@@ -181,7 +181,7 @@ export class Pages {
       ),
     );
     if (f.bounty) b.appendChild(h("span", "mc-crown", undefined, icon(ICON.crown), h("b", "", fmt(f.bountyValue))));
-    b.setAttribute("aria-label", `${f.name}, ${f.personality}, wallet ${fmt(f.balance)} $BOUNTY`);
+    b.setAttribute("aria-label", `${f.name}, ${f.personality}, wallet ${fmt(f.balance)} NOX`);
     b.addEventListener("click", () => {
       this.d.sfx("ui");
       this.profile(f);
@@ -236,7 +236,7 @@ export class Pages {
 
       // sponsor box
       const sbox = h("div", "pf-sponsor");
-      const stakeLine = h("p", "pf-stake", m ? (m.sponsors ? `${m.sponsors} sponsor${m.sponsors === 1 ? "" : "s"} · ${fmt(m.totalStake)} $BOUNTY staked · sponsors share ${Math.round(m.sponsorCut * 100)}% of every prize` : `No sponsors yet · sponsors share ${Math.round(m.sponsorCut * 100)}% of every prize`) : "Sponsor market opens with NEAR sign-in.");
+      const stakeLine = h("p", "pf-stake", m ? (m.sponsors ? `${m.sponsors} sponsor${m.sponsors === 1 ? "" : "s"} · ${fmt(m.totalStake)} NOX staked · sponsors share ${Math.round(m.sponsorCut * 100)}% of every prize` : `No sponsors yet · sponsors share ${Math.round(m.sponsorCut * 100)}% of every prize`) : "Sponsor market opens with NEAR sign-in.");
       sbox.appendChild(stakeLine);
       if (fresh.status === "active") {
         if (isT3(c) && !c.isGuest()) {
@@ -278,7 +278,7 @@ export class Pages {
       } else {
         tl.textContent = "";
         const r = fresh.record;
-        tl.appendChild(h("li", "ev", undefined, icon(ICON.star), h("span", "ev-text", `${r.matches} matches · ${r.wins} wins · ${r.kills} eliminations · ${fmt(r.earnings)} $BOUNTY earned`)));
+        tl.appendChild(h("li", "ev", undefined, icon(ICON.star), h("span", "ev-text", `${r.matches} matches · ${r.wins} wins · ${r.kills} eliminations · ${fmt(r.earnings)} NOX earned`)));
         if (fresh.generation > 0) tl.appendChild(h("li", "ev rookie", undefined, icon(ICON.star), h("span", "ev-text", `Rookie #${fresh.generation} in this slot — the last one went broke`)));
       }
     };
@@ -303,18 +303,18 @@ export class Pages {
     range.max = "200";
     range.step = "5";
     range.value = String(amount);
-    range.setAttribute("aria-label", "Stake amount in $BOUNTY");
+    range.setAttribute("aria-label", "Stake amount in NOX");
     const presets = h("div", "sp-presets");
     const bal = h("p", "sp-bal", "");
     void c.balance().then((b) => {
-      bal.textContent = `Your balance: ${fmt(b)} $BOUNTY`;
+      bal.textContent = `Your balance: ${fmt(b)} NOX`;
       range.max = String(Math.max(5, Math.floor(b / 5) * 5));
     });
     const update = () => {
       const share = amount / (m.totalStake + amount);
       out.textContent = "";
       out.append(
-        h("div", "sp-amt", undefined, icon(ICON.coin, "ic coin"), h("b", "", `${fmt(amount)} $BOUNTY`)),
+        h("div", "sp-amt", undefined, icon(ICON.coin, "ic coin"), h("b", "", `${fmt(amount)} NOX`)),
         h("p", "", `You'd own ${(share * 100).toFixed(1)}% of ${f.name}'s sponsor pool. Sponsors split ${Math.round(m.sponsorCut * 100)}% of every pot and bounty ${f.name} wins.`),
         h("p", "sp-risk", `Risk: your stake becomes part of ${f.name}'s bankroll — if ${f.name} goes broke and retires, it's gone.`),
       );
@@ -341,7 +341,7 @@ export class Pages {
       try {
         await c.sponsor(f.account, amount);
         this.d.sfx("coin");
-        this.d.toast(`You now back ${f.name} with ${fmt(amount)} $BOUNTY`);
+        this.d.toast(`You now back ${f.name} with ${fmt(amount)} NOX`);
         this.closeModal();
         await this.d.refresh();
         await this.loadMarket();
@@ -382,7 +382,7 @@ export class Pages {
       const table = h("table", "board");
       const thead = h("thead");
       const trh = h("tr");
-      for (const c of ["#", "", "Name", "Wins", "Kills", "Matches", "$BOUNTY earned"]) trh.appendChild(h("th", "", c));
+      for (const c of ["#", "", "Name", "Wins", "Kills", "Matches", "NOX earned"]) trh.appendChild(h("th", "", c));
       thead.appendChild(trh);
       const tbody = h("tbody");
       table.append(thead, tbody);
@@ -429,7 +429,7 @@ export class Pages {
       body.textContent = "";
       const c = this.d.client();
       if (!isT3(c) || c.isGuest()) {
-        body.appendChild(h("p", "page-lede", "Back an AI fighter with $BOUNTY and share every pot and bounty it wins. Guests play for glory — sign in with NEAR to sponsor."));
+        body.appendChild(h("p", "page-lede", "Back an AI fighter with NOX and share every pot and bounty it wins. Guests play for glory — sign in with NEAR to sponsor."));
         const b = h("button", "btn-near", "Sign in with NEAR");
         b.addEventListener("click", async () => {
           await this.d.signIn();
@@ -461,7 +461,7 @@ export class Pages {
             out.addEventListener("click", async () => {
               out.disabled = true;
               const r = await c.unsponsor(s.bot).catch(() => null);
-              if (r) this.d.toast(`Withdrew ${fmt(r.returned)} $BOUNTY from ${s.botName}`);
+              if (r) this.d.toast(`Withdrew ${fmt(r.returned)} NOX from ${s.botName}`);
               await this.d.refresh();
               render();
             });

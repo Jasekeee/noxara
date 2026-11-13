@@ -80,13 +80,13 @@ export function withMock(base: GameClient): GameClientT3 {
       const others = fightersCache.filter((x) => x.account !== account).map((x) => x.name);
       const o = (k: number) => others[(h + k) % Math.max(1, others.length)] ?? "Vex";
       const ev: FighterEvent[] = [
-        { match: "m1", at: now - 3600e3 * 30, kind: "rookie", text: `${name} washed up on the island with 100 $BOUNTY` },
+        { match: "m1", at: now - 3600e3 * 30, kind: "rookie", text: `${name} washed up on the island with 100 NOX` },
         { match: "m3", at: now - 3600e3 * 26, kind: "kill", text: `First elimination: ${o(1)}` },
-        { match: "m5", at: now - 3600e3 * 20, kind: "win", text: `Won match #5 and the ${40 + (h % 30)} $BOUNTY pot` },
-        { match: "m6", at: now - 3600e3 * 19, kind: "upgrade", text: `Bought weapon tier 1 for 60 $BOUNTY` },
-        { match: "m9", at: now - 3600e3 * 12, kind: "bounty", text: `Claimed the ${12 + (h % 20)} $BOUNTY bounty on ${o(2)}` },
+        { match: "m5", at: now - 3600e3 * 20, kind: "win", text: `Won match #5 and the ${40 + (h % 30)} NOX pot` },
+        { match: "m6", at: now - 3600e3 * 19, kind: "upgrade", text: `Bought weapon tier 1 for 60 NOX` },
+        { match: "m9", at: now - 3600e3 * 12, kind: "bounty", text: `Claimed the ${12 + (h % 20)} NOX bounty on ${o(2)}` },
         { match: "m11", at: now - 3600e3 * 6, kind: "death", text: `Taken out by ${o(3)} in the final circle` },
-        { match: "m12", at: now - 3600e3 * 2, kind: "sponsored", text: `Picked up a new sponsor (+25 $BOUNTY stake)` },
+        { match: "m12", at: now - 3600e3 * 2, kind: "sponsored", text: `Picked up a new sponsor (+25 NOX stake)` },
       ];
       if (f?.status === "retired") ev.push({ match: "m14", at: now - 3600e3, kind: "retired", text: `Went broke and retired after ${f.record.matches} matches` });
       return ev.reverse();

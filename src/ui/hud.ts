@@ -212,7 +212,7 @@ export class Hud {
   feedBounty(by: string, victim: string, value: number, me: boolean) {
     const li = document.createElement("li");
     li.className = "bounty";
-    li.textContent = value > 0 ? `${by} claimed the ${value.toLocaleString("en-US")} $BOUNTY bounty on ${victim}!` : `${by} claimed the bounty on ${victim}!`;
+    li.textContent = value > 0 ? `${by} claimed the ${value.toLocaleString("en-US")} NOX bounty on ${victim}!` : `${by} claimed the bounty on ${victim}!`;
     if (me) li.classList.add("me");
     this.feed.prepend(li);
     while (this.feed.children.length > 5) this.feed.lastElementChild!.remove();

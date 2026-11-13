@@ -1,4 +1,10 @@
-# BOUNTY ROYALE — art direction (render / UI / audio)
+# NOXARA — art direction (render / UI / audio)
+
+Brand: **NOXARA** — tagline "Only one walks out." Token: **Nox (NOX)**; amounts read "+12.40 NOX". The in-game
+*bounty* mechanic (crown carrier, BOUNTY kill-feed) keeps its name — only the brand and token were renamed.
+
+**Title wordmark:** `NOXARA` in the display face, gold `#ffc93c` fill, ink `#15112b` stroke + hard drop shadow,
+−3° tilt, gentle bob; the tagline sits beneath in paper `#fffaf0`, uppercase, tracked +0.2 em, thinner stroke.
 
 Original stylised low-poly island look. Kenney CC0 kits only (Mini Characters, Blaster Kit, Nature Kit), recoloured
 into our own palette. No Brawl Stars / Fortnite assets, wording or look-alike characters.
@@ -70,7 +76,7 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
 
 ## Economy UI (T2)
 - **Lobby cards** (title): portrait (rendered from the in-game model), name, personality glyph + colour, wallet in
-  $BOUNTY (gold coin), weapon/armor pips (mint), W·K·M record, gold crown badge with the bounty value on the carrier
+  NOX (gold coin), weapon/armor pips (mint), W·K·M record, gold crown badge with the bounty value on the carrier
   (card glows gold), mint ROOKIE tag for generation > 0. Mobile: swipeable strip.
 - **Drop-in**: PLAY shows "DROPPING IN — sealing the match seed on NEAR…" over the orbiting island (never frozen);
   ≤20 s, then offline fallback.
@@ -91,6 +97,8 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
   "Lv N" badge in the lobby and HUD. Human skins 10–14 = female-c, male-d, female-f, male-g, soldier.
 - `?mock` fills the T3 client API locally (sign-in, market, history, leaderboards) for screen work only.
 
-## Screenshots (`docs/screens/`, JPEG q82, desktop 1440×900 + mobile 390×844)
-lobby-{desktop,mobile} · match-{desktop,mobile} · explosion-desktop · ledger-{desktop,mobile} ·
-fighters-{desktop,mobile} · sponsor-{desktop,mobile} · levelup-{desktop,mobile}
+## Screenshots (`docs/screens/`, JPEG q78, desktop 1440×900 + mobile 390×844, ~0.95 MB total)
+Refreshed after the NOXARA rename (2026-11-13):
+title-{desktop,mobile} (offline guest) · lobby-{desktop,mobile} (live wallets, NOX balances) · match-{desktop,mobile} ·
+ledger-{desktop,mobile} (testnet match, verified, NOX pot/bounty/house/burn) · fighters-{desktop,mobile} · sponsor-{desktop,mobile}.
+Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~109 KB).

@@ -43,7 +43,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   const rows = h("ul", "lg-rows");
   const row = (ic: string, text: string, amount?: number | null, cls = "") => {
     const li = h("li", cls, undefined, icon(ic), h("span", "", text));
-    if (amount !== undefined && amount !== null) li.appendChild(h("b", "amt", `${fmt(amount)} $BOUNTY`));
+    if (amount !== undefined && amount !== null) li.appendChild(h("b", "amt", `${fmt(amount)} NOX`));
     rows.appendChild(li);
   };
 
@@ -86,7 +86,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     for (const r of s.rookies) row(ICON.star, `${r} joins the island as a rookie`, null, "rookie");
     const house = s.payouts.find((p) => p.reason === "house" && p !== prize);
     const burn = s.payouts.find((p) => p.reason === "burn");
-    if (house || burn) rows.appendChild(h("li", "small", `House ${fmt(house?.amount ?? 0)} · burned ${fmt(burn?.amount ?? 0)} $BOUNTY`));
+    if (house || burn) rows.appendChild(h("li", "small", `House ${fmt(house?.amount ?? 0)} · burned ${fmt(burn?.amount ?? 0)} NOX`));
     el.appendChild(rows);
     if (s.verified) el.appendChild(h("div", "lg-verified", undefined, icon(ICON.check), h("span", "", "Verified — the server replayed every input and got the same result")));
   }
@@ -94,7 +94,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   if (L.guest) {
     const btn = h("button", "btn-near wide", undefined, h("span", "", "Sign in with NEAR"), h("small", "", "next time this pot could be yours"));
     if (L.onSignIn) btn.addEventListener("click", L.onSignIn);
-    el.appendChild(h("div", "lg-signin", undefined, h("p", "lg-note", "Guests play for glory — sign in with NEAR to earn $BOUNTY."), btn));
+    el.appendChild(h("div", "lg-signin", undefined, h("p", "lg-note", "Guests play for glory — sign in with NEAR to earn NOX."), btn));
   }
 
   // explorer drawer
