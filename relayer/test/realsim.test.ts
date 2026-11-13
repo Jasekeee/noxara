@@ -41,7 +41,7 @@ test("real sim: a recorded match is replayed and judged with kills and the bount
     if (!v.ok) return;
     assert.deepEqual(v.args.placements, record.placements);
     assert.equal(v.winner, m.state.winner);
-    assert.equal(v.killsFrom, "detailed");
+    assert.equal(v.killsFrom, "replay");
     const killsSim = m.state.fighters.map((f) => f.kills);
     if (killsSim.reduce((a, b) => a + b, 0) < 10) assert.deepEqual(v.args.kills, killsSim);
     const b = events.find((e) => e.t === "bounty") as { by: number } | undefined;
