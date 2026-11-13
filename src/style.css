@@ -49,6 +49,14 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
   white-space: nowrap;
 }
 .tag3d.bounty .nm { color: var(--gold); }
+.tag3d .hid { visibility: hidden; font: 900 10px/1 var(--font); letter-spacing: .14em; color: #c9ffd9; background: rgba(21,17,43,.7); padding: 3px 6px; border-radius: 6px; }
+#bounty-arrow {
+  position: absolute; left: 0; top: 0; width: 44px; height: 44px; margin: -22px 0 0 -22px; pointer-events: none;
+  display: grid; place-items: center; will-change: transform;
+}
+#bounty-arrow .ring { position: absolute; inset: 0; border-radius: 50%; background: var(--gold); border: 3px solid var(--ink); box-shadow: 0 3px 0 rgba(20,17,43,.5); }
+#bounty-arrow .tip { position: absolute; left: 50%; top: 50%; width: 0; height: 0; border-left: 9px solid transparent; border-right: 9px solid transparent; border-bottom: 14px solid var(--gold); transform-origin: 50% 100%; }
+#bounty-arrow svg { position: relative; width: 24px; height: 24px; fill: var(--ink); }
 .tag3d .hpb { width: 54px; height: 7px; border-radius: 4px; background: rgba(20,17,43,.75); border: 1.5px solid rgba(20,17,43,.9); overflow: hidden; }
 .tag3d .hpb i { display: block; height: 100%; width: 100%; background: #ff6b5e; transform-origin: left; transition: transform .12s; }
 .tag3d.me .hpb { width: 64px; height: 8px; }
@@ -291,29 +299,37 @@ kbd {
 @keyframes pop2 { from { transform: scale(.2) rotate(-10deg); opacity: 0; } }
 
 @media (max-width: 720px), (pointer: coarse) {
-  .hud-tl { left: 10px; gap: 6px; }
-  .chip { padding: 4px 8px 4px 6px; }
+  .hud-tl { left: 10px; gap: 6px; top: calc(10px + var(--safe-t)); }
+  .chip { padding: 4px 8px 4px 6px; border-radius: 10px; }
   .chip b { font-size: 16px; }
   .chip span { display: none; }
-  .hud-tr { right: 10px; top: calc(56px + var(--safe-t)); }
+  .hud-tc { left: auto; right: 110px; transform: none; top: calc(10px + var(--safe-t)); align-items: flex-end; }
+  .storm-chip { padding: 5px 9px; font-size: 10px; border-radius: 10px; }
+  #storm-text { display: none; }
+  .storm-chip b { font-size: 16px; }
+  .storm-warn { font-size: 11px; padding: 5px 8px; }
+  #minimap { width: 92px; height: 92px; right: 10px; top: calc(10px + var(--safe-t)); bottom: auto; }
+  .hud-tr { right: 10px; top: calc(110px + var(--safe-t)); }
   #feed li { font-size: 11px; padding: 4px 8px; }
   #feed li img { height: 14px; width: 28px; }
-  #minimap { width: 92px; height: 92px; right: 10px; top: calc(12px + var(--safe-t)); bottom: auto; }
-  .hud-tr { top: calc(112px + var(--safe-t)); }
-  .hud-tc { top: calc(12px + var(--safe-t)); left: 46%; }
-  .storm-chip { padding: 4px 10px; font-size: 10px; }
-  .storm-chip b { font-size: 16px; }
-  .hud-bc { bottom: calc(10px + var(--safe-b)); gap: 6px; flex-direction: column; align-items: center; }
-  .hp-bar { width: 150px; height: 14px; }
-  .hp { padding: 5px 10px; }
-  #hp-text { font-size: 17px; }
-  .weapon-card { padding: 4px 10px 4px 4px; }
-  #weapon-icon { width: 60px; height: 30px; }
-  #weapon-name { font-size: 14px; }
-  .hint { bottom: calc(200px + var(--safe-b)); font-size: 13px; flex-direction: column; align-items: center; gap: 6px; }
+  .hud-bc { left: 10px; transform: none; bottom: auto; top: calc(50px + var(--safe-t)); gap: 6px; align-items: stretch; }
+  .weapon-card { padding: 3px 8px 3px 3px; border-radius: 10px; }
+  #weapon-icon { width: 44px; height: 22px; }
+  #weapon-name { font-size: 12px; }
+  .ammo { margin-top: 3px; height: 7px; gap: 2px; }
+  .ammo i { width: 5px; height: 7px; }
+  .ammo .rlbar { width: 44px; }
+  .hp { padding: 4px 8px; border-radius: 10px; }
+  .hp-bar { width: 84px; height: 10px; }
+  #hp-text { font-size: 15px; min-width: 2.5ch; }
+  .hint { bottom: calc(220px + var(--safe-b)); font-size: 13px; flex-direction: column; align-items: center; gap: 6px; }
   .popup { font-size: 38px; }
-  .banner { font-size: 18px; top: 24%; }
-  .icon-btn { left: auto; right: 10px; bottom: auto; top: calc(250px + var(--safe-t)); width: 40px; height: 40px; }
+  .banner { font-size: 17px; top: 22%; }
+  .icon-btn { left: 50%; transform: translateX(-50%); bottom: calc(24px + var(--safe-b)); width: 40px; height: 40px; }
+  .hint-line .kb { display: none; }
+}
+@media not ((max-width: 720px) or (pointer: coarse)) {
+  .hint-line .tch { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .logo span, .storm-chip.closing, #vignette.on { animation: none; }

@@ -87,6 +87,9 @@ export class FighterView {
   tagHp: HTMLElement;
   tagAmmo: HTMLElement | null = null;
   private lastHpFrac = -1;
+  private tagHidden: HTMLElement | null = null;
+  private wasHidden = false;
+  private holdQ = new THREE.Quaternion();
 
   constructor(readonly idx: number, f: FighterState, tagsEl: HTMLElement) {
     const charName = CHARS[idx % CHARS.length];
@@ -119,6 +122,8 @@ export class FighterView {
       hold: this.mixer.clipAction(clips.hold),
       shoot: this.mixer.clipAction(clips.shoot),
     };
+    const ht = clips.hold.tracks.find((t) => t.name === "arm-right.quaternion");
+    if (ht) this.holdQ.fromArray(ht.values as unknown as number[], 0);
     this.acts.die.setLoop(THREE.LoopOnce, 1);
     this.acts.die.clampWhenFinished = true;
     this.acts.shoot.setLoop(THREE.LoopOnce, 1);
@@ -159,7 +164,7 @@ export class FighterView {
     const gem = new THREE.Mesh(gemGeo, gemMat);
     gem.position.set(0, 0, 0.3);
     this.crown.add(gem);
-    this.crown.position.y = 2.75;
+    this.crown.position.y = 2.95;
     this.crown.visible = f.bounty;
     this.root.add(this.crown);
 
@@ -173,6 +178,12 @@ export class FighterView {
       nm.className = "nm";
       nm.textContent = f.name;
       this.tag.appendChild(nm);
+    }
+    if (idx === 0) {
+      this.tagHidden = document.createElement("div");
+      this.tagHidden.className = "hid";
+      this.tagHidden.textContent = "HIDDEN";
+      this.tag.appendChild(this.tagHidden);
     }
     const hpb = document.createElement("div");
     hpb.className = "hpb";
@@ -198,13 +209,18 @@ export class FighterView {
     if (this.weaponObj) this.weaponObj.removeFromParent();
     if (!this.hand) return;
     const w = model(WEAPON_MODEL[kind]);
+    // The arm bone points along -X; in the "holding-right" pose it is rotated toward the front.
+    // Cancel that pose rotation so the weapon points along the character's forward (+Z).
+    const inv = this.holdQ.clone().invert();
     if (kind === "grenade") {
-      w.scale.setScalar(0.55);
-      w.position.set(-0.02, -0.17, 0.03);
+      w.scale.setScalar(0.5);
+      w.position.set(-0.16, -0.04, 0);
+      w.quaternion.copy(inv);
     } else {
-      w.scale.setScalar(0.42);
-      w.rotation.y = Math.PI; // blaster barrels point -Z; characters face +Z
-      w.position.set(-0.01, -0.14, 0.11);
+      w.scale.setScalar(0.36);
+      w.position.set(-0.15, 0.0, 0.0);
+      w.quaternion.copy(inv).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)); // barrels point -Z
+      w.position.add(new THREE.Vector3(0, -0.02, 0.07).applyQuaternion(inv));
     }
     w.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -300,7 +316,14 @@ export class FighterView {
     if (f.bounty && !this.dead) {
       this.crown.visible = true;
       this.crown.rotation.y += dt * 1.5;
-      this.crown.position.y = 2.75 + Math.sin(performance.now() * 0.004) * 0.08;
+      this.crown.position.y = 2.95 + Math.sin(performance.now() * 0.004) * 0.08;
+    }
+    if (this.tagHidden) {
+      const h = f.alive && f.inBush;
+      if (h !== this.wasHidden) {
+        this.wasHidden = h;
+        this.tagHidden.style.visibility = h ? "visible" : "hidden";
+      }
     }
     const frac = Math.max(0, f.hp / Math.max(1, f.maxHp));
     if (frac !== this.lastHpFrac) {

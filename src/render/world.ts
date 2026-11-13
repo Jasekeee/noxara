@@ -129,8 +129,8 @@ interface HealView {
 }
 
 const healGeo = (() => {
-  const a = new THREE.BoxGeometry(0.62, 0.2, 0.2);
-  const b = new THREE.BoxGeometry(0.2, 0.62, 0.2);
+  const a = new THREE.BoxGeometry(0.7, 0.24, 0.24);
+  const b = new THREE.BoxGeometry(0.24, 0.7, 0.24);
   const g = new THREE.BufferGeometry();
   // merge two boxes manually
   const pos: number[] = [], nor: number[] = [], idx: number[] = [];
@@ -162,6 +162,8 @@ const glowTex = (() => {
   return t;
 })();
 export { glowTex };
+const beamGeo = new THREE.CylinderGeometry(0.12, 0.45, 4, 12, 1, true).translate(0, 2, 0);
+const beamMat = new THREE.MeshBasicMaterial({ color: 0xffc93c, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
 
 export class World {
   readonly group = new THREE.Group();
@@ -186,6 +188,16 @@ export class World {
     this.buildBushes(map, seed);
     this.buildDecor(map, seed);
     this.buildPickups();
+    if (new URLSearchParams(location.search).has("debugcol")) {
+      const mk = (x: number, y: number, r: number, c: number) => {
+        const m = new THREE.Mesh(new THREE.RingGeometry(r * U - 0.08, r * U, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: c, depthTest: false }));
+        m.position.set(x * U, 0.3, y * U);
+        m.renderOrder = 99;
+        this.group.add(m);
+      };
+      for (const o of map.obstacles) mk(o.x, o.y, o.r, 0xff0000);
+      for (const b of map.bushes) mk(b.x, b.y, b.r, 0xffff00);
+    }
 
     // ---- storm
     this.stormU = {
@@ -335,7 +347,7 @@ export class World {
       const r = o.r * U;
       if (o.kind === "tree") {
         name = ["nature/tree_default", "nature/tree_detailed", "nature/tree_fat_fall"][i % 3];
-        s = fitScale(name, r) * 1.35;
+        s = fitScale(name, r) * 1.1;
       } else if (o.kind === "crate") {
         name = ["blasters/crate-medium", "blasters/crate-wide", "blasters/crate-small"][i % 3];
         s = fitScale(name, r) * 1.05;
@@ -382,8 +394,8 @@ export class World {
           m.castShadow = true;
         });
         const a = (k / n) * Math.PI * 2 + rand() * 0.6;
-        const d = k === 0 ? 0 : r * (0.35 + rand() * 0.35);
-        const pr = r * (0.55 + rand() * 0.2);
+        const d = k === 0 ? 0 : r * (0.3 + rand() * 0.3);
+        const pr = r * (0.5 + rand() * 0.15);
         piece.scale.setScalar(fitScale("nature/plant_bushLarge", pr) * (0.9 + rand() * 0.3));
         piece.position.set(Math.cos(a) * d, 0, Math.sin(a) * d);
         piece.rotation.y = rand() * Math.PI * 2;
@@ -459,12 +471,15 @@ export class World {
       let lid: THREE.Object3D | null = null;
       crate.traverse((o) => { if (o.name === "lid") lid = o; });
       g.add(crate);
-      const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.22, 0), new THREE.MeshBasicMaterial({ color: PAL.gold }));
+      const beacon = new THREE.Mesh(new THREE.OctahedronGeometry(0.3, 0), new THREE.MeshBasicMaterial({ color: PAL.gold }));
       beacon.position.y = 1.5;
       g.add(beacon);
       const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: PAL.gold, transparent: true, opacity: 0.5, depthWrite: false, blending: THREE.AdditiveBlending }));
       glow.scale.setScalar(1.2);
       beacon.add(glow);
+      const beam = new THREE.Mesh(beamGeo, beamMat);
+      beacon.userData.beam = beam;
+      g.add(beam);
       g.position.set(c.x * U, 0, c.y * U);
       this.group.add(g);
       this.chests[c.id] = { group: g, lid, beacon, open: c.open, t: c.open ? 99 : 0 };
@@ -495,6 +510,7 @@ export class World {
 
   private applyOpen(c: ChestView, t: number) {
     c.beacon.visible = false;
+    (c.beacon.userData.beam as THREE.Object3D).visible = false;
     if (c.lid) {
       const k = Math.min(1, t / 0.5);
       c.lid.position.y = 0.19 + Math.sin(k * Math.PI) * 0.9 + k * 0.05;
@@ -531,7 +547,7 @@ export class World {
       b.rustle = Math.max(0, b.rustle - dt * 1.8);
       const target = inside ? 1 : 0;
       b.fade += (target - b.fade) * Math.min(1, dt * 10);
-      const op = 1 - b.fade * 0.55;
+      const op = 1 - b.fade * 0.68;
       for (const m of b.mats) {
         const tr = op < 0.99;
         if (m.transparent !== tr) { m.transparent = tr; m.depthWrite = !tr; }
@@ -555,6 +571,11 @@ export class World {
       if (v.open) {
         v.t += dt;
         if (v.t < 2) this.applyOpen(v, v.t);
+        else if (v.t < 3.2) {
+          const k = Math.max(0, (v.t - 2.6) / 0.6);
+          v.group.scale.setScalar(1 - k);
+          if (k >= 1) v.group.visible = false;
+        }
       } else {
         v.beacon.position.y = 1.55 + Math.sin(time * 3 + c.id) * 0.12;
         v.beacon.rotation.y = time * 2;
@@ -576,8 +597,8 @@ export class World {
         v.group.visible = k < 1;
       } else {
         const c = v.group.children[0];
-        c.position.y = 0.85 + Math.sin(time * 2.6 + v.phase) * 0.15;
-        c.rotation.y = time * 1.8 + v.phase;
+        c.position.y = 0.95 + Math.sin(time * 2.6 + v.phase) * 0.15;
+        c.rotation.set(-0.55, Math.sin(time * 1.8 + v.phase) * 0.5, 0);
       }
     }
   }

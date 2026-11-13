@@ -21,6 +21,7 @@ const params = new URLSearchParams(location.search);
 const E2E = params.has("e2e");
 const AUTOPLAY = params.has("autoplay");
 const SKIP_TITLE = params.get("bots") === "1";
+const CAM_DIST = Number(params.get("cam") ?? 0) || 0;
 const SPEED = Math.max(0.25, Math.min(16, Number(params.get("speed") ?? 1) || 1));
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -435,10 +436,12 @@ function frame(now: number) {
       }
       // name tag
       const showTag = vis && f.alive && phase !== "title";
-      const p = showTag ? project(v.pos.x, 2.5, v.pos.z) : null;
+      const p = showTag ? project(v.pos.x, f.bounty ? 3.3 : 2.5, v.pos.z) : null;
       if (p) v.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
       else if (v.tag.style.transform !== "translate(-9999px, 0px)") v.tag.style.transform = "translate(-9999px, 0px)";
     }
+    // off-screen bounty marker
+    updateBountyArrow(st.fighters.find((f) => f.bounty && f.alive && f.idx !== watch) ?? null);
     // local player in bush: semi-transparent self too
     world.update(dt, time, me.alive ? { x: views[0].pos.x, z: views[0].pos.z, inBush: me.inBush } : null, rustlers);
 
@@ -472,7 +475,7 @@ function frame(now: number) {
 
   // camera placement
   const portrait = camera.aspect < 1;
-  let dist = portrait ? 34 + (1 - camera.aspect) * 14 : 30;
+  let dist = CAM_DIST || (portrait ? 25 * Math.pow(1 / camera.aspect, 0.5) : 25);
   if (phase === "title") {
     const a = time * 0.06;
     dist = 46;
@@ -494,6 +497,33 @@ function frame(now: number) {
   fx.update(dt, alpha, time);
   hud.updateFloaters(rdt, project);
   renderer.render(scene, camera);
+}
+
+const bountyEl = $("bounty-arrow");
+const bountyTip = bountyEl.querySelector<HTMLElement>(".tip")!;
+let bountyShown = false;
+function updateBountyArrow(f: { idx: number } | null) {
+  let show = false;
+  if (f && phase === "playing") {
+    const v = views[f.idx];
+    _p.set(v.pos.x, 1, v.pos.z).project(camera);
+    const off = _p.z > 1 || Math.abs(_p.x) > 0.95 || Math.abs(_p.y) > 0.92;
+    if (off) {
+      show = true;
+      let x = _p.x, y = _p.y;
+      if (_p.z > 1) { x = -x; y = -y; }
+      const m = Math.max(Math.abs(x) / 0.88, Math.abs(y) / 0.8, 1e-3);
+      x /= m; y /= m;
+      const sx = (x * 0.5 + 0.5) * innerWidth, sy = (-y * 0.5 + 0.5) * innerHeight;
+      bountyEl.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px)`;
+      const ang = Math.atan2(x, y);
+      bountyTip.style.transform = `translate(-50%, -100%) rotate(${ang.toFixed(3)}rad) translateY(-22px)`;
+    }
+  }
+  if (show !== bountyShown) {
+    bountyShown = show;
+    bountyEl.classList.toggle("hidden", !show);
+  }
 }
 
 // ------------------------------------------------------------------ boot
@@ -522,6 +552,8 @@ if (E2E) {
     },
     fps: () => Math.round(fpsVal * 10) / 10,
     record: () => record,
+    /** debug only: the live match object */
+    match: () => match,
   };
 }
 
