@@ -2333,6 +2333,10 @@ fn check_in_needs_a_wallet_paid_match_and_pays_a_growing_streak_from_the_house()
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "no paid match yet");
     grant(&mut c, ALICE, 100 * ONE);
     alice_paid_match(&mut c, 20_000, 200, false, false);
+    ctx_ts(ALICE, 203, day_ms(20_000), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "unlocks after 3 wallet-paid matches");
+    alice_paid_match(&mut c, 20_000, 210, false, false);
+    alice_paid_match(&mut c, 20_000, 220, false, false);
     let minted0 = c.total_minted;
     let mut got = vec![];
     for d in 0..8u64 {
@@ -2344,8 +2348,9 @@ fn check_in_needs_a_wallet_paid_match_and_pays_a_growing_streak_from_the_house()
         ctx_ts(ALICE, 306 + d * 10, day_ms(20_000 + d), NearToken::from_yoctonear(0));
         assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "once a day");
     }
-    let m = m_now(&c);
-    assert_eq!(got[0], daily::CHECKIN_REWARDS[0] * m / 10_000);
+    let m = m_now(&c).min(10_000);
+    assert_eq!(got[0], daily::CHECKIN_REWARDS[0] * m / 10_000, "m capped at 1.0 for dailies");
+    assert!(got.iter().all(|g| *g < ENTRY_FEE), "a daily reward never exceeds the minimum entry");
     assert!(got[6] > got[0], "the streak grows: {got:?}");
     assert_eq!(got[7], got[6], "day 8+ keeps the top reward");
     assert_eq!(c.total_minted, minted0, "paid by the House, never minted");
@@ -2427,4 +2432,27 @@ fn rookies_are_protected_in_their_first_matches() {
     c.save_fighter(f);
     let s = start(&mut c, GUEST, 300);
     assert!(s.roster[0].paid.0 > ENTRY_FEE);
+}
+
+#[test]
+fn audit6_no_idle_check_in_farming_and_zero_payouts_consume_nothing() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    for k in 0..3 {
+        alice_paid_match(&mut c, 20_000, 200 + k * 10, false, false);
+    }
+    ctx_ts(ALICE, 240, day_ms(20_000), NearToken::from_yoctonear(0));
+    c.check_in();
+    // the next day without a paid match: refused (one paid entry per check-in)
+    ctx_ts(ALICE, 250, day_ms(20_001), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "no idle check-in");
+    // the House at its floor: a reward of 0 is refused and consumes nothing
+    alice_paid_match(&mut c, 20_001, 260, false, false);
+    let house = c.house.clone();
+    let drain = c.balance(&house) - HOUSE_FLOOR;
+    c.move_tokens(&house, &acc(BOB), drain, "test");
+    ctx_ts(ALICE, 270, day_ms(20_001), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "zero payout refused");
+    let v = c.get_daily(acc(ALICE));
+    assert!(!v.checked_in_today && v.streak == 1, "nothing consumed: {} {}", v.checked_in_today, v.streak);
 }

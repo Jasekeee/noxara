@@ -113,7 +113,7 @@ function run(seed: number): RunOut {
   const players = Array.from({ length: PLAYERS }, () => ({ bal: 0, credit: P.WELCOME_CREDIT, winsDay: -1, wins: 0, statDay: -1, paid: 0, top3: 0, bounty: 0, streak: 0, lastCheck: -2 }));
   /** House-paid daily rewards (check-in + quests): m-scaled, never below the floor (econ v3, daily.rs) */
   const houseReward = (pl: { bal: number }, base: number, m: number) => {
-    const amt = Math.min(base * m, Math.max(0, house - P.HOUSE_FLOOR));
+    const amt = Math.min(base * Math.min(m, 1), Math.max(0, house - P.HOUSE_FLOOR)); // m capped at 1 for dailies (audit #6)
     house -= amt;
     pl.bal += amt;
     return amt;

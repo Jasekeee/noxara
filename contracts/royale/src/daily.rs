@@ -11,8 +11,8 @@ use near_sdk::{env, near, require, AccountId};
 /// streak day 1..=7 pays these NOX (× m); day 7+ keeps paying the last value
 pub const CHECKIN_REWARDS: [u128; 7] = [ONE, ONE, ONE, 2 * ONE, 2 * ONE, 2 * ONE, 3 * ONE];
 pub const CHECKIN_DAILY_CAP: u32 = 100;
-/// a wallet-paid match within this window is needed to check in
-pub const CHECKIN_ACTIVE_MS: u64 = 48 * 3_600_000;
+/// check-in needs this many wallet-paid matches in the account's lifetime (audit #6: cap reserved for real players)
+pub const CHECKIN_MIN_LIFETIME_PAID: u32 = 3;
 /// quests: (id, goal, reward NOX × m)
 pub const QUESTS: [(&str, u32, u128); 3] = [("play 3 matches", 3, ONE), ("finish in the top 3", 1, ONE), ("take down the bounty carrier", 1, 2 * ONE)];
 pub const QUEST_DAILY_CAP: u32 = 300;
@@ -32,6 +32,8 @@ pub struct PlayerDaily {
     pub progress: [u32; 3],
     /// bit i = quest i claimed on `quest_day`
     pub claimed: u8,
+    /// wallet-paid matches ever
+    pub lifetime_paid: u32,
 }
 
 #[near(serializers = [json])]
@@ -93,6 +95,7 @@ impl Contract {
     pub(crate) fn record_daily(&mut self, player: &AccountId, placement: u8, bounty_kill: bool) {
         let mut d = self.daily_of(player);
         d.last_paid_ms = env::block_timestamp_ms();
+        d.lifetime_paid = d.lifetime_paid.saturating_add(1);
         d.progress[0] += 1;
         if (1..=3).contains(&placement) {
             d.progress[1] += 1;
@@ -102,17 +105,19 @@ impl Contract {
         }
         self.save_daily(player, d);
     }
-    fn house_reward(&mut self, to: &AccountId, base: u128, memo: &str) -> u128 {
+    /// What the House pays for `base` right now: × m capped at 1.0 (audit #6: a daily reward never exceeds
+    /// its base, which stays below the 4-NOX entry), never below the House floor.
+    pub(crate) fn daily_amount(&self, base: u128) -> u128 {
         let (m, _, _) = rule(self.econ().ema);
+        (base * m.min(10_000) / 10_000).min(self.balance(&self.house).saturating_sub(HOUSE_FLOOR))
+    }
+    fn house_reward(&mut self, to: &AccountId, amount: u128, memo: &str) {
         let house = self.house.clone();
-        let amount = (base * m / 10_000).min(self.balance(&house).saturating_sub(HOUSE_FLOOR));
-        if amount > 0 {
-            self.move_tokens_pub(&house, to, amount, memo);
-            let mut e = self.econ();
-            e.season_rewards += amount;
-            self.save_econ(&e);
-        }
-        amount
+        self.move_tokens_pub(&house, to, amount, memo);
+        let mut e = self.econ();
+        self.roll_season(&mut e);
+        e.season_rewards += amount;
+        self.save_econ(&e);
     }
     fn reward_for_streak(streak: u32) -> u128 {
         CHECKIN_REWARDS[(streak.max(1) as usize - 1).min(CHECKIN_REWARDS.len() - 1)]
@@ -129,13 +134,17 @@ impl Contract {
         let mut d = self.daily_of(&me);
         let day = today();
         require!(d.checkin_day != day || d.streak == 0, "already checked in today");
-        require!(d.last_paid_ms > 0 && env::block_timestamp_ms() <= d.last_paid_ms + CHECKIN_ACTIVE_MS, "play a match paid from your own NOX first (in the last 48 h)");
+        // one wallet-paid match TODAY per check-in (audit #6: no idle farming), and a few in the account's life
+        require!(d.last_paid_ms >= day as u64 * DAY_MS, "play a match paid from your own NOX today first");
+        require!(d.lifetime_paid >= CHECKIN_MIN_LIFETIME_PAID, "check-in unlocks after 3 matches paid from your own NOX");
+        let streak = if d.checkin_day + 1 == day { d.streak + 1 } else { 1 };
+        let paid = self.daily_amount(Self::reward_for_streak(streak));
+        require!(paid > 0, "the House can't pay rewards right now: try again later");
         bump_day_count(CHECKIN_COUNT_KEY, day, CHECKIN_DAILY_CAP, "check-in");
-        d.streak = if d.checkin_day + 1 == day { d.streak + 1 } else { 1 };
+        d.streak = streak;
         d.checkin_day = day;
-        let streak = d.streak;
         self.save_daily(&me, d);
-        let paid = self.house_reward(&me, Self::reward_for_streak(streak), "daily check-in");
+        self.house_reward(&me, paid, "daily check-in");
         event("check_in", &near_sdk::serde_json::json!({ "player": me, "streak": streak, "paid": U128(paid) }));
         U128(paid)
     }
@@ -148,10 +157,12 @@ impl Contract {
         let mut d = self.daily_of(&me);
         require!(d.claimed & (1 << quest) == 0, "already claimed today");
         require!(d.progress[quest as usize] >= goal, "quest not finished yet");
+        let paid = self.daily_amount(reward);
+        require!(paid > 0, "the House can't pay rewards right now: try again later");
         bump_day_count(QUEST_COUNT_KEY, today(), QUEST_DAILY_CAP, "quest");
         d.claimed |= 1 << quest;
         self.save_daily(&me, d);
-        let paid = self.house_reward(&me, reward, "daily quest");
+        self.house_reward(&me, paid, "daily quest");
         event("quest", &near_sdk::serde_json::json!({ "player": me, "quest": quest, "paid": U128(paid) }));
         U128(paid)
     }
@@ -161,13 +172,16 @@ impl Contract {
         let day = today();
         let checked = d.checkin_day == day && d.streak > 0;
         let next_streak = if checked { d.streak } else if d.checkin_day + 1 == day { d.streak + 1 } else { 1 };
-        let (m, _, _) = rule(self.econ().ema);
         let why_not = if checked {
             Some("already checked in today".to_string())
         } else if self.load_player(&account_id).is_none() || self.is_guest(&account_id) {
             Some("sign in with a NEAR account".to_string())
-        } else if d.last_paid_ms == 0 || env::block_timestamp_ms() > d.last_paid_ms + CHECKIN_ACTIVE_MS {
-            Some("play a match paid from your own NOX first".to_string())
+        } else if d.lifetime_paid < CHECKIN_MIN_LIFETIME_PAID {
+            Some(format!("unlocks after {CHECKIN_MIN_LIFETIME_PAID} matches paid from your own NOX ({}/{CHECKIN_MIN_LIFETIME_PAID})", d.lifetime_paid))
+        } else if d.last_paid_ms < day as u64 * DAY_MS {
+            Some("play a match paid from your own NOX today first".to_string())
+        } else if self.daily_amount(Self::reward_for_streak(next_streak)) == 0 {
+            Some("the House can't pay rewards right now".to_string())
         } else if day_count(CHECKIN_COUNT_KEY, day) >= CHECKIN_DAILY_CAP {
             Some("today's check-in budget is used up".to_string())
         } else {
@@ -179,7 +193,7 @@ impl Contract {
             checked_in_today: checked,
             can_check_in: why_not.is_none(),
             why_not,
-            next_reward: U128(Self::reward_for_streak(next_streak) * m / 10_000),
+            next_reward: U128(self.daily_amount(Self::reward_for_streak(next_streak))),
             quests: QUESTS
                 .iter()
                 .enumerate()
@@ -190,7 +204,7 @@ impl Contract {
                     goal: *goal,
                     done: d.progress[i] >= *goal,
                     claimed: d.claimed & (1 << i) != 0,
-                    reward: U128(r * m / 10_000),
+                    reward: U128(self.daily_amount(*r)),
                 })
                 .collect(),
         }
