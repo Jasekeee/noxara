@@ -8,7 +8,7 @@
  * Version of the simulation RULES. Bump on ANY change that can alter a replay (rules, AI, mapgen,
  * numbers). The match server refuses records made with a different version.
  */
-export const SIM_VERSION = "r4";
+export const SIM_VERSION = "r5";
 
 export const TICK_HZ = 20;
 export const MATCH_SECONDS = 180;
