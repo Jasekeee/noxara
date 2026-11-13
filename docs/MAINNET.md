@@ -13,6 +13,8 @@ the owner's literal reply **"yes, deploy"**.
 | Full mainnet topology rehearsed on testnet (deploy → match → settle → teardown → balance returned) | pending |
 | Release wasm rebuilt from the audited commit (+ checksum recorded here) | pending |
 
+**Deadline rule:** if mainnet is not live and stable by 2026-11-14 15:00 UTC, the testnet version is submitted. **Keys:** the contract's full-access key is NOT removed (fixes during judging, teardown after 2026-11-25); the README lists every admin method.
+
 ## 1. Accounts (nothing beyond these)
 | Account | Role |
 |---|---|
@@ -61,7 +63,7 @@ The season ends 2026-11-25 00:00 UTC. NOX is play-money. From the season end new
 players can unregister to get self-paid storage deposits back.
 1. Delete the game contract and return its whole balance (code + state storage) to your wallet:
    `near account delete-account noxara.near beneficiary <you>.near network-config mainnet sign-with-legacy-keychain send`
-   If the contract's full-access key was removed before submission, call the time-locked owner method instead:
+   The key is kept, so the CLI path works once the state has been cleared (an account with >~10 KB of state can't be deleted — run the owner-only, time-locked state-clearing calls first). Owner method alternative:
    `near contract call-function as-transaction noxara.near teardown json-args '{}' prepaid-gas '300 Tgas' attached-deposit '0 NEAR' sign-as <you>.near network-config mainnet sign-with-legacy-keychain send`
    (it sweeps any unsettled match first and pays the fixed beneficiary; refused before 2026-11-25).
 2. Delete the relayer account (key from `.env.mainnet` / Railway):
