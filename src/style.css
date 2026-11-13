@@ -668,3 +668,58 @@ kbd {
 @media (prefers-reduced-motion: reduce) {
   .logo span, .storm-chip.closing, #vignette.on { animation: none; }
 }
+
+/* ---- ECONOMY page + HOW NEAR POWERS NOXARA (docs/ART.md: Economy v2 UI) */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.etgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.et { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border-radius: 14px; background: rgba(255,255,255,.06); border: 2px solid rgba(255,255,255,.1); min-width: 0; }
+.et.gold { border-color: rgba(255,201,60,.45); background: rgba(255,201,60,.08); }
+.et-l { font: 800 10px/1 var(--font); letter-spacing: .12em; opacity: .75; }
+.et-v { font: 900 30px/1 var(--display); letter-spacing: .02em; color: var(--paper); }
+.et.gold .et-v { color: var(--gold); }
+.et-s { font: 700 12px/1.3 var(--font); opacity: .8; }
+.et-x { display: flex; flex-direction: column; gap: 6px; }
+.spark { width: 100%; height: 34px; display: block; }
+.ebar { position: relative; height: 10px; border-radius: 6px; background: rgba(255,255,255,.12); overflow: visible; }
+.ebar-f { position: absolute; inset: 0 auto 0 0; border-radius: 6px; background: var(--cyan); }
+.et.gold .ebar-f { background: var(--gold); }
+.ebar-m { position: absolute; top: -3px; bottom: -3px; width: 3px; margin-left: -1px; background: var(--paper); border-radius: 2px; }
+.e-explain { margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; border-left: 4px solid var(--gold); background: rgba(255,255,255,.05); font: 600 14px/1.5 var(--font); max-width: 820px; }
+.e-doc code, .ncode { font: 700 13px/1.4 ui-monospace, Menlo, monospace; background: rgba(0,0,0,.35); padding: 2px 6px; border-radius: 6px; color: var(--mint); }
+.e-warn { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: rgba(255,77,109,.15); border: 2px solid var(--hot); font: 700 14px/1.4 var(--font); }
+.e-note { margin: 8px 0 0; font: 600 12px/1.45 var(--font); opacity: .75; max-width: 760px; }
+.e-guest { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(62,240,192,.1); border: 2px solid rgba(62,240,192,.35); font: 700 14px/1.3 var(--font); }
+.e-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 26px; padding-top: 14px; border-top: 2px solid rgba(255,255,255,.08); font: 600 13px/1.3 var(--font); opacity: .95; }
+.etable-wrap { overflow-x: auto; }
+.etable td.uphint { font: 600 12px/1.2 var(--font); opacity: .8; }
+.etable td.red { color: var(--hot); font: 900 16px/1 var(--display); }
+.etable td.mint { color: var(--mint); font: 900 16px/1 var(--display); }
+.etable tr.gone td { opacity: .55; }
+.etable .acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.btn-chip.small { min-height: 32px; font-size: 12px; padding: 0 10px; white-space: nowrap; }
+.e-field { display: flex; flex-direction: column; gap: 4px; font: 800 12px/1 var(--font); letter-spacing: .06em; text-transform: uppercase; }
+.e-input { min-height: 44px; padding: 0 12px; border-radius: 10px; border: 2px solid rgba(255,255,255,.3); background: rgba(0,0,0,.3); color: #fff; font: 800 18px/1 var(--font); user-select: text; -webkit-user-select: text; }
+.e-input:focus-visible { outline: 3px solid var(--cyan); }
+.e-cost { margin: 0; font: 600 14px/1.4 var(--font); }
+.nsec { margin: 0 0 12px; padding: 12px 14px; border-radius: 12px; background: rgba(255,255,255,.05); max-width: 820px; user-select: text; -webkit-user-select: text; }
+.nsec h3 { margin: 0 0 6px; font: 900 16px/1.2 var(--display); letter-spacing: .06em; color: var(--gold); }
+.nsec p { margin: 0 0 8px; font: 600 14px/1.5 var(--font); }
+.nlinks { display: flex; flex-wrap: wrap; gap: 6px; }
+.ncode { display: block; margin: 0 0 8px; padding: 8px 10px; overflow-x: auto; }
+@media (max-width: 720px) {
+  .etgrid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .et { padding: 10px; }
+  .et-v { font-size: 24px; }
+  .etable, .etable tbody, .etable tr, .etable td { display: block; width: 100%; }
+  .etable thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .etable tbody tr { margin-bottom: 8px; padding: 8px 10px; border-radius: 12px; background: rgba(255,255,255,.06); border: 2px solid rgba(255,255,255,.08); }
+  .etable td, .board.etable td:nth-child(6) { display: flex !important; justify-content: space-between; align-items: center; gap: 10px; padding: 4px 0; background: none; border-radius: 0; text-align: right; }
+  .etable td::before { content: attr(data-label); font: 800 10px/1 var(--font); letter-spacing: .1em; text-transform: uppercase; opacity: .65; text-align: left; }
+  .etable td.nm { font-size: 17px; }
+  .etable td:first-child, .etable td:last-child { border-radius: 0; }
+  .etable td.rank { width: 100%; }
+  .etable td[colspan] { display: block !important; }
+  .etable td[colspan]::before { content: none; }
+  .etable td.rank { display: none !important; }
+  .board.etable th:nth-child(6) { display: none; }
+}

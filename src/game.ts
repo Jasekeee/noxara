@@ -378,6 +378,7 @@ $("signout").addEventListener("click", async () => {
 });
 $("nav-fighters").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.fighters(); });
 $("nav-board").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.leaderboard(); });
+$("nav-economy").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.economy(); });
 $("nav-sponsor").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.sponsorships(); });
 $("roster").addEventListener("click", (e) => {
   const li = (e.target as HTMLElement).closest<HTMLElement>("[data-acct]");
