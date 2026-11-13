@@ -131,7 +131,7 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
     println!("settle_match (guest won): {gas_settle} Tgas");
     assert_eq!(r["prize_to"], house.as_str(), "a guest's pot goes to the house");
     assert_eq!(ft(c, g.id().as_str()).await?, 0, "guests earn zero");
-    assert_eq!(ft(c, house.as_str()).await?, house0 + (9 * E + T) * 98 / 100);
+    assert_eq!(ft(c, house.as_str()).await?, house0 + (9 * E + T) * 98 / 100 - T, "the house paid the top-up and got the pot");
     let p: Value = c.view("get_player").args_json(json!({"account_id": g.id()})).await?.json()?;
     assert_eq!(p["wins"], 1);
     assert_eq!(p["pending"], Value::Null);

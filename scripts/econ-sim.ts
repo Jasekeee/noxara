@@ -1,7 +1,7 @@
 // Simulates the royale contract's bot economy (mirrors contracts/royale/src/lib.rs) over N matches with
 // the real win distribution from docs/balance.json, to tune the constants.
 //
-//   node scripts/econ-sim.ts [--matches 200] [--runs 400] [--entry 5] [--topup 15] ... [--curve]
+//   node scripts/econ-sim.ts [--matches 200] [--runs 400] [--entry 4] [--topup 30] ... [--curve]  (defaults = lib.rs)
 //
 // Outcome model [assumed]: winner drawn by per-fighter win rate of its personality (balance.json),
 // multiplied by (1 + UPGRADE_EDGE * (weaponTier + armor)); the human is a guest with HUMAN_WIN %.
@@ -16,13 +16,14 @@ const arg = (k: string, d: number) => {
 
 // ---- contract constants (keep in sync with lib.rs) -------------------------------------------
 export const C = {
-  ENTRY: arg("entry", 5),
-  TOP_UP: arg("topup", 15),
+  ENTRY: arg("entry", 4),
+  TOP_UP: arg("topup", 30),
   BURN_BPS: 200,
   HOUSE_BPS: 500,
   BOUNTY_BPS: arg("bounty-bps", 1500),
   STARTER: arg("starter", 100),
   HOUSE_GENESIS: 2000,
+  HOUSE_FLOOR: arg("house-floor", 1000),
   RESERVE: arg("reserve", 50),
   WEAPON: [arg("w1", 60), arg("w2", 120)],
   ARMOR: [arg("a1", 90), arg("a2", 180)],
@@ -90,7 +91,8 @@ function run(seed: number) {
     const sum = botW.reduce((a, b) => a + b, 0);
     const weights = [HUMAN_WIN * sum / (1 - HUMAN_WIN), ...botW];
     const winner = pick(weights);
-    // settle
+    // settle: the house pays the top-up while it's above its floor, else it is minted
+    if (house >= C.HOUSE_FLOOR + C.TOP_UP) house -= C.TOP_UP;
     pot += C.TOP_UP;
     const burn = (pot * C.BURN_BPS) / 10_000;
     const cut = (pot * C.HOUSE_BPS) / 10_000;

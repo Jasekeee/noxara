@@ -174,7 +174,9 @@ fn guest_win_goes_to_the_house() {
     assert_eq!(bal(&c, GUEST), 0, "guests earn zero");
     let pot = 9 * ENTRY_FEE + POT_TOP_UP;
     assert_eq!(r.prize.0 + r.burned.0 + r.house_cut.0, pot);
-    assert_eq!(c.balance(&c.house), house0 + pot - r.burned.0);
+    // the house (above its floor) paid the top-up itself: nothing minted
+    assert_eq!(r.minted.0, 0);
+    assert_eq!(c.balance(&c.house), house0 + pot - r.burned.0 - POT_TOP_UP);
     let p = c.get_player(acc(GUEST)).unwrap();
     assert_eq!((p.matches, p.wins, p.kills, p.earnings.0, p.pending), (1, 1, 3, 0, None));
     assert_eq!(c.get_leaderboard().players[0].account.as_str(), GUEST, "guests still get leaderboards");
@@ -229,7 +231,7 @@ fn real_player_who_paid_nothing_wins_nothing() {
     assert_eq!(r.prize_to, c.house);
     assert_eq!(bal(&c, ALICE), 0);
     assert_eq!(c.get_player(acc(ALICE)).unwrap().earnings.0, 0);
-    assert_eq!(c.balance(&c.house), house0 + r.prize.0 + r.house_cut.0);
+    assert_eq!(c.balance(&c.house), house0 + r.prize.0 + r.house_cut.0 - POT_TOP_UP);
     // and a bounty kill by a non-payer also feeds the house
     let s = start(&mut c, ALICE, 220);
     let r = settle(&mut c, s.match_id, 5, Some(0), 230);
@@ -267,7 +269,7 @@ fn guest_bounty_kill_feeds_the_house_not_the_guest() {
     assert_eq!(r.bounty_to.as_ref(), Some(&c.house));
     assert_eq!(bal(&c, GUEST), 0);
     // + the winner's first upgrade
-    assert_eq!(c.balance(&c.house), house0 + r.house_cut.0 + r.bounty_amount.0 + WEAPON_PRICES[0]);
+    assert_eq!(c.balance(&c.house), house0 + r.house_cut.0 + r.bounty_amount.0 + WEAPON_PRICES[0] - POT_TOP_UP);
     assert_supply(&c);
 }
 
@@ -555,4 +557,24 @@ fn long_run_economy_keeps_supply_consistent() {
         cfg.rookies
     );
     assert!(c.get_fighters().iter().all(|f| f.status == "active"));
+}
+
+#[test]
+fn the_house_reinvests_above_its_floor_and_mints_below_it() {
+    let mut c = setup();
+    let supply0 = c.token.total_supply;
+    let s = start(&mut c, GUEST, 200);
+    let r = settle(&mut c, s.match_id, 4, None, 210);
+    assert_eq!(r.minted.0, 0, "healthy house pays the top-up");
+    assert_eq!(c.token.total_supply, supply0 - r.burned.0, "no inflation while the house is healthy");
+    // drain the house below its floor (test only): now the top-up is minted
+    let house = c.house.clone();
+    let drain = c.balance(&house) - HOUSE_FLOOR;
+    c.move_tokens(&house, &acc(ALICE), drain, "test");
+    let supply1 = c.token.total_supply;
+    let s = start(&mut c, GUEST, 220);
+    let r = settle(&mut c, s.match_id, 4, None, 230);
+    assert_eq!(r.minted.0, POT_TOP_UP);
+    assert_eq!(c.token.total_supply, supply1 + POT_TOP_UP - r.burned.0);
+    assert_supply(&c);
 }

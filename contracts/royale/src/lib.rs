@@ -23,7 +23,9 @@
 //!
 //! $BOUNTY supply rules (NEP-141 inside this contract, see token.rs):
 //! * minted ONLY (a) once in `new()` (bot starter wallets + the house reserve) and (b) as the
-//!   fixed `POT_TOP_UP` added to every SETTLED match's pot;
+//!   fixed `POT_TOP_UP` added to every SETTLED match's pot — and only when the house can't pay it:
+//!   while the house holds more than `HOUSE_FLOOR`, it reinvests its income as the top-up instead,
+//!   so the supply stops growing once the house is healthy;
 //! * burned: `BURN_BPS` of every pot;
 //! * everything else (entries, prizes, bounties, upgrades, rookie grants) moves existing tokens.
 use near_contract_standards::fungible_token::events::{FtBurn, FtMint};
@@ -45,6 +47,8 @@ pub const ONE: u128 = 1_000_000_000_000_000_000;
 // retirement per 17-25 matches, the strongest bot reaches weapon tier 2 around match 10-13).
 pub const ENTRY_FEE: u128 = 4 * ONE;
 pub const POT_TOP_UP: u128 = 30 * ONE;
+/// The house keeps this much for rookie grants; above it, the house funds the pot top-up itself.
+pub const HOUSE_FLOOR: u128 = 1_000 * ONE;
 pub const BURN_BPS: u128 = 200; // 2% of every pot is burned
 pub const HOUSE_BPS: u128 = 500; // 5% of every pot goes to the house treasury
 pub const BOUNTY_BPS: u128 = 1_500; // killing the bounty carrier takes 15% of its wallet
@@ -208,6 +212,7 @@ pub struct MatchResult {
     /// who received the prize (the house for a guest win or no winner)
     pub prize_to: AccountId,
     pub prize: U128,
+    /// part of the top-up that was newly minted (0 when the house paid it)
     pub minted: U128,
     pub burned: U128,
     pub house_cut: U128,
@@ -304,6 +309,7 @@ pub struct ConfigView {
     pub rookies: u32,
     pub entry_fee: U128,
     pub pot_top_up: U128,
+    pub house_floor: U128,
     pub burn_bps: u16,
     pub house_bps: u16,
     pub bounty_bps: u16,
@@ -566,13 +572,19 @@ impl Contract {
         self.release_escrow(&m);
 
         // ---- the pot: escrowed entries + the minted top-up
-        self.mint(&me, POT_TOP_UP, "pot top-up");
+        let house = self.house.clone();
+        let minted = if self.balance(&house) >= HOUSE_FLOOR + POT_TOP_UP {
+            self.move_tokens(&house, &me, POT_TOP_UP, "pot top-up (the house reinvests)");
+            0
+        } else {
+            self.mint(&me, POT_TOP_UP, "pot top-up");
+            POT_TOP_UP
+        };
         let pot = m.pot.0 + POT_TOP_UP;
         let burned = pot * BURN_BPS / 10_000;
         let house_cut = pot * HOUSE_BPS / 10_000;
         let prize = pot - burned - house_cut;
         let prize_to = winner.map(|w| self.payee(&m, w)).unwrap_or_else(|| self.house.clone());
-        let house = self.house.clone();
         self.move_tokens(&me, &prize_to, prize, "match prize");
         self.move_tokens(&me, &house, house_cut, "house cut");
         self.burn(&me, burned, "pot burn");
@@ -640,7 +652,7 @@ impl Contract {
             winner,
             prize_to,
             prize: U128(prize),
-            minted: U128(POT_TOP_UP),
+            minted: U128(minted),
             burned: U128(burned),
             house_cut: U128(house_cut),
             bounty_killer,
@@ -769,6 +781,7 @@ impl Contract {
             rookies: self.rookies,
             entry_fee: U128(ENTRY_FEE),
             pot_top_up: U128(POT_TOP_UP),
+            house_floor: U128(HOUSE_FLOOR),
             burn_bps: BURN_BPS as u16,
             house_bps: HOUSE_BPS as u16,
             bounty_bps: BOUNTY_BPS as u16,
