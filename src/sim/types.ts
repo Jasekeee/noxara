@@ -4,6 +4,12 @@
 // integers 0..4095 (4096 per turn; 0 = +x, 1024 = +y). The world is the x/y plane; the renderer maps
 // sim y to three.js z.
 
+/**
+ * Version of the simulation RULES. Bump on ANY change that can alter a replay (rules, AI, mapgen,
+ * numbers). The match server refuses records made with a different version.
+ */
+export const SIM_VERSION = "r4";
+
 export const TICK_HZ = 20;
 export const MATCH_SECONDS = 180;
 export const MATCH_TICKS = TICK_HZ * MATCH_SECONDS;

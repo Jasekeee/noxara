@@ -31,6 +31,7 @@ games: "Build NPCs with wallets, player-owned markets and economies that evolve 
 - Three.js (pinned) + Vite + TypeScript. Kenney CC0 3D kits (Blaster Kit, Nature/Platformer, Mini/Animated Characters, Particle Pack) + synthesized sfx.
 - **Deterministic match simulation** in `src/sim/` (pure TS, no DOM): fixed tick (20 Hz), seeded PRNG only (never `Math.random`), integer/fixed-point math and table trig (no `Math.sin/cos/atan2` in the sim), recorded player inputs. Runs in the browser (render interpolates to 60 FPS) and in Node (match server / verifier). `npm run verify-match <id>` replays the input log and reproduces the result hash.
 - On chain (testnet): `start_match` (seed from next-block randomness), `settle_match(result, input-log hash)` signed by the match-server key; bot wallets, bounty, sponsorship shares, upgrades. Trust model stated honestly in README: the server computes, the chain records, anyone can re-verify any match offline.
+- **`SIM_VERSION` in `src/sim/types.ts` must be bumped on ANY change to sim rules/AI/mapgen/numbers**; the match server refuses records from another version.
 - Bot AI: utility AI per personality (loot, chase, kite, hide in bushes, flee storm, third-party fights). Upgrades change stats and behaviour.
 - Reuse from `~/Developer/hoard` (copy, don't modify): relayer (NEP-366, guest FC keys, signature + key-owner checks, gas budgets), NEP-141 token code, next-block randomness pattern, NPC sub-accounts with no keys.
 
