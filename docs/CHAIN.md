@@ -38,6 +38,7 @@ dev patch.
 | migration 6: deposit payer / refund to payer (code only) | `7Brr5XP1kTSyhviC6N5nif2cHEAdMkMvTxPZYf7J6hJt` |
 | migration 7: V1 player records fail closed to the relayer as payer (code only) | `6v2dzRbizjP3QaF2kcTjHymjKESKxez7GwQdvaJNy4cb` |
 | migration 8: NOXARA + audits #1/#2 (code only; Nox/NOX metadata) / `set_teardown_beneficiary(br-7e8492.testnet)` | `He34ga4cPqAmAKzt21m3wCTKpTtvwzNH2eaZv5eWQ8cS` / `1wo26HWKkHEhYZtYuHyqZTREt9QvEzaNi9AzPaerJdq` |
+| migration 9: teardown_clear review fix (code only) | `CjH3XLH87dwNP1bHJiUUZxutRNsW5DyyQEnFPXYPGb85` |
 | live check after migration 8: guest match #50 start / settle (verified, played in real time) | `2QtTrSx4oZ4bQJpMtuQMkE2mQ3Cn5h4sy6MKdHVFsHDc` / `HtHbHewJmJMNfX1cyDArRXCqCdbq26HoTKdueD6Pmgcj` |
 | T3 live (game client): real account created / wallet adds the game key | `DBxrCqzzSwc9SrHUdQ4wHhV1tHvTbmuF4SHCd2xq4iA7` / `iwpQgpWqkjpADK9TVmzJt6WERewsCBH72SzfyNikEc4` |
 | T3 live: `house_grant` 60 (testing on-ramp) / relayed `sponsor` Pep 20 | `9RnX2RXNaswbbSZKrijUyAauBE8fhuBDfAm1pL9u5gVG` / `D4bU7p7cSzDGzyJfm25C6nhfaVGRpUSP1Unzc9AKV2Z8` |
