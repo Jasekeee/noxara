@@ -3,7 +3,8 @@
 // T1 tuning (tables live in rules.ts):
 //  - 20 Hz, 3600 ticks max. Island radius 32 u, spawns on a 24 u ring (±1.5 u, ±60 angle jitter).
 //  - 18 obstacles (rock r1.0–1.6 / tree r0.6–0.8 / crate r0.8, ≥1.4 u walkable gaps), 14–18 bushes
-//    (r1.6–2.4), 9 chests (blaster 34 / shotgun 24 / sniper 20 / grenade 22 %), 6 heals (+35 hp).
+//    (r1.6–2.4), 9 chests (1 central + 8 on a 14–21 u ring between spawns;
+//    blaster 38 / shotgun 27 / sniper 15 / grenade 20 %), 6 heals (+35 hp).
 //  - Fighter: 100 hp, r 0.5 u, 5 u/s (250 FP/tick), soft fighter-fighter separation.
 //    A closed chest opens when the fighter centre is within 1.4 u of it; heals likewise (only if hurt).
 //  - Weapons: popper 12dmg cd6 9u 0.9u/t 6 shots rl30 · blaster 16 cd4 11u 1.0u/t 10 rl36 ·
@@ -11,10 +12,13 @@
 //    grenade 45 (→50 % at edge) r2.5u, lobbed 9 u over obstacles, fuse 16 t (or impact on an enemy),
 //    3 shots cd20 rl50; owners are immune to their own grenades.
 //    Crit 8 % ×1.5. Weapon tier +10 % dmg, armor −2 per level (min 1).
+//  - Grenade proximity fuse: explodes on touching an enemy (0.65 u) or after the fuse.
 //  - Regen: after 3 s without being hurt or shooting, +4 hp every 0.5 s (8 hp/s).
 //  - Bush stealth: hidden unless viewer ≤2.5 u, target shot ≤20 ticks ago, or was hurt ≤10 ticks ago.
 //  - Storm: 6 phases (rules.ts STORM_PHASES): 32 → 22 → 14 → 8 → 4.5 → 2.5 → 0 u, dps 4/6/9/12/16/20
 //    (applied every 10 ticks as ceil(dps/2), ignores armor). Storm hits emit "hit" with by = -1.
+//    Shrinks (s): 20–35, 50–65, 80–95, 108–123, 140–165 (2.5 u), 169–177 (closed). Each phase is
+//    announced (event "storm") ~13–17 s before it shrinks; the new centre drifts ≤70 % of the slack.
 //    state.storm also carries tx/ty = the centre of the circle it is shrinking toward (StormX).
 //  - Time out at 3600 ticks: highest hp wins (tiebreak lowest idx). If every remaining fighter would
 //    die on the same tick, the one with the most hp left survives with 1 hp.

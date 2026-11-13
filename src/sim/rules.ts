@@ -93,8 +93,8 @@ export const STORM_PHASES: StormPhase[] = [
   { announce: 35 * S, shrinkStart: 50 * S, shrinkEnd: 65 * S, r: 14 * FP, dps: 6 },
   { announce: 65 * S, shrinkStart: 80 * S, shrinkEnd: 95 * S, r: 8 * FP, dps: 9 },
   { announce: 95 * S, shrinkStart: 108 * S, shrinkEnd: 123 * S, r: 4500, dps: 12 },
-  { announce: 123 * S, shrinkStart: 135 * S, shrinkEnd: 150 * S, r: 2500, dps: 16 },
-  { announce: 150 * S, shrinkStart: 160 * S, shrinkEnd: 176 * S, r: 0, dps: 20 },
+  { announce: 123 * S, shrinkStart: 140 * S, shrinkEnd: 165 * S, r: 2500, dps: 16 },
+  { announce: 165 * S, shrinkStart: 169 * S, shrinkEnd: 177 * S, r: 0, dps: 20 },
 ];
 /** Storm damage is applied every STORM_EVERY ticks (= dps / 2, rounded up). */
 export const STORM_EVERY = 10;
