@@ -77,7 +77,7 @@ export class SpendBudget {
 /** What we keep in hand before starting each kind of spending (upper-bound estimates). */
 export const RESERVE = {
   guest: near("0.025"), // account funding + guest storage + 2 txs of gas
-  relay: near("0.012"), // a relayed call: <= 100 Tgas attached at the max gas price, refunds come back
+  relay: near("0.018"), // a relayed call: <= 150 Tgas attached at the max gas price, refunds come back
   register: near("0.025"), // a real account's storage subsidy + gas
 };
 

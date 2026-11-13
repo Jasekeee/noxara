@@ -28,7 +28,7 @@ const STORE_XP = "bountyroyale.localxp.v1";
 const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
-const START_GAS = 100n * 10n ** 12n;
+const START_GAS = 150n * 10n ** 12n; // worst case: retirements + rookie accounts at start (audit #10)
 
 /** yocto-$NOX string -> display number with 2 decimals. */
 export const toBounty = (y: string | bigint | undefined | null): number => (y === undefined || y === null ? 0 : Number(BigInt(y) / YOCTO_PER_CENT) / 100);

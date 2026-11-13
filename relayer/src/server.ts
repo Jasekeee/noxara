@@ -45,9 +45,9 @@ const policy: RelayPolicy = {
   gameContractId: gameId,
   guestParentId: relayerId,
   allowedMethods: GAME_METHODS,
-  maxGasPerAction: 100n * TGAS,
+  maxGasPerAction: 150n * TGAS,
   maxActions: 1,
-  methodGas: { start_match: 100n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS, claim_welcome: 30n * TGAS },
+  methodGas: { start_match: 150n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS, claim_welcome: 30n * TGAS },
 };
 // Gas budgets (attached gas, an upper bound on what we pay): per sender and for everyone, per hour.
 const senderGas = new Budget(BigInt(env("GAS_PER_SENDER_PER_HOUR_TGAS", "3000")) * TGAS, 3_600_000);
@@ -136,7 +136,7 @@ async function handleSettle(body: Record<string, unknown>) {
   if (settling.has(matchId)) return { code: 409, body: { error: "already settling", code: "busy" } };
   settling.add(matchId);
   try {
-    const v = judge({ ...m, match_id: matchId }, record);
+    const v = judge({ ...m, match_id: matchId }, record, undefined, Date.now());
     if (!v.ok) return { code: v.status, body: { error: v.reason, code: v.code ?? "refused" } };
     fs.writeFileSync(recordPath(matchId), JSON.stringify({ match_id: matchId, input_log_hash: logHash, record }));
     const r = await chain.settle(v.args);

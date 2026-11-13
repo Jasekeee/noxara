@@ -42,6 +42,7 @@ export const MAX_INPUTS = MATCH_TICKS * 2;
 
 export function checkInputs(inputs: unknown): string | null {
   if (!Array.isArray(inputs)) return "inputs must be an array";
+  // a recorder stores only changes, at most a couple per tick: more rows than that isn't a recording
   if (inputs.length > MAX_INPUTS) return "input log too long";
   let last = -1;
   for (const row of inputs) {
@@ -78,10 +79,14 @@ export function detailedReplay(cfg: MatchConfig, inputs: MatchRecord["inputs"]) 
     }
     for (const e of m.step(cur)) if (e.t === "bounty") bountyKiller = e.by;
   }
-  return { hash: m.hash(), kills: m.state.fighters.map((f) => f.kills), bountyKiller };
+  return { hash: m.hash(), kills: m.state.fighters.map((f) => f.kills), bountyKiller, ticks: m.state.tick };
 }
 
-export function judge(chain: ChainMatch, record: MatchRecord, replay: Replayer = replayRecord): Verdict {
+/** A match can't be played faster than real time: TICK_HZ ticks a second, minus slack for clocks. */
+export const REALTIME_SLACK = { factor: 0.9, ms: 5_000 };
+export const TICK_MS = 1000 / 20;
+
+export function judge(chain: ChainMatch, record: MatchRecord, replay: Replayer = replayRecord, nowMs?: number): Verdict {
   const t0 = performance.now();
   if (!record || record.version !== 1) return { ok: false, status: 400, reason: "unsupported record version" };
   if (chain.status && chain.status !== "Pending") return { ok: false, status: 409, reason: "match already settled" };
@@ -99,6 +104,18 @@ export function judge(chain: ChainMatch, record: MatchRecord, replay: Replayer =
   if (diff) return { ok: false, status: 409, code: "config_mismatch", reason: `record does not match the on-chain match (${diff})` };
 
   const r = replay(cfg, record.inputs);
+  // real time: the whole match (as replayed) must have had time to be played since start_match.
+  // The seed is public and the sim deterministic, so this blocks instant offline-searched records;
+  // it can't prove a human played (the honest trust model: the server verifies consistency).
+  let detailed: ReturnType<typeof detailedReplay> | null = null;
+  const startMs = Number((chain as { start_ms?: string }).start_ms ?? 0);
+  if (nowMs !== undefined && startMs > 0) {
+    detailed = detailedReplay(cfg, record.inputs);
+    const minMs = detailed.ticks * TICK_MS * REALTIME_SLACK.factor - REALTIME_SLACK.ms;
+    if (nowMs - startMs < minMs) {
+      return { ok: false, status: 409, code: "too_fast", reason: `this match lasts ${Math.round((detailed.ticks * TICK_MS) / 1000)} s but was submitted ${Math.round((nowMs - startMs) / 1000)} s after it started` };
+    }
+  }
   if (r.hash !== record.hash) return { ok: false, status: 409, code: "replay_mismatch", reason: "replay mismatch: the server's simulation disagrees with this record" };
   if (!Array.isArray(r.placements) || r.placements.length !== FIGHTERS) return { ok: false, status: 500, reason: "simulation returned bad placements" };
 
@@ -110,7 +127,7 @@ export function judge(chain: ChainMatch, record: MatchRecord, replay: Replayer =
     bountyKiller = r.bountyKiller ?? null;
     killsFrom = "replay";
   } else {
-    const d = detailedReplay(cfg, record.inputs);
+    const d = detailed ?? detailedReplay(cfg, record.inputs);
     if (d.hash === r.hash) {
       kills = d.kills;
       bountyKiller = d.bountyKiller;

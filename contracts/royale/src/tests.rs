@@ -19,9 +19,14 @@ fn acc(s: &str) -> AccountId {
     s.parse().unwrap()
 }
 
+thread_local! {
+    /// the contract's account id for `ctx` (the worst-case log tests use a 50-char one)
+    static CUR: std::cell::RefCell<String> = std::cell::RefCell::new(ME.to_string());
+}
+
 fn ctx(pred: &str, height: u64, deposit: NearToken) {
     let mut b = VMContextBuilder::new();
-    b.current_account_id(acc(ME))
+    b.current_account_id(acc(&CUR.with(|c| c.borrow().clone())))
         .predecessor_account_id(acc(pred))
         .signer_account_id(acc(pred))
         .block_height(height)
@@ -47,6 +52,11 @@ fn setup() -> Contract {
 
 /// start + resolve (the self-call) for `who`; returns the match id.
 fn start(c: &mut Contract, who: &str, h: u64) -> MatchStart {
+    // most tests start many matches quickly: lift the guests' one-free-match-a-minute cooldown here
+    // (tested on its own in free_matches_have_a_cooldown_and_are_for_guests_only)
+    let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+    last.remove(&acc(who));
+    last.flush();
     ctx(who, h, NearToken::from_yoctonear(0));
     let _ = c.start_match();
     let id = c.next_match_id - 1;
@@ -159,8 +169,8 @@ fn unregistered_players_cannot_start() {
 #[should_panic(expected = "only the match server")]
 fn only_the_server_settles() {
     let mut c = setup();
-    let s = start(&mut c, ALICE, 200);
-    ctx(ALICE, 210, NearToken::from_yoctonear(0));
+    let s = start(&mut c, GUEST, 200);
+    ctx(GUEST, 210, NearToken::from_yoctonear(0));
     c.settle_match(s.match_id, places(0), vec![0; FIGHTERS], None, "h".into(), None);
 }
 
@@ -168,7 +178,7 @@ fn only_the_server_settles() {
 #[should_panic(expected = "duplicate placement")]
 fn bad_placements_rejected() {
     let mut c = setup();
-    let s = start(&mut c, ALICE, 200);
+    let s = start(&mut c, GUEST, 200);
     ctx(SERVER, 210, NearToken::from_yoctonear(0));
     c.settle_match(s.match_id, vec![1, 1, 2, 3, 4, 5, 6, 7, 8, 9], vec![0; FIGHTERS], None, "h".into(), None);
 }
@@ -231,23 +241,12 @@ fn real_player_pays_entry_and_wins_the_pot() {
 }
 
 #[test]
-fn real_player_who_paid_nothing_wins_nothing() {
-    // review fix #3: no entry paid -> prize-ineligible exactly like a guest
+fn a_real_account_without_funds_cannot_take_a_free_slot() {
+    // audit #3: free matches are for the relayer's guests only (24 throwaway accounts can't lock them)
     let mut c = setup();
-    let house0 = c.balance(&c.house);
-    let s = start(&mut c, ALICE, 200);
-    assert_eq!(s.player_paid.0, 0);
-    let r = settle(&mut c, s.match_id, 0, None, 210);
-    assert_eq!(r.prize_to, c.house);
-    assert_eq!(bal(&c, ALICE), 0);
-    assert_eq!(c.get_player(acc(ALICE)).unwrap().earnings.0, 0);
-    assert_eq!(c.balance(&c.house), house0 + r.prize.0 + r.house_cut.0 - POT_TOP_UP);
-    // and a bounty kill by a non-payer also feeds the house
-    let s = start(&mut c, ALICE, 220);
-    let r = settle(&mut c, s.match_id, 5, Some(0), 230);
-    assert_eq!(r.bounty_to.as_ref(), Some(&c.house));
-    assert_eq!(bal(&c, ALICE), 0);
-    assert_supply(&c);
+    ctx(ALICE, 200, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).is_err());
+    assert!(c.pending_free.is_empty());
 }
 
 #[test]
@@ -437,19 +436,20 @@ fn free_matches_are_capped_and_lazily_swept_but_never_block_paid_play() {
     // once the oldest free ones expire, the next free start sweeps them itself
     let s = start(&mut c, "g-late.relay.test", 200 + EXPIRY_FREE_BLOCKS + 1);
     assert!(s.seed > 0);
-    assert_eq!(c.pending_free.len(), 3, "three expired swept, one added");
+    assert_eq!(c.pending_free.len(), 5, "one expired swept per start (bounded), one added");
     // the paid match (longer expiry) was not swept
     assert_eq!(c.pending_paid, 1);
     assert_supply(&c);
 }
 
 #[test]
-fn a_bot_that_cannot_pay_retires_at_start_even_with_escrow() {
-    // judge #2: a bot at ~0 must not play another match on money that sits in escrow elsewhere
+fn a_bot_short_only_because_of_escrow_blocks_free_matches_not_paid_ones() {
+    // audit #2: retirement looks at wallet + escrow; concurrency is capped by the bots' wallets
     let mut c = setup();
+    ctx(RELAY, 101, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("g-2222.relay.test")), None);
     let pip = c.slots[2].clone();
     let house = c.house.clone();
-    // Pip has played and is down to 1.5 entries
     let left = ENTRY_FEE + ENTRY_FEE / 2;
     c.move_tokens(&pip, &house, STARTER - left, "test");
     let mut f = c.load_fighter(&pip).unwrap();
@@ -457,14 +457,21 @@ fn a_bot_that_cannot_pay_retires_at_start_even_with_escrow() {
     c.save_fighter(f);
     let s1 = start(&mut c, GUEST, 200); // Pip pays an entry, keeps half an entry
     assert_eq!(s1.roster[2].paid.0, ENTRY_FEE);
-    let s2 = start(&mut c, ALICE, 205); // < entry: retires now, a rookie plays instead
-    assert_ne!(c.slots[2], pip, "retired at start");
-    assert_ne!(s2.roster[2].account, pip);
-    assert_eq!(c.get_fighter(pip.clone()).unwrap().status, "retired");
-    // its escrowed entry still settles normally (Pip appears in s1's records)
+    // a second FREE match would need Pip's escrowed money: refused, Pip is not retired
+    ctx("g-2222.relay.test", 205, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).is_err(), "island busy");
+    assert_eq!(c.slots[2], pip);
+    // a PAID match goes ahead; Pip plays for what it has
+    grant(&mut c, ALICE, 50 * ONE);
+    let s2 = start(&mut c, ALICE, 206);
+    assert_eq!(s2.roster[2].paid.0, ENTRY_FEE / 2);
+    assert_eq!(c.slots[2], pip, "not retired: its bankroll isn't empty");
+    // both settle, Pip loses both: wallet + escrow empty -> it retires at settlement
     settle(&mut c, s1.match_id, 4, None, 210);
+    assert_eq!(c.slots[2], pip, "s2 still holds its entry");
+    settle(&mut c, s2.match_id, 4, None, 220);
+    assert_ne!(c.slots[2], pip);
     assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, 0);
-    assert_eq!(c.load_fighter(&pip).unwrap().record.matches, 4);
     assert_supply(&c);
 }
 
@@ -562,7 +569,7 @@ fn long_run_economy_keeps_supply_consistent() {
     let mut seen = std::collections::BTreeSet::new();
     let mut h = 200;
     for i in 0..120u64 {
-        let who = if i % 3 == 0 { ALICE } else { GUEST };
+        let who = GUEST;
         let s = start(&mut c, who, h);
         let x = (s.seed as u64 ^ i) as usize;
         let winner = x % FIGHTERS;
@@ -678,6 +685,9 @@ fn a_sponsor_loses_when_the_bot_retires_broke() {
         }
     }
     assert_ne!(c.slots[4], coward, "the coward went broke");
+    assert!(!c.get_sponsorships(acc(ALICE)).is_empty(), "open until close_retired");
+    ctx("anyone.test", h, NearToken::from_yoctonear(0));
+    c.close_retired(coward.clone());
     assert!(c.get_sponsorships(acc(ALICE)).is_empty(), "the pool closed");
     assert!(c.sponsors.get(&coward).is_none());
     assert!(bal(&c, ALICE) < 100 * ONE, "the stake is gone: {}", bal(&c, ALICE));
@@ -727,6 +737,7 @@ fn xp_progression_and_level_upgrades_in_the_roster() {
     assert_eq!(c.get_match(s.match_id).unwrap().player_upgrades.skin, 10);
     // a high-level player brings weapon tier 2 + armor 1 (never above the best bot)
     c.xp.insert(acc(ALICE), 2_000);
+    grant(&mut c, ALICE, 10 * ONE);
     let s = start(&mut c, ALICE, 230);
     assert_eq!((s.player_level, s.player_upgrades.clone()), (10, Upgrades { weapon_tier: 2, armor: 1, skin: 14 }));
 }
@@ -836,16 +847,16 @@ fn unregister_needs_closed_sponsorships_and_cleans_xp() {
 }
 
 #[test]
-fn no_sponsoring_or_withdrawing_while_the_bot_is_in_a_match() {
+fn no_buying_in_during_a_match_but_withdrawing_is_never_blocked() {
     let mut c = setup();
     grant(&mut c, ALICE, 50 * ONE);
     let bot = c.slots[0].clone();
     let s = start(&mut c, GUEST, 200); // every bot now has an entry in escrow
     ctx(ALICE, 201, NearToken::from_yoctonear(0));
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.sponsor(bot.clone(), U128(10 * ONE))));
-    assert!(r.is_err(), "no front-running a pending match");
+    assert!(r.is_err(), "no buying in on a known outcome");
     settle(&mut c, s.match_id, 3, None, 210);
-    sponsor(&mut c, ALICE, &bot, 10 * ONE, 211); // fine once settled
+    sponsor(&mut c, ALICE, &bot, 10 * ONE, 211);
     let mut h = 220;
     for _ in 0..5 {
         let s = start(&mut c, GUEST, h);
@@ -853,20 +864,21 @@ fn no_sponsoring_or_withdrawing_while_the_bot_is_in_a_match() {
         h += 10;
     }
     start(&mut c, GUEST, h); // pending again
+    let wallet = c.balance(&bot);
+    let pool = c.sponsors.get(&bot).unwrap().clone();
+    let expect = pool.entries[0].shares.0 * wallet / pool.total_shares.0;
     ctx(ALICE, h + 2, NearToken::from_yoctonear(0));
-    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.unsponsor(bot.clone())));
-    assert!(r.is_err(), "no withdrawing while a match is pending");
+    let got = c.unsponsor(bot.clone());
+    assert_eq!(got.0, expect, "audit #4: valued on the wallet only, never locked by pending matches");
 }
 
 #[test]
-fn a_pool_closes_only_after_the_retired_bots_escrow_comes_back() {
+fn a_retired_bot_is_settled_by_a_separate_bounded_call() {
+    // audit #1: pools are never closed inside start/settle; close_retired does it (one event)
     let mut c = setup();
-    ctx(RELAY, 101, STORAGE_DEPOSIT);
-    c.storage_deposit(Some(acc("g-2222.relay.test")), None);
     grant(&mut c, ALICE, 50 * ONE);
-    let bot = c.slots[2].clone(); // idx 3
+    let bot = c.slots[2].clone();
     sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
-    // drain the bot (test only) so that after one entry it can't pay the next
     let house = c.house.clone();
     let keep = ENTRY_FEE + ENTRY_FEE / 2;
     let b = c.balance(&bot);
@@ -874,18 +886,22 @@ fn a_pool_closes_only_after_the_retired_bots_escrow_comes_back() {
     let mut f = c.load_fighter(&bot).unwrap();
     f.record.matches = 3;
     c.save_fighter(f);
-    let s1 = start(&mut c, GUEST, 200); // pays an entry: escrow > 0, wallet < entry
-    let _s2 = start(&mut c, "g-2222.relay.test", 201); // can't pay: retires, but its s1 entry is pending
-    assert_ne!(c.slots[2], bot, "retired at start");
-    assert!(c.sponsors.get(&bot).is_some(), "pool still open while s1 holds its entry");
+    let s1 = start(&mut c, GUEST, 200);
+    settle(&mut c, s1.match_id, 4, None, 210); // it loses: wallet < entry, nothing in escrow -> retires
+    assert_ne!(c.slots[2], bot, "retired at settlement");
+    assert!(c.sponsors.get(&bot).is_some(), "the pool is NOT closed inside settle");
     let alice0 = bal(&c, ALICE);
-    // s1 settles and the retired bot WINS it: the prize, dividend and closing all reach the sponsor
-    let r = settle(&mut c, s1.match_id, 3, None, 210);
-    assert_eq!(r.prize_to, bot);
-    assert!(c.sponsors.get(&bot).is_none(), "closed after the escrow came back");
+    let house0 = c.balance(&house);
+    let wallet = c.balance(&bot);
+    // anyone settles it
+    ctx("anyone.test", 220, NearToken::from_yoctonear(0));
+    let to_house = c.close_retired(bot.clone());
+    assert!(c.sponsors.get(&bot).is_none());
     assert!(c.get_sponsorships(acc(ALICE)).is_empty());
-    let got = bal(&c, ALICE) - alice0;
-    assert!(got > r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000, "dividend + share of the final bankroll: {got}");
+    assert_eq!(c.balance(&bot), 0, "nothing stranded in the keyless retired account");
+    assert_eq!(bal(&c, ALICE) - alice0 + to_house.0, wallet);
+    assert_eq!(c.balance(&house), house0 + to_house.0);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.close_retired(c.slots[0].clone()))).is_err(), "active bots can't be closed");
     assert_supply(&c);
 }
 
@@ -1007,9 +1023,9 @@ fn below_the_house_floor_the_credit_waits() {
     let house = c.house.clone();
     let spare = c.balance(&house) - HOUSE_FLOOR;
     c.move_tokens(&house, &acc(GUEST), spare, "test");
-    let s = start(&mut c, "dave.testnet", 600);
-    assert_eq!(s.player_paid.0, 0, "plays free (and prize-ineligible) for now");
-    assert_eq!(c.welcome_credit(&acc("dave.testnet")), WELCOME_STAKE, "credit untouched");
+    ctx("dave.testnet", 600, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).is_err(), "no free matches for real accounts");
+    assert_eq!(c.welcome_credit(&acc("dave.testnet")), WELCOME_STAKE, "credit untouched, it waits for the house");
 }
 
 #[test]
@@ -1104,22 +1120,22 @@ fn a_griefer_cannot_block_teardown() {
 }
 
 #[test]
-fn season_end_exit_waits_for_bots_in_a_match() {
+fn season_end_exit_works_even_with_a_match_pending() {
     let mut c = setup();
     grant(&mut c, ALICE, 50 * ONE);
     let bot = c.slots[0].clone();
     sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
-    let s = start(&mut c, GUEST, 200); // the bot now has an entry in escrow
+    start(&mut c, GUEST, 200); // the bot now has an entry in escrow
+    let wallet = c.balance(&bot);
+    let pool = c.sponsors.get(&bot).unwrap().clone();
+    let expect = pool.entries[0].shares.0 * wallet / pool.total_shares.0;
     let mut b = VMContextBuilder::new();
     b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).block_timestamp(SEASON_END_MS * 1_000_000);
     testing_env!(b.build());
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.storage_unregister(Some(true)))).is_err(), "no exit on an unsettled outcome");
-    assert_eq!(c.get_sponsorships(acc(ALICE)).len(), 1, "still open");
-    settle(&mut c, s.match_id, 3, None, 300);
-    let mut b = VMContextBuilder::new();
-    b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).block_timestamp(SEASON_END_MS * 1_000_000);
-    testing_env!(b.build());
-    assert!(c.storage_unregister(Some(true)));
+    let before = c.total_burned;
+    assert!(c.storage_unregister(Some(true)), "never blocked by other people's matches");
+    assert_eq!(c.token.total_supply + 0, c.total_minted - c.total_burned);
+    assert_eq!(c.total_burned - before, 30 * ONE + expect, "valued on the wallet, then burned on leaving (force)");
 }
 
 #[test]
@@ -1162,4 +1178,168 @@ fn measure_guest_storage() {
     let need = env::storage_byte_cost().as_yoctonear() * (bytes as u128 * 12 / 10);
     println!("GUEST: player {p} B + match {m} B + ft + xp = {bytes} bytes; +20% = {} yocto", need);
     assert!(need <= GUEST_STORAGE_DEPOSIT.as_yoctonear(), "GUEST_STORAGE_DEPOSIT too small: need {need}");
+}
+
+
+// ============================================================ audit PoCs: the exploits no longer work
+
+fn guest_n(c: &mut Contract, i: usize) -> String {
+    let g = format!("g-{i:010}.relay.test");
+    ctx(RELAY, 150, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc(&g)), None);
+    g
+}
+
+#[test]
+fn audit_concurrent_free_matches_cannot_force_mass_retirement() {
+    let mut c = setup();
+    let s = start(&mut c, GUEST, 200);
+    settle(&mut c, s.match_id, 0, None, 205);
+    let house0 = c.balance(&c.house);
+    // throwaway non-guest accounts can't take free slots at all
+    ctx("evil.test", 150, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("att0.test")), None);
+    ctx("att0.test", 300, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).is_err());
+    // 24 relayer guests all starting at once: once a bot's wallet can't fund another entry the island
+    // says "busy" instead of retiring anyone
+    let mut busy = 0;
+    for i in 0..24 {
+        let g = guest_n(&mut c, i);
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| start(&mut c, &g, 300 + i as u64)));
+        if r.is_err() {
+            busy += 1;
+        }
+    }
+    println!("24 concurrent guest starts: {busy} refused as busy, rookies {}", c.rookies);
+    assert_eq!(c.rookies, 0, "nobody was force-retired");
+    // everything expires and is swept: every bot gets its entries back, nothing stranded
+    let ids: Vec<u64> = c.pending_free.clone();
+    for id in ids {
+        ctx("anyone.test", 300 + EXPIRY_FREE_BLOCKS + 50, NearToken::from_yoctonear(0));
+        c.sweep_match(U64(id));
+    }
+    assert!(c.get_fighters().iter().all(|f| f.status == "active" && f.fighter.escrowed.0 == 0));
+    assert_eq!(c.balance(&c.house), house0, "the house paid nothing");
+    assert_supply(&c);
+}
+
+#[test]
+fn audit_an_empty_house_does_not_churn_rookies() {
+    let mut c = setup();
+    let house = c.house.clone();
+    let mut h = 200;
+    for _ in 0..40 {
+        let hb = c.balance(&house);
+        c.move_tokens(&house, &acc(ALICE), hb, "keep the house empty");
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 5, None, h + 5);
+        h += 10;
+    }
+    assert_eq!(c.rookies, 0, "no unfunded rookies: broke bots keep their slot until the house can fund one");
+    assert!(c.get_fighters().iter().all(|f| f.status == "active"));
+}
+
+#[test]
+fn audit_a_pending_match_never_blocks_unsponsor() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[0].clone();
+    sponsor(&mut c, ALICE, &bot, 10 * ONE, 150);
+    let mut h = 200;
+    for _ in 0..5 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 3, None, h + 5);
+        h += 10;
+    }
+    let griefer = guest_n(&mut c, 77);
+    start(&mut c, &griefer, h); // a match pending at all times
+    ctx(ALICE, h + 3, NearToken::from_yoctonear(0));
+    let back = c.unsponsor(bot.clone());
+    assert!(back.0 > 0, "withdrawn while a match is pending");
+}
+
+/// Worst case for the 16 KiB log limit: a 50-char contract id (so 62-char rookie ids), 64-char sponsor
+/// names on every bot, and ALL eight losing bots retiring + eight rookies in ONE settlement.
+#[test]
+fn audit_worst_case_logs_fit_in_16_kib() {
+    const LONG: &str = "a-very-long-contract-name-for-the-log-test.testnet"; // 50 chars
+    CUR.with(|c| *c.borrow_mut() = LONG.to_string());
+    ctx(LONG, 100, NearToken::from_yoctonear(0));
+    let mut c = Contract::new(acc("owner.test"), acc(SERVER), acc(RELAY), Some(acc("operator.test")), None);
+    ctx(RELAY, 101, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc(GUEST)), None);
+    // 3 sponsors with 64-char names on every bot
+    for i in 0..27 {
+        let who = format!("{:0>59}.test", i);
+        ctx(&who, 120, STORAGE_DEPOSIT);
+        c.storage_deposit(None, None);
+        let house = c.house.clone();
+        c.move_tokens(&house, &acc(&who), 10 * ONE, "test");
+        let bot = c.slots[i % 9].clone();
+        ctx(&who, 121, NearToken::from_yoctonear(0));
+        c.sponsor(bot, U128(10 * ONE));
+    }
+    c.mint(&c.house.clone(), 20_000 * ONE, "test: enough to fund every rookie");
+    let mut h = 200;
+    let mut worst_settle = 0usize;
+    let mut worst_start = 0usize;
+    let mut retired_at_once = 0u32;
+    for _ in 0..40 {
+        let r0 = c.rookies;
+        near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart).remove(&acc(GUEST));
+        ctx(GUEST, h, NearToken::from_yoctonear(0));
+        let _ = c.start_match();
+        worst_start = worst_start.max(near_sdk::test_utils::get_logs().iter().map(|l| l.len()).sum());
+        let id = c.next_match_id - 1;
+        ctx(LONG, h + 1, NearToken::from_yoctonear(0));
+        c.resolve_start(U64(id));
+        settle(&mut c, U64(id), 5, None, h + 5);
+        worst_settle = worst_settle.max(near_sdk::test_utils::get_logs().iter().map(|l| l.len()).sum());
+        retired_at_once = retired_at_once.max(c.rookies - r0);
+        h += 10;
+    }
+    // and the separate pool closings, one bot each
+    let mut worst_close = 0usize;
+    for b in c.get_retired() {
+        ctx("anyone.test", h, NearToken::from_yoctonear(0));
+        c.close_retired(b.fighter.account.clone());
+        worst_close = worst_close.max(near_sdk::test_utils::get_logs().iter().map(|l| l.len()).sum());
+    }
+    CUR.with(|c| *c.borrow_mut() = ME.to_string());
+    println!("worst logs: start {worst_start} B, settle {worst_settle} B ({retired_at_once} retirements in one settle), close_retired {worst_close} B (limit 16384)");
+    assert!(retired_at_once >= 8, "the wave happened");
+    assert!(worst_settle < 16_384 && worst_start < 16_384 && worst_close < 16_384);
+}
+
+#[test]
+fn free_matches_have_a_cooldown_and_are_for_guests_only() {
+    let mut c = setup();
+    ctx(GUEST, 200, NearToken::from_yoctonear(0));
+    let _ = c.start_match();
+    ctx(GUEST, 250, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).is_err(), "one free match a minute");
+    ctx(GUEST, 200 + FREE_COOLDOWN_BLOCKS, NearToken::from_yoctonear(0));
+    let _ = c.start_match();
+}
+
+#[test]
+fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
+    // audit #5: a free match's pot is mostly the house's 30 top-up; dividends only on the entries part
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[1].clone(); // idx 2
+    sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
+    let s = start(&mut c, GUEST, 200);
+    let r = settle(&mut c, s.match_id, 2, None, 210);
+    let earned = c.get_sponsorships(acc(ALICE))[0].earned.0;
+    let pot = s.pot.0 + POT_TOP_UP;
+    let entries_part = (r.prize.0 / 1_000_000_000_000) * s.pot.0 / pot * 1_000_000_000_000;
+    assert_eq!(earned, entries_part * crate::market::SPONSOR_CUT_BPS / 10_000);
+    assert!(earned < r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
+    // in a PAID match sponsors share the whole prize
+    let s = start(&mut c, ALICE, 220);
+    let r = settle(&mut c, s.match_id, 2, None, 230);
+    let earned2 = c.get_sponsorships(acc(ALICE))[0].earned.0 - earned;
+    assert_eq!(earned2, r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
 }
