@@ -1,4 +1,4 @@
-// BOUNTY ROYALE relayer + match server.
+// NOXARA relayer + match server.
 //  POST /api/guest   {publicKey}            -> walletless guest account g-*.<relayer> (function-call key
 //                                               for the game) + its NEP-145 storage prepaid by the relayer
 //  POST /api/relay   {payload}              -> pays gas for a NEP-366 delegate action calling the game

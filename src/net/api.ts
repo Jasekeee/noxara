@@ -1,5 +1,5 @@
 // SHARED CONTRACT between the chain glue (Agent C implements src/net/client.ts) and the UI (Agent A
-// calls it). Owned by the lead. Amounts are already converted to display numbers ($BOUNTY, 2 dp).
+// calls it). Owned by the lead. Amounts are already converted to display numbers (NOX, 2 dp).
 import type { MatchConfig, MatchRecord, Personality } from "../sim/types";
 
 export interface FighterInfo {
@@ -7,7 +7,7 @@ export interface FighterInfo {
   account: string; // NEAR account (keyless sub-account)
   name: string;
   personality: Personality;
-  balance: number; // $BOUNTY in its wallet
+  balance: number; // NOX in its wallet
   upgrades: { weaponTier: number; armor: number; skin: number };
   record: { matches: number; wins: number; kills: number; deaths: number; earnings: number };
   bounty: boolean; // carries the bounty next match
@@ -19,7 +19,7 @@ export interface FighterInfo {
 export interface StartResult {
   matchId: string;
   cfg: MatchConfig; // built with matchConfigFromChain — the sim MUST use exactly this
-  pot: number; // $BOUNTY in the pot (entries + house top-up)
+  pot: number; // NOX in the pot (entries + house top-up)
   bountyIdx: number | null; // sim fighter idx of the bounty carrier
   bountyValue: number;
   playerPaid: number; // 0 for guests (they can't win tokens)
@@ -47,9 +47,9 @@ export interface SettleResult {
 export interface Sponsorship {
   bot: string; // bot account
   botName: string;
-  stake: number; // $BOUNTY staked (part of the bot's bankroll; lost if the bot retires broke)
+  stake: number; // NOX staked (part of the bot's bankroll; lost if the bot retires broke)
   share: number; // fraction 0..1 of the bot's sponsor pool owned by this player
-  earned: number; // $BOUNTY received from the bot's winnings so far
+  earned: number; // NOX received from the bot's winnings so far
 }
 
 export interface BotMarket {
@@ -83,7 +83,7 @@ export interface FighterEvent {
   match: string;
   at: number; // unix ms
   kind: "win" | "kill" | "death" | "bounty" | "upgrade" | "retired" | "rookie" | "sponsored";
-  text: string; // ready to show ("Bought armor 1 for 90 $BOUNTY")
+  text: string; // ready to show ("Bought armor 1 for 90 NOX")
   tx?: string;
 }
 
@@ -106,10 +106,10 @@ export interface GameClient {
 
 /** T3 additions. Agent C implements them on the same client object; UI checks `"signIn" in client`. */
 export interface GameClientT3 extends GameClient {
-  /** Sign in with a NEAR wallet (real account: can earn $BOUNTY, sponsor, keeps progress). One wallet popup, then gasless again. */
+  /** Sign in with a NEAR wallet (real account: can earn NOX, sponsor, keeps progress). One wallet popup, then gasless again. */
   signIn(): Promise<string>;
   signOut(): Promise<void>;
-  /** $BOUNTY balance of the current account (0 for guests). */
+  /** NOX balance of the current account (0 for guests). */
   balance(): Promise<number>;
   progress(): Promise<Progress>;
   market(): Promise<BotMarket[]>;

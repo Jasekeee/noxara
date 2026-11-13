@@ -281,7 +281,7 @@ async function refreshAccount() {
   if (t3 && !guest) {
     $("acct-name").textContent = await c.account().catch(() => "");
     const b = await c.balance().catch(() => 0);
-    $("acct-bal").textContent = `${fmt(b)} $BOUNTY`;
+    $("acct-bal").textContent = `${fmt(b)} NOX`;
     // welcome credit: play-money that only pays match entries (never transferable)
     const credit = await c.welcomeCredit().catch(() => 0);
     wel.textContent = "";
@@ -330,7 +330,7 @@ async function signIn() {
   try {
     await c.signIn();
     sfx.chest();
-    toast("Signed in — your matches now earn $BOUNTY");
+    toast("Signed in — your matches now earn NOX");
   } catch {
     toast("Sign-in was cancelled");
   }
@@ -481,7 +481,7 @@ async function startMatch() {
   myKillTimes = [];
   lastAmmo = -1;
   const st = current;
-  if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} $BOUNTY ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
+  if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
   else hud.banner("READY…", "gold");
   $("title").classList.add("hidden");
   $("hud").classList.remove("hidden");
@@ -617,7 +617,7 @@ function onEvents(evs: SimEvent[]) {
       }
       case "bounty": {
         if (e.by === 0) iClaimedBounty = true;
-        const val = current && current.bountyValue > 0 ? `THE ${fmt(current.bountyValue)} $BOUNTY BOUNTY` : "THE BOUNTY";
+        const val = current && current.bountyValue > 0 ? `THE ${fmt(current.bountyValue)} NOX BOUNTY` : "THE BOUNTY";
         hud.banner(`${nameOf(e.by)!.toUpperCase()} CLAIMED ${val} ON ${nameOf(e.who)!.toUpperCase()}!`, "gold");
         hud.feedBounty(nameOf(e.by)!, nameOf(e.who)!, current?.bountyValue ?? 0, e.by === 0);
         sfx.chest();
