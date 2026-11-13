@@ -1,0 +1,13 @@
+{
+  "name": "@bounty-royale/scripts",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "deploy": "node deploy.ts",
+    "deploy:dry": "node deploy.ts --dry-run"
+  },
+  "dependencies": {
+    "near-kit": "0.20.2"
+  }
+}

@@ -1,0 +1,31 @@
+[package]
+name = "royale"
+version = "1.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "BOUNTY ROYALE: persistent bot fighters with their own NEAR wallets, a $BOUNTY pot per match and a bot economy that evolves without a dev patch."
+repository = "https://github.com/OWNER/bounty-royale"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+near-sdk = "5.30.1"
+near-contract-standards = "5.30.1"
+borsh = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+near-sdk = { version = "5.30.1", features = ["unit-testing"] }
+near-workspaces = { version = "0.24.0", features = ["unstable"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+serde_json = "1"
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+overflow-checks = true
