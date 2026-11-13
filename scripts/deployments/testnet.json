@@ -1,0 +1,71 @@
+{
+  "deployed_at": "2026-11-13T14:57:16.854Z",
+  "contract": "royale.br-7e8492.testnet",
+  "server": "server.br-7e8492.testnet",
+  "relayer": "relay.br-7e8492.testnet",
+  "owner": "br-7e8492.testnet",
+  "txs": {
+    "deploy_and_new": "6friAiTr2Qs9DWdTuGpZGPgYx8z2tL7aL4GssBxZ35GB",
+    "create_server": "Ax3sZQ8krFvmGd2eHEWMtM13zaTxmS2R1H8tGNRLsv7Y",
+    "create_relay": "3oGwqax4tLPZ5TLivKwAt1RDhNFEAtTUKJPMoqEcyQea"
+  },
+  "npc_access_keys": {
+    "house.royale.br-7e8492.testnet": 0,
+    "bramble.royale.br-7e8492.testnet": 0,
+    "ox.royale.br-7e8492.testnet": 0,
+    "pip.royale.br-7e8492.testnet": 0,
+    "vex.royale.br-7e8492.testnet": 0,
+    "moss.royale.br-7e8492.testnet": 0,
+    "juno.royale.br-7e8492.testnet": 0,
+    "rook.royale.br-7e8492.testnet": 0,
+    "tink.royale.br-7e8492.testnet": 0,
+    "sable.royale.br-7e8492.testnet": 0
+  },
+  "fighters": [
+    {
+      "account": "bramble.royale.br-7e8492.testnet",
+      "name": "Bramble",
+      "personality": "camper"
+    },
+    {
+      "account": "ox.royale.br-7e8492.testnet",
+      "name": "Ox",
+      "personality": "aggressive"
+    },
+    {
+      "account": "pip.royale.br-7e8492.testnet",
+      "name": "Pip",
+      "personality": "coward"
+    },
+    {
+      "account": "vex.royale.br-7e8492.testnet",
+      "name": "Vex",
+      "personality": "sniper"
+    },
+    {
+      "account": "moss.royale.br-7e8492.testnet",
+      "name": "Moss",
+      "personality": "looter"
+    },
+    {
+      "account": "juno.royale.br-7e8492.testnet",
+      "name": "Juno",
+      "personality": "balanced"
+    },
+    {
+      "account": "rook.royale.br-7e8492.testnet",
+      "name": "Rook",
+      "personality": "aggressive"
+    },
+    {
+      "account": "tink.royale.br-7e8492.testnet",
+      "name": "Tink",
+      "personality": "looter"
+    },
+    {
+      "account": "sable.royale.br-7e8492.testnet",
+      "name": "Sable",
+      "personality": "sniper"
+    }
+  ]
+}
