@@ -233,6 +233,22 @@ through the owner account).
   guest match, the root's only key deleted, a pending match left by a "griefer", the season clock
   passes, the owner tears down: 7.92 of 7.92 NEAR returned.
 
+**Testnet rehearsal of the mainnet topology (2026-11-13, faucet root `nx-4ba5bb.testnet`)** [verified]:
+
+| Step | Tx |
+|---|---|
+| deploy + `new()` in ONE tx on the root itself (owner `br-7e8492.testnet`, server = guest parent = `relay.nx-4ba5bb.testnet`, beneficiary = owner; `teardown-override` build with the lock 15 min ahead — mainnet uses the release build, locked to 2026-11-25) | `8sN695wi7ZZ4hdJ3joFMjc58crHXNBbCFJ3gKYSnZAKF` |
+| create the relayer (also the match server) | `HPpAKJDirDkXqFKuynM8jHjVhgwbJ2gpqtcTbeSUh27j` |
+| guest match #2: relayed start / settle signed by the relayer (12.7 Tgas), played in real time (the server refused an instant record #1 as `too_fast`) | `GuazvDYPTDZ4XTUn4Ctj45fdFKxY6t8a5L72v3KwEkoc` / `G1oS32CTS1YXmDDmsStjJRBaWtpjpVbYXAbWYTDE6eKy` |
+| the root's ONLY full-access key deleted (0 keys left) | `46JS52ouTGZvBYfxMJFb1iX796d7iy4wAyHHYEYcfYR6` |
+| owner `teardown()` after the lock: closed the pending match #1, deleted the keyless root → 7.9376 of 7.9386 NEAR to the beneficiary | `48QEMtUCywkUp68awtzpeyGkfND4VNPpGhBsQReCDnnq` |
+| relayer account deleted → 1.9449 NEAR to the beneficiary | `L7Heytk1WEXHXbiooWPGmCxqG3SayjD9zCzA9gZb61V` |
+
+Root storage after deploy: 379,446 bytes (375,865 code + ~3.6 KB genesis state). Of the 10 NEAR faucet
+funds, 9.88 came back; the rest is gas, the 10 keyless NPC accounts (0.01) and 2 guest accounts
+(0.003 each + their storage deposits, which went back with the root). The relayer's budget counted
+0.054 NEAR for 2 guests + 2 relayed starts (≈ 0.027 per guest).
+
 **Guest budget mode:** the relayer spends at most `RELAYER_BUDGET_NEAR` (default 1) on players (new
 guests, their storage, registrations, relayed gas; persisted in `relayer/data/budget.json`) and at most
 `DAILY_GUEST_CAP` (200) new guests a day. When either is used up, `/api/health` says
