@@ -1,3 +1,6 @@
+[extend]
+useDefault = true
+
 [allowlist]
-description = "known false positives"
+description = "known false positive: a localStorage key name, not a secret"
 regexes = [ "bountyroyale\\.xp\\.v1" ]
