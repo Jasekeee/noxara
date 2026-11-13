@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "ask": [
+      "Bash(*mainnet*)",
+      "Bash(git push*)",
+      "Bash(*git push*)",
+      "Bash(gh repo create*)",
+      "Bash(gh repo edit*)",
+      "Bash(*gh repo create*)",
+      "Bash(*gh repo edit*)",
+      "Bash(vercel*)",
+      "Bash(npx vercel*)",
+      "Bash(pnpm dlx vercel*)",
+      "Bash(netlify*)",
+      "Bash(npx netlify*)",
+      "Bash(wrangler*)",
+      "Bash(npx wrangler*)",
+      "Bash(firebase deploy*)",
+      "Bash(gh-pages*)",
+      "Bash(npx gh-pages*)",
+      "Bash(fly deploy*)",
+      "Bash(rm -rf*)",
+      "Bash(*rm -rf*)",
+      "Bash(rm -fr*)",
+      "Bash(*rm -fr*)"
+    ],
+    "deny": [
+      "Read(~/.near-credentials/mainnet/**)",
+      "Read(~/.near-credentials/mainnet)",
+      "Bash(*.near-credentials/mainnet*)",
+      "Read(**/*seed*phrase*)",
+      "Read(**/*seed*.txt)",
+      "Read(**/*mnemonic*)",
+      "Bash(*mnemonic*)",
+      "Bash(*seed-phrase*)",
+      "Bash(*seed_phrase*)"
+    ]
+  }
+}

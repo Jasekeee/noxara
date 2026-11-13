@@ -1,0 +1,18 @@
+# secrets
+.env
+.env.*
+!.env.example
+*.key
+.near-credentials/
+**/.near-credentials/
+
+# build
+node_modules/
+target/
+dist/
+.DS_Store
+
+# local tooling
+.playwright-mcp/
+playwright-report/
+test-results/
