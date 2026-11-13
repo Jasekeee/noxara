@@ -11,7 +11,7 @@
 //    shotgun 5×9 ±150 cd16 6u 4 rl40 · sniper 55 cd30 22u 2.5u/t 3 rl50 ·
 //    grenade 45 (→50 % at edge) r2.5u, lobbed 9 u over obstacles, fuse 16 t (or impact on an enemy),
 //    3 shots cd20 rl50; owners are immune to their own grenades.
-//    Crit 8 % ×1.5. Weapon tier +10 % dmg, armor −2 per level (min 1).
+//    Crit 8 % ×1.5. Weapon tier: +10 % dmg and −10 % reload time per tier; armor −2 per hit per level (min 1).
 //  - Grenade proximity fuse: explodes on touching an enemy (0.65 u) or after the fuse.
 //  - Regen: after 3 s without being hurt or shooting, +4 hp every 0.5 s (8 hp/s).
 //  - Bush stealth: hidden unless viewer ≤2.5 u, target shot ≤20 ticks ago, or was hurt ≤10 ticks ago.
@@ -262,7 +262,7 @@ export function createMatch(cfg: MatchConfig): Match {
     f.lastShotTick = t;
     if (f.ammo <= 0) {
       f.ammo = 0;
-      f.readyTick = t + w.reload;
+      f.readyTick = t + w.reload - Math.trunc((w.reload * tiers[f.idx]) / 10);
     } else f.readyTick = t + w.cd;
   }
 
