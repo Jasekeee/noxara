@@ -375,7 +375,7 @@ const pages = new Pages({
 // Challenge a friend + DAILY (docs/SOCIAL.md): own DOM, three hooks below (forcedStart / matchOver / endShown)
 const social = new Social({
   getRecord: () => record,
-  start: () => void startMatch(),
+  start: () => { if (!bootDone) wantPlay = true; else void startMatch(); }, // before the island is built: start when ready
   client: () => client,
   toast,
   sfx: (k) => { sfx.start(); if (k === "coin") sfx.heal(); else sfx.ui(); },
