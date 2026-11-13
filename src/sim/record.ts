@@ -25,11 +25,22 @@ export class Recorder {
   }
 }
 
+export interface ReplayResult {
+  hash: string;
+  winner: number | null;
+  placements: number[];
+  /** kills by fighter idx */
+  kills: number[];
+  /** idx of whoever killed the bounty carrier; null if it survived or the storm got it */
+  bountyKiller: number | null;
+}
+
 export function replayRecord(
   cfg: MatchConfig,
   inputs: MatchRecord["inputs"],
-): { hash: string; winner: number | null; placements: number[] } {
+): ReplayResult {
   const m = createMatch(cfg);
+  let bountyKiller: number | null = null;
   const rows = [...inputs].sort((a, b) => a[0] - b[0]); // stable: keeps push order within a tick
   const cur = new Map<number, Input>();
   for (let i = 0; i < cfg.fighters.length; i++) if (cfg.fighters[i].human) cur.set(i, { mx: 0, my: 0, aim: 0, fire: false });
@@ -42,7 +53,13 @@ export function replayRecord(
       if (q > 0) inp.aimDist = (q - 1) * 100;
       cur.set(idx, inp);
     }
-    m.step(cur);
+    for (const e of m.step(cur)) if (e.t === "bounty") bountyKiller = e.by;
   }
-  return { hash: m.hash(), winner: m.state.winner, placements: m.state.fighters.map((f) => f.placement) };
+  return {
+    hash: m.hash(),
+    winner: m.state.winner,
+    placements: m.state.fighters.map((f) => f.placement),
+    kills: m.state.fighters.map((f) => f.kills),
+    bountyKiller,
+  };
 }
