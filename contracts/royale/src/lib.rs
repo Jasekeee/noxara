@@ -88,13 +88,20 @@ pub const WELCOME_RECORD_NEAR: NearToken = NearToken::from_millinear(1);
 /// Abuse brake: at most this many welcome credits per UTC day.
 pub const WELCOME_DAILY_CAP: u32 = 50;
 const WELCOME_DAY_KEY: &[u8] = b"welcome_day";
+const WELCOME_SELF_DAY_KEY: &[u8] = b"welcome_self_day";
+/// Of the daily welcome credits, at most this many without the relayer (self-registration / claim):
+/// sybils with self-paid accounts can't eat the whole day's cap.
+pub const WELCOME_SELF_DAILY_CAP: u32 = 10;
+const PENDING_OWNER_KEY: &[u8] = b"pending_owner";
+const CLEAR_MATCH_KEY: &[u8] = b"clear_match_cursor";
+const CLEAR_ROOKIE_KEY: &[u8] = b"clear_rookie_cursor";
 /// The owner may delete the whole contract account (deposits back) only after this: 2026-11-25 00:00 UTC.
 pub const TEARDOWN_AFTER_MS: u64 = 1_795_564_800_000;
 const TEARDOWN_KEY: &[u8] = b"teardown_after";
 const BENEFICIARY_KEY: &[u8] = b"teardown_beneficiary";
 const PAID_IDS_KEY: &[u8] = b"pending_paid_ids";
 /// Unsettled matches `teardown` closes per call (gas bound); call again if more remain.
-pub const TEARDOWN_SWEEP: usize = 60;
+pub const TEARDOWN_SWEEP: usize = 8;
 /// A guest may start a free match at most once per this many blocks (~1 minute).
 pub const FREE_COOLDOWN_BLOCKS: u64 = 100;
 /// From 2026-11-20 00:00 UTC the season is ending: players can leave even with open sponsorships
@@ -438,6 +445,14 @@ pub struct Leaderboard {
 }
 
 #[near(serializers = [json])]
+pub struct ClearProgress {
+    pub done: bool,
+    pub matches_left: u64,
+    pub rookie_generations_left: u32,
+    pub storage_usage: U64,
+}
+
+#[near(serializers = [json])]
 pub struct ConfigView {
     pub version: u16,
     pub owner: AccountId,
@@ -556,6 +571,7 @@ impl Contract {
     pub fn new(owner: AccountId, server: AccountId, guest_parent: AccountId, teardown_beneficiary: Option<AccountId>, teardown_after_ms: Option<U64>) -> Self {
         env::storage_write(TEARDOWN_KEY, &clamp_teardown_after(teardown_after_ms).to_le_bytes());
         let beneficiary = teardown_beneficiary.unwrap_or_else(|| owner.clone());
+        require!(beneficiary != env::current_account_id(), "the teardown beneficiary must be another account");
         env::storage_write(BENEFICIARY_KEY, beneficiary.as_bytes());
         let me = env::current_account_id();
         let house: AccountId = format!("house.{me}").parse().unwrap();
@@ -920,12 +936,15 @@ impl Contract {
             settled_block: U64(env::block_height()),
         };
         event("match_settled", &near_sdk::serde_json::json!({ "match_id": match_id, "winner": winner, "input_log_hash": result.input_log_hash, "result_hash": result.result_hash }));
+        let m_player = m.player.clone();
         m.status = MatchStatus::Settled;
         m.result = Some(result.clone());
         self.unlist_pending(&m);
         self.save_match(m);
         self.matches_settled += 1;
         near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches).remove(&match_id.0);
+        let who = m_player.clone();
+        self.prune_free_start(&who);
 
         self.recent.push(match_id.0);
         if self.recent.len() > RECENT_MATCHES {
@@ -954,6 +973,7 @@ impl Contract {
         require!(!self.is_guest(&account_id), "guests can't hold $NOX");
         require!(self.load_player(&account_id).is_some(), "not a registered player");
         let house = self.house.clone();
+        require!(self.balance(&house) >= HOUSE_FLOOR + amount.0, "the house can't go below its floor");
         self.move_tokens(&house, &account_id, amount.0, "house grant");
         event("house_grant", &near_sdk::serde_json::json!({ "account": account_id, "amount": amount }));
     }
@@ -968,10 +988,21 @@ impl Contract {
     }
 
     /// Owner: hand ownership to another account (e.g. before removing this account's full-access keys).
-    pub fn set_owner(&mut self, owner: AccountId) {
+    /// Owner, step 1 of 2: propose a new owner (it must accept, so a typo can't lose the contract).
+    pub fn propose_owner(&mut self, owner: AccountId) {
         require!(env::predecessor_account_id() == self.owner, "owner only");
-        event("owner_changed", &near_sdk::serde_json::json!({ "from": self.owner, "to": owner }));
-        self.owner = owner;
+        env::storage_write(PENDING_OWNER_KEY, owner.as_bytes());
+        event("owner_proposed", &near_sdk::serde_json::json!({ "from": self.owner, "to": owner }));
+    }
+
+    /// Step 2 of 2: the proposed owner accepts.
+    pub fn accept_owner(&mut self) {
+        let who = env::predecessor_account_id();
+        let pending = env::storage_read(PENDING_OWNER_KEY).and_then(|b| String::from_utf8(b).ok());
+        require!(pending.as_deref() == Some(who.as_str()), "you are not the proposed owner");
+        env::storage_remove(PENDING_OWNER_KEY);
+        event("owner_changed", &near_sdk::serde_json::json!({ "from": self.owner, "to": who }));
+        self.owner = who;
     }
 
     /// Owner, after the time lock (2026-11-25 00:00 UTC), with no match in flight: delete this
@@ -1004,6 +1035,96 @@ impl Contract {
     }
 
     /// For contracts initialised before the beneficiary existed: the owner sets it ONCE.
+    /// Owner, after the time lock: shrink the contract's state in bounded batches so `teardown` can
+    /// delete the account (NEAR refuses to delete an account with a large state). Each call: closes
+    /// up to TEARDOWN_SWEEP pending matches, then removes up to `max_matches` match records (by id),
+    /// up to `max_rookies` rookie generations (genesis bots first; rookie ids are re-derived from the
+    /// name pool), and every per-player key of the given `players` (<= 40 per call; the owner's script
+    /// lists them from the chain's storage_deposit history). Call again until `done`.
+    pub fn teardown_clear(&mut self, players: Vec<AccountId>, max_matches: Option<u32>, max_rookies: Option<u32>) -> ClearProgress {
+        require!(env::predecessor_account_id() == self.owner, "owner only");
+        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-11-25 00:00 UTC");
+        require!(players.len() <= 40, "at most 40 players per call");
+        // 1. anything still in flight
+        let mut todo: Vec<u64> = self.pending_free.clone();
+        todo.extend(self.pending_paid_ids());
+        for id in todo.into_iter().take(TEARDOWN_SWEEP) {
+            if self.matches.get(&id).is_some() {
+                self.close_unsettled(id, "season over");
+            } else {
+                self.pending_free.retain(|x| *x != id);
+            }
+        }
+        // 2. match records by id
+        let mut cursor = env::storage_read(CLEAR_MATCH_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(1);
+        let end = (cursor + max_matches.unwrap_or(60).min(200) as u64).min(self.next_match_id);
+        let mut credit = near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches);
+        while cursor < end {
+            self.matches.remove(&cursor);
+            credit.remove(&cursor);
+            cursor += 1;
+        }
+        env::storage_write(CLEAR_MATCH_KEY, &cursor.to_le_bytes());
+        self.recent.clear();
+        // 3. fighters: generation 0 = the genesis nine, then rookie n = 1..=rookies (24 candidate names each)
+        let me = env::current_account_id();
+        let mut gen = env::storage_read(CLEAR_ROOKIE_KEY).map(|v| u32::from_le_bytes(v[0..4].try_into().unwrap())).unwrap_or(0);
+        let gen_end = (gen + max_rookies.unwrap_or(8).min(20)).min(self.rookies + 1);
+        while gen < gen_end {
+            let ids: Vec<AccountId> = if gen == 0 {
+                let mut v: Vec<AccountId> = GENESIS.iter().filter_map(|(id, _, _)| format!("{id}.{me}").parse().ok()).collect();
+                v.extend(["bramble", "ox", "pip", "vex", "moss", "juno", "rook", "tink", "sable"].iter().filter_map(|id| format!("{id}.{me}").parse().ok()));
+                v
+            } else {
+                ROOKIE_NAMES.iter().filter_map(|n| format!("{n}-{gen}.{me}").parse().ok()).collect()
+            };
+            for a in ids {
+                if self.fighters.remove(&a).is_some() {
+                    self.history.remove(&a);
+                    self.sponsors.remove(&a);
+                    self.token.accounts.remove(&a);
+                }
+            }
+            gen += 1;
+        }
+        env::storage_write(CLEAR_ROOKIE_KEY, &gen.to_le_bytes());
+        // 4. per-player keys
+        let mut welcomed = near_sdk::store::LookupSet::<AccountId>::new(Key::Welcomed);
+        let mut credits = near_sdk::store::LookupMap::<AccountId, u128>::new(Key::WelcomeCredit);
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        for a in &players {
+            self.players.remove(a);
+            self.token.accounts.remove(a);
+            self.xp.remove(a);
+            self.sponsoring.remove(a);
+            self.history.remove(a);
+            welcomed.remove(a);
+            credits.remove(a);
+            last.remove(a);
+        }
+        credits.flush();
+        last.flush();
+        let done = cursor >= self.next_match_id && gen > self.rookies && self.pending_free.is_empty() && self.pending_paid_ids().is_empty();
+        if done {
+            self.retired.set(Some(vec![]));
+            self.leaderboard.set(Some(vec![]));
+        }
+        ClearProgress { done, matches_left: self.next_match_id.saturating_sub(cursor), rookie_generations_left: (self.rookies + 1).saturating_sub(gen), storage_usage: U64(env::storage_usage()) }
+    }
+
+    /// Owner, after the time lock: send NEAR above what the current storage needs (+0.05 NEAR) to the
+    /// fixed beneficiary — a fallback if the account can't be deleted.
+    pub fn withdraw_excess(&mut self, amount: U128) -> Promise {
+        require!(env::predecessor_account_id() == self.owner, "owner only");
+        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-11-25 00:00 UTC");
+        let beneficiary = self.teardown_beneficiary().unwrap_or_else(|| env::panic_str("no teardown beneficiary set"));
+        let locked = env::storage_byte_cost().as_yoctonear() * env::storage_usage() as u128 + NearToken::from_millinear(50).as_yoctonear();
+        let free = env::account_balance().as_yoctonear().saturating_sub(locked);
+        require!(amount.0 > 0 && amount.0 <= free, format!("at most {free} yoctoNEAR is free"));
+        event("withdraw_excess", &near_sdk::serde_json::json!({ "to": beneficiary, "amount": amount }));
+        Promise::new(beneficiary).transfer(NearToken::from_yoctonear(amount.0))
+    }
+
     pub fn set_teardown_beneficiary(&mut self, beneficiary: AccountId) {
         require!(env::predecessor_account_id() == self.owner, "owner only");
         require!(self.teardown_beneficiary().is_none(), "the teardown beneficiary is fixed");
@@ -1171,7 +1292,7 @@ impl Contract {
         require!(self.load_player(&id).is_some(), "register first: storage_deposit");
         require!(!self.is_guest(&id), "guests play for free and earn no $NOX: sign in with a NEAR account");
         require!(!self.is_welcomed(&id), "you already got your welcome credit");
-        require!(self.grant_welcome(&id), "today's welcome credits are gone: try again tomorrow");
+        require!(self.grant_welcome(&id, false), "today's welcome credits are gone: try again tomorrow");
         U128(WELCOME_STAKE)
     }
 
@@ -1330,6 +1451,7 @@ impl Contract {
         }
         self.unlist_pending(&m);
         self.matches.remove(&match_id);
+        self.prune_free_start(&m.player);
         event("match_closed", &near_sdk::serde_json::json!({ "match_id": U64(match_id), "reason": why, "seeded": seeded, "player_forfeited": if seeded { m.player_paid } else { U128(0) } }));
     }
 
@@ -1408,7 +1530,7 @@ impl Contract {
         let mut f = self.slot_fighter(slot);
         f.active = false;
         f.retired_block = Some(env::block_height());
-        event("retire", &near_sdk::serde_json::json!({ "account": f.account, "slot": slot, "reason": why, "record": f.record, "balance": U128(self.balance(&f.account)) }));
+        event("retire", &near_sdk::serde_json::json!({ "account": f.account, "slot": slot, "reason": why, "matches": f.record.matches, "wins": f.record.wins }));
         let acct = f.account.clone();
         // its sponsorship pool and leftover wallet are settled later by the permissionless, bounded
         // `close_retired` (once none of its entries are in escrow) - never inside start/settle
@@ -1468,7 +1590,9 @@ impl Contract {
 
     /// Grant the one-time welcome credit (real accounts only, at most WELCOME_DAILY_CAP per UTC day).
     /// Recorded forever (survives unregister). Returns whether it was granted now.
-    pub(crate) fn grant_welcome(&mut self, account: &AccountId) -> bool {
+    /// `via_relayer`: granted through the relayer's /api/register (rate-limited per IP off chain);
+    /// otherwise (self-registration / claim_welcome) a smaller daily sub-cap applies too.
+    pub(crate) fn grant_welcome(&mut self, account: &AccountId, via_relayer: bool) -> bool {
         if self.is_guest(account) || self.fighters.get(account).is_some() || account == &self.house || account == &env::current_account_id() {
             return false;
         }
@@ -1483,6 +1607,16 @@ impl Contract {
         let n = if d == day { n } else { 0 };
         if n >= WELCOME_DAILY_CAP {
             return false;
+        }
+        if !via_relayer {
+            let (sd, sn) = env::storage_read(WELCOME_SELF_DAY_KEY)
+                .map(|v| (u64::from_le_bytes(v[0..8].try_into().unwrap()), u32::from_le_bytes(v[8..12].try_into().unwrap())))
+                .unwrap_or((day, 0));
+            let sn = if sd == day { sn } else { 0 };
+            if sn >= WELCOME_SELF_DAILY_CAP {
+                return false;
+            }
+            env::storage_write(WELCOME_SELF_DAY_KEY, &[&day.to_le_bytes()[..], &(sn + 1).to_le_bytes()].concat());
         }
         env::storage_write(WELCOME_DAY_KEY, &[&day.to_le_bytes()[..], &(n + 1).to_le_bytes()].concat());
         welcomed.insert(account.clone());
@@ -1511,6 +1645,16 @@ impl Contract {
     }
     fn set_pending_paid_ids(&mut self, ids: &[u64]) {
         env::storage_write(PAID_IDS_KEY, &borsh::to_vec(ids).unwrap());
+    }
+
+    /// A guest's free-start marker is only needed during the cooldown: drop it afterwards (bounded:
+    /// one per settle / close), so the contract doesn't pay for it forever.
+    fn prune_free_start(&mut self, player: &AccountId) {
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        if last.get(player).is_some_and(|b| env::block_height() >= b + FREE_COOLDOWN_BLOCKS) {
+            last.remove(player);
+            last.flush();
+        }
     }
 
     /// The house can fund a rookie's starter wallet and stay above its floor.

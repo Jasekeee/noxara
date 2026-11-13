@@ -23,11 +23,13 @@ const ICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'
 impl FungibleTokenCore for Contract {
     #[payable]
     fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>) {
+        self.refuse_game_wallet(&receiver_id);
         self.token.ft_transfer(receiver_id, amount, memo)
     }
 
     #[payable]
     fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128, memo: Option<String>, msg: String) -> PromiseOrValue<U128> {
+        self.refuse_game_wallet(&receiver_id);
         self.token.ft_transfer_call(receiver_id, amount, memo, msg)
     }
 
@@ -81,7 +83,7 @@ impl StorageManagement for Contract {
         // the one-time welcome credit: only when the account registers itself or via the trusted relayer
         // (a third party registering someone else grants nothing and never touches the daily cap)
         if !guest && (payer == account || payer == self.guest_parent) {
-            self.grant_welcome(&account);
+            self.grant_welcome(&account, payer == self.guest_parent);
         }
         let refund = amount.saturating_sub(need);
         if !refund.is_zero() {
@@ -129,8 +131,9 @@ impl StorageManagement for Contract {
     }
 
     fn storage_balance_bounds(&self) -> StorageBalanceBounds {
-        // guests (relayer-registered) need GUEST_STORAGE_DEPOSIT, real players STORAGE_DEPOSIT
-        StorageBalanceBounds { min: GUEST_STORAGE_DEPOSIT, max: Some(STORAGE_DEPOSIT) }
+        // what a self-registering account must pay; the smaller guest price is internal to the relayer
+        // path (get_config.guest_storage_deposit)
+        StorageBalanceBounds { min: STORAGE_DEPOSIT, max: Some(STORAGE_DEPOSIT) }
     }
 
     fn storage_balance_of(&self, account_id: AccountId) -> Option<StorageBalance> {
@@ -165,6 +168,16 @@ impl FungibleTokenMetadataProvider for Contract {
 }
 
 impl Contract {
+    /// The game's own wallets (this contract, the house, every bot and rookie: all sub-accounts of the
+    /// contract) only receive $NOX through game rules. A plain transfer — and above all an
+    /// ft_transfer_call, whose refund lands LATER — would let anyone inflate a bot's wallet or the
+    /// house for one receipt (valuing sponsorships / passing the house floor) and take it back.
+    pub(crate) fn refuse_game_wallet(&self, receiver: &AccountId) {
+        let me = env::current_account_id();
+        let sub = receiver.as_str().strip_suffix(me.as_str()).is_some_and(|p| p.ends_with('.'));
+        require!(receiver != &me && !sub && receiver != &self.house && self.fighters.get(receiver).is_none(), "game wallets only receive $NOX through the game");
+    }
+
     pub(crate) fn ensure_registered(&mut self, a: &AccountId) {
         if !self.token.accounts.contains_key(a) {
             self.token.internal_register_account(a);
