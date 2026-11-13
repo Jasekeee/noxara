@@ -188,3 +188,66 @@ export async function viewCall<T>(url: string, contract: string, method: string,
   });
   return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result))) as T;
 }
+
+// ---------------------------------------------------------------- normal transactions (no relayer)
+
+/** borsh(Transaction V0) with FunctionCall actions. */
+export function encodeTransaction(t: { signerId: string; publicKey: Uint8Array; nonce: bigint; receiverId: string; blockHash: Uint8Array; actions: FunctionCall[] }): Uint8Array {
+  const w = new W();
+  w.str(t.signerId);
+  w.u8(0);
+  w.bytes(t.publicKey);
+  w.uN(t.nonce, 8);
+  w.str(t.receiverId);
+  w.bytes(t.blockHash);
+  w.u32(t.actions.length);
+  for (const a of t.actions) {
+    w.u8(2);
+    w.str(a.methodName);
+    w.vec(utf8(JSON.stringify(a.args ?? {})));
+    w.uN(a.gas, 8);
+    w.uN(a.deposit ?? 0n, 16);
+  }
+  return w.out();
+}
+
+/** base64(borsh(SignedTransaction)): signed with the player's own (function-call) key. */
+export async function signTransaction(signer: Signer, t: { signerId: string; nonce: bigint; receiverId: string; blockHash: Uint8Array; actions: FunctionCall[] }): Promise<string> {
+  const tx = encodeTransaction({ ...t, publicKey: signer.publicKeyBytes });
+  const sig = await signer.sign(await sha256(tx));
+  return toBase64(new Uint8Array([...tx, 0, ...sig]));
+}
+
+type Outcome = {
+  transaction: { hash: string };
+  receipts_outcome: { outcome: { executor_id: string; status: Record<string, unknown> } }[];
+};
+
+/** Send a signed transaction and return the contract's last value (or throw its panic message). */
+export async function sendTransaction<T>(url: string, contract: string, signedB64: string): Promise<{ value: T; tx: string }> {
+  const o = await rpc<Outcome>(url, "send_tx", { signed_tx_base64: signedB64, wait_until: "EXECUTED_OPTIMISTIC" }, 60_000);
+  let value: unknown = null;
+  for (const r of o.receipts_outcome) {
+    if (r.outcome.executor_id !== contract) continue;
+    const f = r.outcome.status.Failure;
+    if (f) {
+      const m = JSON.stringify(f).match(/Smart contract panicked: (?:panicked at [^\\]*?:\\n)?([^"]+)/);
+      throw new Error(m ? m[1].replace(/\\n/g, " ").trim() : "the transaction failed");
+    }
+    const v = r.outcome.status.SuccessValue;
+    if (typeof v === "string" && v.length) {
+      const s = new TextDecoder().decode(Uint8Array.from(atob(v), (c) => c.charCodeAt(0)));
+      try {
+        value = JSON.parse(s);
+      } catch {
+        value = s;
+      }
+    }
+  }
+  return { value: value as T, tx: o.transaction.hash };
+}
+
+export async function finalBlockHash(url: string): Promise<Uint8Array> {
+  const b = await rpc<{ header: { hash: string } }>(url, "block", { finality: "final" });
+  return base58Decode(b.header.hash);
+}

@@ -160,3 +160,22 @@ test("registration subsidies have an hourly budget", () => {
   assert.deepEqual(s.take("c.t", 2), { ok: false, reason: "budget" });
   assert.equal(s.take("c.t", 3_600_001).ok, true);
 });
+
+import { SpendBudget, near as toYocto, RESERVE } from "../src/budget.ts";
+
+test("guest budget mode: 1 NEAR total, daily guest cap, closes cleanly and persists", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "br-bud-")), "budget.json");
+  const day = 86_400_000;
+  const b = new SpendBudget(file, "1", 3, 10 * day);
+  assert.equal(b.closed("guest", RESERVE.guest, 10 * day), null);
+  assert.deepEqual(b.status(10 * day).guests, "open");
+  for (let i = 0; i < 3; i++) b.spend(toYocto("0.02"), "guest");
+  assert.equal(b.closed("guest", RESERVE.guest, 10 * day), "daily_cap", "daily guest cap");
+  assert.equal(b.closed("relay", RESERVE.relay, 10 * day), null, "relays still fine");
+  assert.equal(b.closed("guest", RESERVE.guest, 11 * day), null, "a new day");
+  b.spend(toYocto("0.93"));
+  assert.equal(b.closed("relay", RESERVE.relay, 11 * day), "budget", "spent: closed for everything");
+  assert.deepEqual(b.status(11 * day), { guests: "closed", reason: "budget", remaining: "0.0100", guestsToday: 0 });
+  const again = new SpendBudget(file, "1", 3, 11 * day);
+  assert.equal(again.closed("relay", RESERVE.relay, 11 * day), "budget", "survives a restart");
+});

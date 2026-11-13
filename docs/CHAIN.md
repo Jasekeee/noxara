@@ -192,6 +192,102 @@ Zero new dependencies. For multi-wallet support (Meteor, HOT, Intear…) I propo
 `@hot-labs/near-connect` **0.12.0** (no runtime deps, 234 KB unpacked) — not added, awaiting the lead.
 The live run used a script in place of the wallet (it adds the same key), see the T3 txs above.
 
+## NOXARA mainnet preparation (nothing executed on mainnet)
+
+The project is now **NOXARA** ("Only one walks out."); the token is **Nox / NOX** (`ft_metadata`
+name "Nox", symbol "NOX", new dark-coin icon). Event standard names are unchanged
+(`bountyroyale`, `nep141`). Historical testnet notes above keep "$BOUNTY". NOX is play-money.
+
+**Mainnet topology** (`scripts/deploy.ts --contract-on-root --owner <owner.near>`):
+- the game + NOX contract lives ON the root account (e.g. `noxara.near`): one contract for game and
+  token; the house, the bots and every rookie are its keyless sub-accounts (`brindle.noxara.near`, …;
+  0.001 NEAR each, not refundable: keyless accounts can't be deleted — 10 at genesis = 0.01 NEAR, plus
+  0.001 per rookie, ~1 per 18 matches);
+- **the relayer is also the match server** (`relay.noxara.near` = contract `server`): one key both pays
+  guests' gas and signs `settle_match`. Trade-off: if that key leaks, the attacker can relay AND settle
+  arbitrary results (move play-money NOX, drain the relayer's NEAR budget). It can't upgrade, mint
+  beyond the rules, touch deposits or teardown. Mitigations: key only in the hosted env, budget caps,
+  `set_server` by the owner rotates it.
+- the **owner** is a separate account the owner controls (the only one who can `teardown`,
+  `set_server`, `set_owner`, `house_grant`); deploy and `new()` go in ONE batch tx (`new` is
+  `#[private]`, so nobody can front-run the init).
+- dry run: `node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <owner.near> --dry-run`
+  prints the steps and costs (code ≈ 3.7 NEAR at 370 KB, genesis state ≈ 0.06, NPCs 0.01, headroom
+  0.5, relayer 1.5 → ≈ 5.8 NEAR). A real mainnet run still refuses without `BR_MAINNET_YES=yes`.
+
+**Upgrade / lock policy (audit #8):** the root's full-access key can redeploy (`scripts/upgrade.ts`).
+The owner decides before submission whether to remove it (lock: no more upgrades, teardown still works
+through the owner account).
+
+**Season end and teardown:**
+- from **2026-11-20 00:00 UTC** no new matches start; players can `storage_unregister` and get their
+  OWN storage deposits back (open sponsorships are closed at their wallet value; never blocked by
+  other people's matches);
+- from **2026-11-25 00:00 UTC** the owner calls `teardown()` (no argument): it closes anything still
+  in flight (max 60 per call, call again if more) and deletes the contract's own account, sending all
+  its NEAR (code + state + leftover, incl. deposits the relayer paid) to the **teardown beneficiary
+  fixed at `new()`**. Works without any full-access key. All NOX disappears with it (play-money). The
+  account name becomes re-registrable afterwards. Release builds can't move the date (only test builds /
+  the `teardown-override` feature can).
+- sandbox `contract_on_root_relay_as_server_and_teardown`: contract on the root, relay = server, a
+  guest match, the root's only key deleted, a pending match left by a "griefer", the season clock
+  passes, the owner tears down: 7.92 of 7.92 NEAR returned.
+
+**Testnet rehearsal of the mainnet topology (2026-11-13, faucet root `nx-4ba5bb.testnet`)** [verified]:
+
+| Step | Tx |
+|---|---|
+| deploy + `new()` in ONE tx on the root itself (owner `br-7e8492.testnet`, server = guest parent = `relay.nx-4ba5bb.testnet`, beneficiary = owner; `teardown-override` build with the lock 15 min ahead — mainnet uses the release build, locked to 2026-11-25) | `8sN695wi7ZZ4hdJ3joFMjc58crHXNBbCFJ3gKYSnZAKF` |
+| create the relayer (also the match server) | `HPpAKJDirDkXqFKuynM8jHjVhgwbJ2gpqtcTbeSUh27j` |
+| guest match #2: relayed start / settle signed by the relayer (12.7 Tgas), played in real time (the server refused an instant record #1 as `too_fast`) | `GuazvDYPTDZ4XTUn4Ctj45fdFKxY6t8a5L72v3KwEkoc` / `G1oS32CTS1YXmDDmsStjJRBaWtpjpVbYXAbWYTDE6eKy` |
+| the root's ONLY full-access key deleted (0 keys left) | `46JS52ouTGZvBYfxMJFb1iX796d7iy4wAyHHYEYcfYR6` |
+| owner `teardown()` after the lock: closed the pending match #1, deleted the keyless root → 7.9376 of 7.9386 NEAR to the beneficiary | `48QEMtUCywkUp68awtzpeyGkfND4VNPpGhBsQReCDnnq` |
+| relayer account deleted → 1.9449 NEAR to the beneficiary | `L7Heytk1WEXHXbiooWPGmCxqG3SayjD9zCzA9gZb61V` |
+
+Root storage after deploy: 379,446 bytes (375,865 code + ~3.6 KB genesis state). Of the 10 NEAR faucet
+funds, 9.88 came back; the rest is gas, the 10 keyless NPC accounts (0.01) and 2 guest accounts
+(0.003 each + their storage deposits, which went back with the root). The relayer's budget counted
+0.054 NEAR for 2 guests + 2 relayed starts (≈ 0.027 per guest).
+
+**Guest budget mode:** the relayer spends at most `RELAYER_BUDGET_NEAR` (default 1) on players (new
+guests, their storage, registrations, relayed gas; persisted in `relayer/data/budget.json`) and at most
+`DAILY_GUEST_CAP` (200) new guests a day. When either is used up, `/api/health` says
+`guests: "closed"` + `reason` (`budget` | `daily_cap`); guests play offline (`offlineReason:
+"guests_closed"`, clearly labelled), signed-in accounts keep playing on chain by signing their own
+transactions with their function-call key (allowance 0.25 NEAR set at sign-in pays the gas), and a
+new sign-in pays its own storage through the wallet. Settlement is not counted (match-server duty).
+
+**Guest storage, measured:** a guest's record (player + FT account + one pending match + XP) is
+**1,261 bytes** with worst-case names (36-char guest id, 36-char bot ids); +20% → `GUEST_STORAGE_DEPOSIT`
+= 1,514 bytes = **0.01514 NEAR** (was 0.02). Real players keep 0.02 NEAR (measured 1,897 bytes with 3
+sponsorships + welcome records). The relayer reads both from `get_config`.
+
+**Wasm size** (release, `cargo near build non-reproducible-wasm`, wasm-opt included): 375,865 bytes
+(3.76 NEAR of storage). `--no-embed-abi` → **370,091** (−5.8 KB; publish `royale_abi.json` in the repo
+instead); `RUSTFLAGS=-C link-arg=-s` → no change (already stripped); `opt-level = "s"` → 414,299 (worse,
+kept `z`); `lto`, `codegen-units = 1`, `panic = "abort"` were already set; `overflow-checks` stay on
+(safety). Further gains would need code changes (the ~60 `json!` event sites, the NEP-141
+`ft_transfer_call`/resolver path) for maybe 5–10% more — not worth the risk before the second audit.
+
+## Independent audit (NO-GO → fixes; second audit pending)
+
+| # | Finding | Fix | Regression test |
+|---|---|---|---|
+| 1 HIGH | logs > 16 KiB froze `start_match`/sweeps (pool closures + retirement waves) | pools are never closed inside start/settle: permissionless bounded `close_retired(bot)` (one aggregated event); entries/refunds emit ONE `ft_transfer` line; lazy sweep = 1 match per start | `audit_worst_case_logs_fit_in_16_kib`: 50-char contract id, 27 sponsors with 64-char names, 8 retirements in one settle → start 2,053 B, settle 10,775 B, close 1,623 B (< 16,384) |
+| 2 HIGH | 24 concurrent free matches force-retired every bot | retirement = wallet + escrow below the entry; a bot short only because of escrow makes FREE matches wait ("island busy") instead (paid ones proceed); rookies only when the house can fund them above its floor; `close_retired` sweeps leftovers to the house | `audit_concurrent_free_matches_cannot_force_mass_retirement`, `a_bot_short_only_because_of_escrow_blocks_free_matches_not_paid_ones` |
+| 3 MED | 24 cheap accounts lock the free pool | free matches only for relayer guests; one free start per 100 blocks per guest | `a_real_account_without_funds_cannot_take_a_free_slot`, `free_matches_have_a_cooldown_and_are_for_guests_only` |
+| 4 MED | any pending match locked sponsors' funds | `unsponsor` and season-end exits are valued on the bot's WALLET only (entries in play stay with the others), so they're never blocked and can't profit from an unsettled outcome; buying in is still refused mid-match | `audit_a_pending_match_never_blocks_unsponsor`, `no_buying_in_during_a_match_but_withdrawing_is_never_blocked`, `season_end_exit_works_even_with_a_match_pending` |
+| 5 MED | sponsors farmed the house's top-up via free matches | in a free match sponsors only share the entries part of the prize | `sponsors_get_no_cut_of_the_house_top_up_in_free_matches` |
+| 6 LOW | unfunded rookies churned every settle | no unfunded rookies, never retire a 0-match rookie, broke bots keep their slot until the house can fund a successor | `audit_an_empty_house_does_not_churn_rookies` |
+| 7 LOW (accepted) | sybil accounts cost ~0.001 NEAR | welcome credit daily cap (50), credits only pay entries, guests earn nothing | — |
+| 8 INFO | full-access key on the contract | upgrade/lock policy above | — |
+| 9 INFO | public seed + deterministic sim → offline input search | the match server refuses records submitted faster than the replayed match could be played (`too_fast`: ≥ 90% of ticks/20 s − 5 s since `start_match`); input rows bounded. Settlement verifies consistency, not that a human played; winnings are play-money | relayer `real time: … too_fast` |
+| 10 INFO | start_match gas | measured settle with 8 retirements + rookies: 72 Tgas; relayer cap and client gas for `start_match` raised to 150 Tgas | sandbox gas prints |
+
+Economy after the fixes (`scripts/econ-sim.ts`, 400×200): ~1 retirement per 18 matches, weapon tier 2
+by match ~9, house ~1,800; sponsorship is now roughly break-even (50% profitable, median ROI ≈ 0%),
+since free-match prizes no longer pay sponsors from the house's top-up.
+
 ## Welcome credit (owner decision: real accounts' first stake)
 
 - Every real NEAR account gets ONE welcome credit of **30** (≈ 7 entries at the base 4), never guests,

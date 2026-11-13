@@ -26,6 +26,11 @@ for (let k = 0; k < n; k++) {
     m.step(new Map([[0, inp]]));
   }
   const record: MatchRecord = { version: 1, cfg: s.cfg, inputs: rec.inputs, hash: m.hash(), winner: m.state.winner, placements: m.state.fighters.map((f) => f.placement) };
+  // the match server refuses records faster than real time (audit #9): wait like a real player would
+  const playMs = m.state.tick * 50;
+  const waitMs = Math.max(0, playMs * 0.9 - (performance.now() - t) + 2_000);
+  console.log(`  played ${Math.round(playMs / 1000)} s of game time; waiting ${Math.round(waitMs / 1000)} s (real time)`);
+  await new Promise((r) => setTimeout(r, waitMs));
   t = performance.now();
   const r = await c.settle(s.matchId, record);
   console.log(`settle: ${Math.round(performance.now() - t)} ms`, JSON.stringify(r));

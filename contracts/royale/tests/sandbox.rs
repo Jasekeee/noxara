@@ -5,6 +5,9 @@ use near_workspaces::{network::Sandbox, Account, Contract, Worker};
 use serde_json::{json, Value};
 
 const WASM: &str = "target/near/royale.wasm";
+/// Same contract built with the sandbox-only `teardown-override` feature (an earlier teardown time):
+/// `cargo near build non-reproducible-wasm --features teardown-override --out-dir target/near/override`
+const WASM_OVERRIDE: &str = "target/near/override/royale.wasm";
 use royale::{entry_fee_for, BOUNTY_BPS, ENTRY_FEE as E, ONE, POT_TOP_UP as T, RESERVE, STARTER, WEAPON_PRICES};
 
 struct World {
@@ -17,6 +20,7 @@ struct World {
 
 async fn world() -> anyhow::Result<World> {
     let w = near_workspaces::sandbox().await?;
+    WORKER.with(|x| *x.borrow_mut() = Some(w.clone()));
     let root = w.root_account()?;
     let mk = |n: &'static str, near: u128| {
         let root = root.clone();
@@ -49,7 +53,16 @@ async fn guest(wd: &World, name: &str) -> anyhow::Result<Account> {
     Ok(g)
 }
 
+thread_local! {
+    /// this test's sandbox (each #[tokio::test] runs on its own thread)
+    static WORKER: std::cell::RefCell<Option<Worker<Sandbox>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Guests may start one free match per FREE_COOLDOWN_BLOCKS (100): move the sandbox past it first.
 async fn start(p: &Account, c: &Contract) -> anyhow::Result<(Value, u64)> {
+    if let Some(w) = WORKER.with(|w| w.borrow().clone()) {
+        w.fast_forward(101).await?;
+    }
     let r = p.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
     let gas = r.total_gas_burnt.as_tgas();
     let v: Value = r.into_result().map_err(|e| anyhow::anyhow!("start_match: {e:?}"))?.json()?;
@@ -233,16 +246,12 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     let r = alice.call(c.id(), "ft_transfer").args_json(json!({"receiver_id": house, "amount": ONE.to_string()})).deposit(NearToken::from_yoctonear(1)).transact().await?;
     assert!(r.into_result().is_err());
 
-    // review fix #3: a real account with neither credit nor $BOUNTY plays free but can't win
+    // a real account with neither credit nor $NOX can't take a free slot (free matches are for guests)
     // (bob was registered by a third party: no credit)
     let bob = wd.w.root_account()?.create_subaccount("bob").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
     wd.owner.call(c.id(), "storage_deposit").args_json(json!({"account_id": bob.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
-    let (s, _) = start(&bob, c).await?;
-    assert_eq!(s["player_paid"], "0");
-    let (r, _) = settle(&wd.server, c, &s["match_id"], 0, None).await?;
-    let r = r.map_err(anyhow::Error::msg)?;
-    assert_eq!(r["prize_to"], house.as_str());
-    assert_eq!(ft(c, bob.id().as_str()).await?, 0);
+    let r = bob.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("you need $NOX"));
 
     // alice's credit pays her entry (the house funds it), so she can win real $BOUNTY
     let (s, _) = start(&alice, c).await?;
@@ -279,7 +288,8 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
         .await?
         .into_result()?;
     let meta: Value = c.view("ft_metadata").await?.json()?;
-    assert_eq!(meta["symbol"], "BOUNTY");
+    assert_eq!(meta["symbol"], "NOX");
+    assert_eq!(meta["name"], "Nox");
     Ok(())
 }
 
@@ -358,7 +368,10 @@ async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result
     let alice_end = ft(c, alice.id().as_str()).await?;
     println!("alice staked 25, earned {}, got back {} -> {} total", earned / ONE, back.parse::<u128>()? / ONE, alice_end / ONE);
     assert!(alice_end > 100 * ONE, "backing a winner paid off (the welcome is a credit, not $BOUNTY)");
-    // bob: the bot retired broke -> the pool closed, the stake is (mostly) gone
+    // bob: the bot retired broke -> anyone settles it with close_retired (separate, bounded)
+    let r = g.call(c.id(), "close_retired").args_json(json!({"bot": loser})).gas(Gas::from_tgas(50)).transact().await?;
+    println!("close_retired: {} Tgas", r.total_gas_burnt.as_tgas());
+    r.into_result()?;
     let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": bob.id()})).await?.json()?;
     assert!(sp.is_empty());
     let bob_end = ft(c, bob.id().as_str()).await?;
@@ -426,5 +439,98 @@ async fn a_relayer_paid_deposit_goes_back_to_the_relayer() -> anyhow::Result<()>
     // the relayer got its 0.02 back: net cost ≈ gas only
     let spent = relay0.as_yoctonear() - relay1.as_yoctonear();
     assert!(spent < NearToken::from_millinear(5).as_yoctonear(), "relayer spent {spent} yocto");
+    Ok(())
+}
+
+/// The mainnet topology: the contract on the root account itself, the relayer is also the match
+/// server, the owner is a separate account. Play one match, drop the root's full-access key, then
+/// the owner's time-locked teardown deletes the root and returns its NEAR.
+#[tokio::test]
+async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    WORKER.with(|x| *x.borrow_mut() = Some(w.clone()));
+    let top = w.root_account()?;
+    let root = top.create_subaccount("noxara").initial_balance(NearToken::from_near(10)).transact().await?.into_result()?;
+    let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let c = root.deploy(&std::fs::read(WASM_OVERRIDE)?).await?.into_result()?;
+    // the season ends 15 minutes from now (sandbox time; fast_forward moves the clock); teardown is locked until then
+    let now_ms = w.view_block().await?.timestamp() / 1_000_000;
+    let season_end = now_ms + 900_000;
+    c.call("new")
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id(), "teardown_after_ms": season_end.to_string()}))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?
+        .into_result()?;
+    let fs: Vec<Value> = c.view("get_fighters").await?.json()?;
+    assert_eq!(fs[0]["account"], format!("brindle.{}", root.id()), "bots are sub-accounts of the root");
+    // a guest match, settled by the relay account acting as the match server
+    let g = relay.create_subaccount("g-0001").initial_balance(NearToken::from_millinear(500)).transact().await?.into_result()?;
+    relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let (s, _) = start(&g, &c).await?;
+    settle(&relay, &c, &s["match_id"], 3, None).await?.0.map_err(anyhow::Error::msg)?;
+    // remove every full-access key of the root: only the contract's own rules remain
+    let keys = w.view_access_keys(root.id()).await?;
+
+    for k in keys {
+        let r = root.batch(root.id()).delete_key(k.public_key).transact().await;
+        println!("delete key: {:?}", r.as_ref().map(|x| x.is_success()).map_err(|e| e.to_string()));
+    }
+    assert_eq!(w.view_access_keys(root.id()).await?.len(), 0);
+    // locked before the season's end; a griefer's pending match won't block it after
+    let r = owner.call(c.id(), "teardown").transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("locked"));
+    w.fast_forward(101).await?;
+    let pending: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
+    while w.view_block().await?.timestamp() / 1_000_000 < season_end {
+        w.fast_forward(500).await?;
+    }
+    let r = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("season is over"));
+    let r = g.call(c.id(), "teardown").transact().await?;
+    assert!(r.into_result().is_err(), "a stranger can't");
+    let _ = pending;
+    let root_bal = w.view_account(root.id()).await?.balance;
+    let owner0 = owner.view_account().await?.balance;
+    let r = owner.call(c.id(), "teardown").gas(Gas::from_tgas(50)).transact().await?;
+    println!("teardown: {} Tgas, failures {:?}", r.total_gas_burnt.as_tgas(), r.receipt_failures().len());
+    r.into_result()?;
+    assert!(w.view_account(root.id()).await.is_err(), "the root account is gone");
+    let owner1 = owner.view_account().await?.balance;
+    let back = owner1.as_yoctonear() as f64 / 1e24 - owner0.as_yoctonear() as f64 / 1e24;
+    println!("root held {:.4} NEAR, the owner got back {back:.4} NEAR", root_bal.as_yoctonear() as f64 / 1e24);
+    assert!(back > root_bal.as_yoctonear() as f64 / 1e24 - 0.01);
+    Ok(())
+}
+
+#[tokio::test]
+async fn teardown_refused_before_the_lock() -> anyhow::Result<()> {
+    let wd = world().await?; // default lock: 2026-11-25 00:00 UTC
+    let r = wd.owner.call(wd.c.id(), "teardown").transact().await?;
+    let e = format!("{:?}", r.into_result().unwrap_err());
+    assert!(e.contains("locked until 2026-11-25"), "{e}");
+    let t: String = wd.c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1795564800000");
+    Ok(())
+}
+
+#[tokio::test]
+async fn release_build_ignores_an_earlier_teardown_time_and_init_is_private() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    let root = w.root_account()?;
+    let ca = root.create_subaccount("game").initial_balance(NearToken::from_near(10)).transact().await?.into_result()?;
+    let mallory = root.create_subaccount("mallory").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let c = ca.deploy(&std::fs::read(WASM)?).await?.into_result()?;
+    // a foreign init (front-running between deploy and init) is refused
+    let r = mallory.call(c.id(), "new").args_json(json!({"owner": mallory.id(), "server": mallory.id(), "guest_parent": mallory.id()})).gas(Gas::from_tgas(150)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("private"));
+    // the account itself can, but a release build ignores teardown_after_ms
+    c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id(), "teardown_after_ms": "1"})).gas(Gas::from_tgas(150)).transact().await?.into_result()?;
+    let t: String = c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1795564800000", "release builds can't move the lock");
+    // a second init fails
+    let r = c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id()})).gas(Gas::from_tgas(150)).transact().await?;
+    assert!(r.into_result().is_err());
     Ok(())
 }

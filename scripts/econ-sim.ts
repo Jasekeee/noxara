@@ -95,7 +95,7 @@ function run(seed: number) {
   const rookie = (s: number) => {
     retirements++;
     closePool(s, true);
-    const g = Math.min(C.STARTER, house);
+    const g = Math.min(C.STARTER, Math.max(0, house - C.HOUSE_FLOOR));
     house -= g;
     bots[s] = { p: PERS[Math.floor(r() * 6)], bal: g, w: 0, a: 0, matches: 0, gen: bots[s].gen + 1 };
   };
@@ -127,7 +127,8 @@ function run(seed: number) {
     // start
     let pot = 0;
     for (let s = 0; s < 9; s++) {
-      if (bots[s].bal < C.ENTRY && bots[s].matches > 0) rookie(s);
+      // retire only when the house can fund the successor (else the broke bot keeps its slot)
+      if (bots[s].bal < C.ENTRY && bots[s].matches > 0 && house >= C.HOUSE_FLOOR + C.STARTER) rookie(s);
       const paid = Math.min(entryFor(bots[s].bal), bots[s].bal);
       bots[s].bal -= paid;
       // the wealth part of the entry goes to the house (a tax), the base part into the pot
@@ -152,7 +153,8 @@ function run(seed: number) {
     if (winner === 0) house += prize;
     else {
       bots[winner - 1].bal += prize;
-      dividends(winner - 1, prize);
+      // the human is a guest: a free match, so sponsors only share the bots' entries part of the prize
+      dividends(winner - 1, (prize * (pot - C.TOP_UP)) / pot);
     }
     if (winner !== carrier + 1 && r() < BOUNTY_KILL_P) {
       const others = weights.map((w, i) => (i === carrier + 1 ? 0 : w));
@@ -179,7 +181,7 @@ function run(seed: number) {
         else if (b.a < 2) b.a++;
         if (b.w === 2 && firstTier2 === null) firstTier2 = m;
       }
-      if (b.bal < C.ENTRY) rookie(s);
+      if (b.bal < C.ENTRY && b.matches > 0 && house >= C.HOUSE_FLOOR + C.STARTER) rookie(s);
       // sponsors whose holding time is up withdraw the stake's current value
       const p = pools[s];
       for (const st of [...p.stakes]) {

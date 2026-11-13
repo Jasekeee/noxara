@@ -74,6 +74,7 @@ try {
 }
 // 6. paid matches as the real account
 for (let k = 0; k < Number(arg("matches", "2")); k++) {
+  const started = performance.now();
   const s = await c.startMatch();
   const m = createMatch(s.cfg);
   const rec = new Recorder();
@@ -83,6 +84,11 @@ for (let k = 0; k < Number(arg("matches", "2")); k++) {
     m.step(new Map([[0, inp]]));
   }
   const record: MatchRecord = { version: 1, cfg: s.cfg, inputs: rec.inputs, hash: m.hash(), winner: m.state.winner, placements: m.state.fighters.map((f) => f.placement) };
+  // the match server refuses records faster than real time (audit #9): wait like a real player would
+  const playMs = m.state.tick * 50;
+  const waitMs = Math.max(0, playMs * 0.9 - (performance.now() - started) + 2_000);
+  console.log(`  played ${Math.round(playMs / 1000)} s of game time; waiting ${Math.round(waitMs / 1000)} s (real time)`);
+  await new Promise((r) => setTimeout(r, waitMs));
   const r = await c.settle(s.matchId, record);
   console.log(`match ${s.matchId}: paid ${s.playerPaid}, you L${s.cfg.fighters[0].upgrades.weaponTier}/${s.cfg.fighters[0].upgrades.armor}/${s.cfg.fighters[0].upgrades.skin}, winner ${r.winner}, verified ${r.verified}, start ${s.tx}, settle ${r.tx}`);
 }

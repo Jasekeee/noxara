@@ -58,3 +58,13 @@ test("real sim: a tampered record is refused", () => {
   const v = judge(chain, forged);
   assert.equal(v.ok, false);
 });
+
+test("real time: a record submitted faster than the match could be played is refused", () => {
+  const { chain, record } = play(9);
+  const now = Date.now();
+  const fast = judge({ ...chain, start_ms: String(now - 2_000) } as never, record, undefined, now);
+  assert.equal(fast.ok, false);
+  assert.equal((fast as { code?: string }).code, "too_fast");
+  const ok = judge({ ...chain, start_ms: String(now - 200_000) } as never, record, undefined, now);
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+});

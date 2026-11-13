@@ -1,0 +1,73 @@
+{
+  "deployed_at": "2026-11-13T18:34:05.861Z",
+  "topology": "contract on the root; relayer = match server",
+  "contract": "nx-4ba5bb.testnet",
+  "owner": "br-7e8492.testnet",
+  "teardown_beneficiary": "br-7e8492.testnet",
+  "server": "relay.nx-4ba5bb.testnet",
+  "relayer": "relay.nx-4ba5bb.testnet",
+  "txs": {
+    "deploy_and_new": "8sN695wi7ZZ4hdJ3joFMjc58crHXNBbCFJ3gKYSnZAKF",
+    "create_relay": "HPpAKJDirDkXqFKuynM8jHjVhgwbJ2gpqtcTbeSUh27j"
+  },
+  "storage_usage": 379446,
+  "npc_access_keys": {
+    "house.nx-4ba5bb.testnet": 0,
+    "brindle.nx-4ba5bb.testnet": 0,
+    "quillon.nx-4ba5bb.testnet": 0,
+    "vesper.nx-4ba5bb.testnet": 0,
+    "magpie.nx-4ba5bb.testnet": 0,
+    "tallow.nx-4ba5bb.testnet": 0,
+    "dorrit.nx-4ba5bb.testnet": 0,
+    "zinnia.nx-4ba5bb.testnet": 0,
+    "okapi.nx-4ba5bb.testnet": 0,
+    "fenwick.nx-4ba5bb.testnet": 0
+  },
+  "fighters": [
+    {
+      "account": "brindle.nx-4ba5bb.testnet",
+      "name": "Brindle",
+      "personality": "aggressive"
+    },
+    {
+      "account": "quillon.nx-4ba5bb.testnet",
+      "name": "Quillon",
+      "personality": "camper"
+    },
+    {
+      "account": "vesper.nx-4ba5bb.testnet",
+      "name": "Vesper",
+      "personality": "sniper"
+    },
+    {
+      "account": "magpie.nx-4ba5bb.testnet",
+      "name": "Magpie",
+      "personality": "looter"
+    },
+    {
+      "account": "tallow.nx-4ba5bb.testnet",
+      "name": "Tallow",
+      "personality": "coward"
+    },
+    {
+      "account": "dorrit.nx-4ba5bb.testnet",
+      "name": "Dorrit",
+      "personality": "balanced"
+    },
+    {
+      "account": "zinnia.nx-4ba5bb.testnet",
+      "name": "Zinnia",
+      "personality": "aggressive"
+    },
+    {
+      "account": "okapi.nx-4ba5bb.testnet",
+      "name": "Okapi",
+      "personality": "camper"
+    },
+    {
+      "account": "fenwick.nx-4ba5bb.testnet",
+      "name": "Fenwick",
+      "personality": "balanced"
+    }
+  ]
+}

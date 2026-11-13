@@ -121,8 +121,8 @@ impl Contract {
         let who = env::predecessor_account_id();
         require!(!self.is_guest(&who), "guests can't sponsor: sign in with a NEAR account");
         require!(self.load_player(&who).is_some(), "register first: storage_deposit");
-        require!(amount.0 >= MIN_STAKE, "stake at least 10 $BOUNTY");
-        require!(self.balance(&who) >= amount.0, "not enough $BOUNTY");
+        require!(amount.0 >= MIN_STAKE, "stake at least 10 $NOX");
+        require!(self.balance(&who) >= amount.0, "not enough $NOX");
         let f = self.load_fighter(&bot).filter(|f| f.active).unwrap_or_else(|| env::panic_str("not an active fighter"));
         // no buying in while the bot's money sits in unsettled matches (their outcome may already be known)
         require!(f.escrowed.0 == 0, "this bot is in a match right now: try again when it's over");
@@ -167,9 +167,9 @@ impl Contract {
         let f = self.load_fighter(&bot).expect("fighter");
         let e = pool.entries[i].clone();
         require!(f.record.matches >= e.since_matches + SPONSOR_COOLDOWN, "this bot must play 5 matches after your stake before you can withdraw");
-        require!(f.escrowed.0 == 0, "this bot is in a match right now: try again when it's over");
-        let value = e.shares.0 * self.bankroll(&bot) / pool.total_shares.0;
-        let pay = value.min(self.balance(&bot));
+        // valued on the WALLET only: entries sitting in unsettled matches stay in play for the others,
+        // so leaving mid-match can never profit from a known outcome (and is never blocked)
+        let pay = e.shares.0 * self.balance(&bot) / pool.total_shares.0;
         pool.total_shares = U128(pool.total_shares.0 - e.shares.0);
         pool.entries.remove(i);
         self.sponsors.insert(bot.clone(), pool);
@@ -178,6 +178,39 @@ impl Contract {
         self.push_history(&bot, 0, "unsponsored", pay, who.as_str());
         event("unsponsor", &near_sdk::serde_json::json!({ "sponsor": who, "bot": bot, "returned": U128(pay), "staked": e.staked, "earned": e.earned }));
         U128(pay)
+    }
+
+    /// Anyone: settle a retired bot once none of its entries are left in escrow. Its sponsors split
+    /// the wallet by share (one aggregated event), the rest goes to the house. Bounded (<= 12 sponsors)
+    /// and never run inside start/settle. Returns what went to the house.
+    pub fn close_retired(&mut self, bot: AccountId) -> U128 {
+        let f = self.load_fighter(&bot).unwrap_or_else(|| env::panic_str("not a fighter"));
+        require!(!f.active, "this bot is still active");
+        require!(f.escrowed.0 == 0, "its entries are still in a match: try again later");
+        let wallet = self.balance(&bot);
+        let mut paid = vec![];
+        let mut out = vec![];
+        if let Some(pool) = self.sponsors.remove(&bot) {
+            let t = pool.total_shares.0.max(1);
+            for e in pool.entries {
+                let back = e.shares.0 * wallet / t;
+                self.move_quiet(&bot, &e.sponsor, back);
+                if back > 0 {
+                    out.push((bot.clone(), e.sponsor.clone(), back));
+                }
+                self.forget_sponsoring(&e.sponsor, &bot);
+                paid.push(near_sdk::serde_json::json!({ "sponsor": e.sponsor, "staked": e.staked, "returned": U128(back), "earned": e.earned }));
+            }
+        }
+        let rest = self.balance(&bot);
+        let house = self.house.clone();
+        self.move_quiet(&bot, &house, rest);
+        if rest > 0 {
+            out.push((bot.clone(), house, rest));
+        }
+        crate::emit_transfers(&out, "retired bot settled");
+        event("retired_closed", &near_sdk::serde_json::json!({ "bot": bot, "sponsors": paid, "to_house": U128(rest) }));
+        U128(rest)
     }
 
     // ------------------------------------------------------------------ views
@@ -287,6 +320,26 @@ impl Contract {
         })
     }
 
+    /// Season end: close every sponsorship of `who` at its wallet value (like `unsponsor`), no
+    /// cooldown. Bounded (at most 3). Returns the total paid back.
+    pub(crate) fn close_all_sponsorships(&mut self, who: &AccountId) -> u128 {
+        let bots = self.sponsoring.get(who).cloned().unwrap_or_default();
+        let mut total = 0u128;
+        for bot in bots {
+            let Some(mut pool) = self.sponsors.get(&bot).cloned() else { continue };
+            let Some(i) = pool.entries.iter().position(|e| &e.sponsor == who) else { continue };
+            let e = pool.entries.remove(i);
+            let pay = e.shares.0 * self.balance(&bot) / pool.total_shares.0.max(1);
+            pool.total_shares = U128(pool.total_shares.0 - e.shares.0);
+            self.sponsors.insert(bot.clone(), pool);
+            self.move_tokens(&bot, who, pay, "sponsorship closed: season end");
+            event("unsponsor", &near_sdk::serde_json::json!({ "sponsor": who, "bot": bot, "returned": U128(pay), "staked": e.staked, "earned": e.earned, "season_end": true }));
+            total += pay;
+            self.forget_sponsoring(who, &bot);
+        }
+        total
+    }
+
     fn forget_sponsoring(&mut self, who: &AccountId, bot: &AccountId) {
         let mut mine = self.sponsoring.get(who).cloned().unwrap_or_default();
         mine.retain(|b| b != bot);
@@ -327,21 +380,6 @@ impl Contract {
             self.push_history(bot, match_id, "dividend", paid, "");
         }
         paid
-    }
-
-    /// A retired bot's pool closes (once nothing of it is in escrow, so wallet == bankroll): sponsors
-    /// split what's left by share; the rest of their stake is lost.
-    pub(crate) fn close_pool(&mut self, bot: &AccountId, match_id: u64) {
-        let Some(pool) = self.sponsors.remove(bot) else { return };
-        let b = self.bankroll(bot);
-        require!(b == self.balance(bot), "pool closed with entries in escrow");
-        let t = pool.total_shares.0.max(1);
-        for e in pool.entries {
-            let back = e.shares.0 * b / t;
-            self.move_tokens(bot, &e.sponsor, back, "sponsorship closed: bot retired");
-            self.forget_sponsoring(&e.sponsor, bot);
-            event("sponsor_lost", &near_sdk::serde_json::json!({ "bot": bot, "sponsor": e.sponsor, "staked": e.staked, "returned": U128(back), "earned": e.earned, "match_id": U64(match_id) }));
-        }
     }
 
     pub(crate) fn push_history(&mut self, acct: &AccountId, match_id: u64, kind: &str, amount: u128, detail: &str) {

@@ -9,7 +9,7 @@ import { levelProgress, unlocksForLevel, upgradesForLevel, xpForMatch } from "..
 import { SIM_VERSION, type MatchConfig, type MatchRecord, type Personality } from "../sim/types";
 import { t1Roster } from "../sim/roster";
 import { matchConfigFromChain, type ChainMatch, type ChainRosterEntry } from "./roster";
-import { ed25519Supported, generateKey, inputLogHash, rpc, settleMessage, sha256, signDelegate, Signer, toBase64, viewCall, type StoredKey } from "./near";
+import { ed25519Supported, finalBlockHash, generateKey, inputLogHash, rpc, sendTransaction, settleMessage, sha256, signDelegate, signTransaction, Signer, toBase64, viewCall, type StoredKey } from "./near";
 
 const env = ((import.meta as { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
 const DEFAULTS = {
@@ -28,9 +28,9 @@ const STORE_XP = "bountyroyale.localxp.v1";
 const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
-const START_GAS = 100n * 10n ** 12n;
+const START_GAS = 150n * 10n ** 12n; // worst case: retirements + rookie accounts at start (audit #10)
 
-/** yocto-$BOUNTY string -> display number with 2 decimals. */
+/** yocto-$NOX string -> display number with 2 decimals. */
 export const toBounty = (y: string | bigint | undefined | null): number => (y === undefined || y === null ? 0 : Number(BigInt(y) / YOCTO_PER_CENT) / 100);
 
 type Saved = { accountId: string; key: StoredKey; contract: string };
@@ -78,18 +78,18 @@ function save(key: string, v: unknown) {
   }
 }
 
-/** "12.5" $BOUNTY -> yocto string (2 decimals are enough for the UI). */
+/** "12.5" $NOX -> yocto string (2 decimals are enough for the UI). */
 const toYocto = (amount: number) => ((BigInt(Math.round(amount * 100)) * ONE) / 100n).toString();
 
 /** Contract panics -> sentences a player understands. */
 function friendly(msg: string): string {
   const m = msg.toLowerCase();
-  if (m.includes("not enough $bounty")) return "You don't have enough $BOUNTY for that.";
+  if (m.includes("not enough $nox") || m.includes("not enough $bounty")) return "You don't have enough $NOX for that.";
   if (m.includes("must play 5 matches")) return "Your stake is locked until this bot plays 5 more matches.";
   if (m.includes("guests can't")) return "Sign in with a NEAR account to sponsor bots.";
   if (m.includes("not an active fighter") || m.includes("broke")) return "This bot has retired.";
   if (m.includes("30%")) return "Sponsors can own at most 30% of a bot: try a smaller stake.";
-  if (m.includes("at least 10")) return "The minimum stake is 10 $BOUNTY.";
+  if (m.includes("at least 10")) return "The minimum stake is 10 $NOX.";
   if (m.includes("at most 3 bots")) return "You can back at most 3 bots at once.";
   if (m.includes("all the sponsors")) return "This bot already has as many sponsors as it can take.";
   if (m.includes("don't sponsor")) return "You don't sponsor this bot.";
@@ -121,11 +121,14 @@ export type OfflineReason =
   | "wrong_contract" // the relayer serves another contract
   | "sim_version_mismatch" // the match server runs another simulation version (it would refuse our records)
   | "no_webcrypto" // the browser can't make ed25519 keys
+  | "guests_closed" // the relayer's free budget / daily guest spots are used up (sign-in still works)
   | "chain_error"; // something failed mid-session (guest creation, relay, views)
 
 class Client implements GameClientT3 {
   private _mode: "chain" | "offline";
   private _offlineReason: OfflineReason | undefined;
+  /** the relayer stopped paying (guest budget mode): real accounts sign their own transactions */
+  relayClosed = false;
   /** last chain-side error message (for debugging; never logged) */
   lastError: string | null = null;
   private relayer: string;
@@ -237,6 +240,7 @@ class Client implements GameClientT3 {
   private async relay<T>(methodName: string, args: unknown, retry = true, gas = START_GAS): Promise<{ value: T; tx: string }> {
     await this.sync();
     const s = this.saved!;
+    if (this.relayClosed && this.realSaved) return this.direct<T>(methodName, args, gas);
     this.nonce += 1n;
     const payload = await signDelegate(this.signer!, {
       senderId: s.accountId,
@@ -248,6 +252,14 @@ class Client implements GameClientT3 {
     const r = await postJson<{ value: T; tx: string }>(`${this.relayer}/api/relay`, { payload }, 45_000);
     if (!r.ok) {
       const msg = String(r.json.error ?? "relay failed");
+      const code = (r.json as { code?: string }).code;
+      if (code === "relay_closed" && this.realSaved) {
+        // the relayer's budget is spent: sign the same call ourselves (the key's allowance pays the gas)
+        this.relayClosed = true;
+        this.nonce -= 1n; // the delegate was never sent
+        return this.direct<T>(methodName, args, gas);
+      }
+      if (code === "guests_closed" && !this.realSaved) this.goOffline(msg, "guests_closed");
       if (retry && /nonce|expired/i.test(msg)) {
         await this.sync(true);
         return this.relay<T>(methodName, args, false, gas);
@@ -262,6 +274,30 @@ class Client implements GameClientT3 {
       throw new Error(msg);
     }
     return { value: r.json.value, tx: r.json.tx };
+  }
+
+  /** A normal transaction signed with the signed-in account's function-call key (no relayer). */
+  private async direct<T>(methodName: string, args: unknown, gas: bigint, retry = true): Promise<{ value: T; tx: string }> {
+    await this.sync();
+    const s = this.saved!;
+    this.nonce += 1n;
+    const signed = await signTransaction(this.signer!, {
+      signerId: s.accountId,
+      nonce: this.nonce,
+      receiverId: this.contract,
+      blockHash: await finalBlockHash(this.rpcUrl),
+      actions: [{ methodName, args, gas }],
+    });
+    try {
+      return await sendTransaction<T>(this.rpcUrl, this.contract, signed);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (retry && /nonce/i.test(m)) {
+        await this.sync(true);
+        return this.direct<T>(methodName, args, gas, false);
+      }
+      throw e instanceof Error ? e : new Error(m);
+    }
   }
 
   private async config(): Promise<ChainConfig> {
@@ -421,7 +457,7 @@ class Client implements GameClientT3 {
    */
   async signIn(): Promise<string> {
     if (this.realSaved) return this.realSaved.accountId;
-    if (this._mode !== "chain") throw new Error("The NEAR network is unreachable right now: try again later.");
+    if (this._mode !== "chain" && this._offlineReason !== "guests_closed") throw new Error("The NEAR network is unreachable right now: try again later.");
     if (typeof window === "undefined") throw new Error("Sign-in needs a browser.");
     const key = await generateKey();
     let accountId: string | null = null;
@@ -483,7 +519,11 @@ class Client implements GameClientT3 {
     for (let i = 0; i < 10 && !ok; i++) {
       const r = await postJson<{ registered?: boolean; code?: string }>(`${this.relayer}/api/register`, { accountId, publicKey: key.publicKey, signature }).catch(() => null);
       if (r?.ok) ok = true;
-      else if (r && r.json.code === "already_subsidised") {
+      else if (r && r.json.code === "relay_closed") {
+        // the relayer can't pay the registration: the wallet pays its own storage deposit (one more approval)
+        if (!(await this.selfRegister(accountId))) return;
+        ok = true;
+      } else if (r && r.json.code === "already_subsidised") {
         // registered before and left: they need their own storage deposit (wallet tx), not ours
         this.lastError = "This account left the game before: re-register it with your wallet (0.02 NEAR storage).";
         return;
@@ -499,6 +539,31 @@ class Client implements GameClientT3 {
     this.realSaved = real;
     save(STORE_REAL, real);
     this.use(real);
+    if (this._offlineReason === "guests_closed") {
+      // guests are closed, but a signed-in account plays on chain, signing its own transactions
+      this._mode = "chain";
+      this._offlineReason = undefined;
+      this.relayClosed = true;
+    }
+  }
+
+  /** Storage deposit paid by the player's wallet (only when the relayer is closed). */
+  private async selfRegister(accountId: string): Promise<boolean> {
+    try {
+      const reg = await viewCall<unknown>(this.rpcUrl, this.contract, "storage_balance_of", { account_id: accountId }).catch(() => null);
+      if (reg) return true;
+      if (!this.connector) throw new Error("no wallet connection");
+      const cfg = await viewCall<{ storage_deposit: string }>(this.rpcUrl, this.contract, "get_config");
+      const wallet = await this.connector.wallet();
+      await wallet.signAndSendTransaction({
+        receiverId: this.contract,
+        actions: [{ type: "FunctionCall", params: { methodName: "storage_deposit", args: {}, gas: "30000000000000", deposit: cfg.storage_deposit } }],
+      });
+      return true;
+    } catch (e) {
+      this.lastError = `The relayer is closed and your wallet didn't register the account: ${e instanceof Error ? e.message : String(e)}`;
+      return false;
+    }
   }
 
   async signOut(): Promise<void> {
@@ -510,7 +575,7 @@ class Client implements GameClientT3 {
     await this.connector?.disconnect().catch(() => {});
   }
 
-  /** Welcome credit left (pays match entries only; not $BOUNTY). Proposed for GameClientT3. */
+  /** Welcome credit left (pays match entries only; not $NOX). Proposed for GameClientT3. */
   async welcomeCredit(): Promise<number> {
     if (this._mode !== "chain" || !this.realSaved) return 0;
     const v = await viewCall<string>(this.rpcUrl, this.contract, "get_welcome_credit", { account_id: this.realSaved.accountId }).catch(() => "0");
@@ -566,7 +631,7 @@ class Client implements GameClientT3 {
   async sponsor(bot: string, amount: number): Promise<{ tx: string | null }> {
     if (!this.realSaved) throw new Error("Sign in with a NEAR account to sponsor bots.");
     if (this._mode !== "chain") throw new Error("The NEAR network is unreachable right now: try again later.");
-    if (!(amount > 0)) throw new Error("Choose how much $BOUNTY to stake.");
+    if (!(amount > 0)) throw new Error("Choose how much $NOX to stake.");
     try {
       const r = await this.relay<unknown>("sponsor", { bot, amount: toYocto(amount) }, true, 50n * 10n ** 12n);
       return { tx: r.tx };
@@ -634,7 +699,7 @@ export function histEvent(e: ChainHist): FighterEvent {
   switch (e.kind) {
     case "win": {
       const [, kills] = e.detail.split(":");
-      return { match, at, kind: "win", text: `Won match${m} and took ${amt} $BOUNTY${kills && kills !== "0" ? ` (${kills} kills)` : ""}` };
+      return { match, at, kind: "win", text: `Won match${m} and took ${amt} $NOX${kills && kills !== "0" ? ` (${kills} kills)` : ""}` };
     }
     case "death": {
       const [place, kills] = e.detail.split(":");
@@ -643,20 +708,20 @@ export function histEvent(e: ChainHist): FighterEvent {
     }
     case "bounty":
       return e.detail === "lost"
-        ? { match, at, kind: "bounty", text: `Was hunted down in match${m} and lost a ${amt} $BOUNTY bounty` }
-        : { match, at, kind: "bounty", text: `Claimed a ${amt} $BOUNTY bounty in match${m}` };
+        ? { match, at, kind: "bounty", text: `Was hunted down in match${m} and lost a ${amt} $NOX bounty` }
+        : { match, at, kind: "bounty", text: `Claimed a ${amt} $NOX bounty in match${m}` };
     case "upgrade":
-      return { match, at, kind: "upgrade", text: `Bought ${e.detail.replace("weapon", "weapon tier")} for ${amt} $BOUNTY` };
+      return { match, at, kind: "upgrade", text: `Bought ${e.detail.replace("weapon", "weapon tier")} for ${amt} $NOX` };
     case "retired":
-      return { match, at, kind: "retired", text: `Went broke and retired${amt !== "0" ? ` with ${amt} $BOUNTY left` : ""}` };
+      return { match, at, kind: "retired", text: `Went broke and retired${amt !== "0" ? ` with ${amt} $NOX left` : ""}` };
     case "rookie":
-      return { match, at, kind: "rookie", text: `Arrived on the island with ${amt} $BOUNTY from the House${e.detail ? `, replacing ${e.detail}` : ""}` };
+      return { match, at, kind: "rookie", text: `Arrived on the island with ${amt} $NOX from the House${e.detail ? `, replacing ${e.detail}` : ""}` };
     case "sponsored":
-      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} backed this bot with ${amt} $BOUNTY` };
+      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} backed this bot with ${amt} $NOX` };
     case "unsponsored":
-      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} withdrew ${amt} $BOUNTY` };
+      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} withdrew ${amt} $NOX` };
     case "dividend":
-      return { match, at, kind: "sponsored", text: `Paid ${amt} $BOUNTY to its sponsors` };
+      return { match, at, kind: "sponsored", text: `Paid ${amt} $NOX to its sponsors` };
     default:
       return { match, at, kind: "death", text: `${e.kind} ${amt}` };
   }
@@ -677,7 +742,7 @@ export const createGameClient: CreateGameClient = async (opts = {}) => {
   const o = { relayer: opts.relayer ?? DEFAULTS.relayer, rpc: opts.rpc ?? DEFAULTS.rpc, contract: opts.contract ?? DEFAULTS.contract };
   const offline = (reason: OfflineReason, detail: string) => new Client("offline", o, reason, detail);
   if (typeof crypto?.subtle === "undefined" || !(await ed25519Supported())) return offline("no_webcrypto", "WebCrypto ed25519 unavailable");
-  let h: { ok?: boolean; game?: string; simVersion?: string };
+  let h: { ok?: boolean; game?: string; simVersion?: string; guests?: string; reason?: string };
   try {
     const r = await fetch(`${o.relayer.replace(/\/$/, "")}/api/health`, { signal: AbortSignal.timeout(2500) });
     h = (await r.json()) as typeof h;
@@ -687,7 +752,12 @@ export const createGameClient: CreateGameClient = async (opts = {}) => {
   }
   if (h.game !== o.contract) return offline("wrong_contract", `relayer serves ${h.game ?? "?"}, not ${o.contract}`);
   if (h.simVersion !== SIM_VERSION) return offline("sim_version_mismatch", `server sim ${h.simVersion ?? "unknown"}, client sim ${SIM_VERSION}`);
-  const c = new Client("chain", o);
+  const closed = h.guests === "closed";
+  const hasReal = !!load<Saved>(STORE_REAL);
+  // guest budget mode: guests play offline (clearly labelled); a signed-in account stays on chain and
+  // signs its own transactions
+  const c = closed && !hasReal ? new Client("offline", o, "guests_closed", `relayer closed: ${h.reason ?? "budget"}`) : new Client("chain", o);
+  if (closed) c.relayClosed = true;
   // back from the wallet? (?account_id=...&public_key=...&all_keys=...) finish the sign-in, clean the URL
   if (typeof location !== "undefined" && typeof history !== "undefined") {
     const q = new URLSearchParams(location.search);

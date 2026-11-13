@@ -142,10 +142,10 @@ import { sha256 } from "../../src/net/near.ts";
 
 test("T3: history entries become ready-to-show lines", () => {
   const e = (kind: string, amount: string, detail: string) => histEvent({ match_id: "42", at_ms: "1000", kind, amount, detail });
-  assert.equal(e("win", "70420000000000000000", "1:3").text, "Won match #42 and took 70.42 $BOUNTY (3 kills)");
+  assert.equal(e("win", "70420000000000000000", "1:3").text, "Won match #42 and took 70.42 $NOX (3 kills)");
   assert.equal(e("death", "0", "4:1").kind, "kill");
   assert.equal(e("death", "0", "9:0").text, "Finished #9 in match #42");
-  assert.equal(e("upgrade", "120000000000000000000", "weapon 2").text, "Bought weapon tier 2 for 120 $BOUNTY");
+  assert.equal(e("upgrade", "120000000000000000000", "weapon 2").text, "Bought weapon tier 2 for 120 $NOX");
   assert.equal(e("bounty", "15000000000000000000", "lost").kind, "bounty");
   assert.equal(e("retired", "0", "broke").kind, "retired");
   assert.equal(e("dividend", "7040000000000000000", "").kind, "sponsored");
@@ -171,4 +171,26 @@ test("T3: the player's level upgrades from the chain go into fighter 0", () => {
 
 test("T3: register message matches between browser and relayer", async () => {
   assert.deepEqual(await sha256("bountyroyale:register:alice.testnet"), registerMessage("alice.testnet"));
+});
+
+test("guest budget mode: closed relayer -> guests offline with a reason, no console noise", async () => {
+  const h = await fakeHealth({ ok: true, game: "royale.t", simVersion: SIM_VERSION, guests: "closed", reason: "budget" });
+  try {
+    const c = await silently(() => createGameClient({ relayer: h.url, contract: "royale.t" }));
+    assert.equal(c.mode, "offline");
+    assert.equal(c.offlineReason, "guests_closed");
+    const s = await c.startMatch();
+    assert.match(s.matchId, /^local-/, "guests play locally");
+  } finally {
+    h.close();
+  }
+});
+
+import { encodeTransaction } from "../../src/net/near.ts";
+test("direct transactions: borsh layout of a FunctionCall tx", () => {
+  const tx = encodeTransaction({ signerId: "a.t", publicKey: new Uint8Array(32).fill(7), nonce: 5n, receiverId: "g.t", blockHash: new Uint8Array(32).fill(9), actions: [{ methodName: "m", args: {}, gas: 10n }] });
+  // 4+3 signer, 1+32 key, 8 nonce, 4+3 receiver, 32 hash, 4 count, 1 tag, 4+1 method, 4+2 args, 8 gas, 16 deposit
+  assert.equal(tx.length, 7 + 33 + 8 + 7 + 32 + 4 + 1 + 5 + 6 + 8 + 16);
+  assert.equal(tx[7], 0, "ed25519 key type");
+  assert.equal(tx[7 + 33 + 8 + 7 + 32 + 4], 2, "Action::FunctionCall");
 });
