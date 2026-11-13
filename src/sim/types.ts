@@ -47,6 +47,8 @@ export interface Input {
   aim: number;
   /** trigger held this tick */
   fire: boolean;
+  /** optional aim distance (FP) for lobbed weapons (grenade); absent = max range */
+  aimDist?: number;
 }
 
 export interface FighterState {
@@ -126,6 +128,9 @@ export interface Storm {
   cy: number;
   r: number; // current safe radius (FP)
   targetR: number; // radius it is shrinking toward
+  /** centre of the next safe circle */
+  tx: number;
+  ty: number;
   phase: number;
   /** damage per second outside the safe zone */
   dps: number;
@@ -154,7 +159,7 @@ export interface MatchState {
 
 export type SimEvent =
   | { t: "shot"; who: number; weapon: WeaponKind; x: number; y: number; aim: number }
-  | { t: "hit"; who: number; by: number; dmg: number; crit: boolean; x: number; y: number }
+  | { t: "hit"; who: number; by: number; dmg: number; crit: boolean; x: number; y: number } // by = -1: storm
   | { t: "kill"; who: number; by: number | null; weapon: WeaponKind | "storm" }
   | { t: "bounty"; who: number; by: number } // the bounty carrier was killed by `by`
   | { t: "chest"; who: number; chest: number; weapon: WeaponKind }
