@@ -245,12 +245,12 @@ function onEvents(evs: SimEvent[]) {
         const mine = e.by === 0, me = e.who === 0;
         if (storm) {
           fx.spark(x, z, PAL.stormHot);
-          if (me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, "storm");
+          if (me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, "storm", e.who);
           if (me) { hud.hurtFlash(); shake(0.08); }
           break;
         }
         fx.impact(x, 1.1, z, BOLT_COLOR[st.fighters[e.by]?.weapon ?? "popper"], e.crit);
-        if (mine || me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, (e.crit ? "crit " : "") + (me ? "me" : ""));
+        if (mine || me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, (e.crit ? "crit " : "") + (me ? "me" : ""), e.who);
         if (mine) {
           const p = project(v.pos.x, 1.2, v.pos.z);
           if (p) hud.hitMark(p.x, p.y, false);

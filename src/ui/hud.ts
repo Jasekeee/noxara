@@ -208,7 +208,16 @@ export class Hud {
     this.flashA = Math.max(this.flashA, a);
   }
 
-  floater(text: string, x: number, y: number, z: number, cls: string) {
+  private stackT = new Map<number, { t: number; n: number }>();
+  floater(text: string, x: number, y: number, z: number, cls: string, key = -1) {
+    if (key >= 0) {
+      const now = performance.now();
+      const st = this.stackT.get(key);
+      const n = st && now - st.t < 350 ? st.n + 1 : 0;
+      this.stackT.set(key, { t: now, n });
+      y += (n % 4) * 0.55;
+      x += (n % 2 ? 0.5 : -0.5) * Math.min(1, n);
+    }
     const f = this.floaters[this.fi];
     this.fi = (this.fi + 1) % this.floaters.length;
     f.el.textContent = text;
