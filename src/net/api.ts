@@ -43,6 +43,50 @@ export interface SettleResult {
   upgrades: { name: string; what: string }[];
 }
 
+/** A real player's sponsorship of a bot (player-owned market). */
+export interface Sponsorship {
+  bot: string; // bot account
+  botName: string;
+  stake: number; // $BOUNTY staked (part of the bot's bankroll; lost if the bot retires broke)
+  share: number; // fraction 0..1 of the bot's sponsor pool owned by this player
+  earned: number; // $BOUNTY received from the bot's winnings so far
+}
+
+export interface BotMarket {
+  bot: string;
+  totalStake: number;
+  sponsors: number;
+  /** share of every prize/bounty the bot wins that goes to its sponsors (pro rata) */
+  sponsorCut: number;
+}
+
+export interface Progress {
+  xp: number;
+  level: number;
+  nextLevelXp: number;
+  /** what the player's fighter brings into a match at this level */
+  upgrades: { weaponTier: number; armor: number; skin: number };
+  unlocks: string[]; // human-readable ("Shotgun tier 2", "Armor 1")
+}
+
+export interface LeaderRow {
+  account: string;
+  name: string;
+  bot: boolean;
+  wins: number;
+  kills: number;
+  earnings: number;
+  matches: number;
+}
+
+export interface FighterEvent {
+  match: string;
+  at: number; // unix ms
+  kind: "win" | "kill" | "death" | "bounty" | "upgrade" | "retired" | "rookie" | "sponsored";
+  text: string; // ready to show ("Bought armor 1 for 90 $BOUNTY")
+  tx?: string;
+}
+
 export interface GameClient {
   /** "chain" when the relayer + contract are reachable; "offline" = local-only play (still fully playable). */
   readonly mode: "chain" | "offline";
@@ -56,6 +100,19 @@ export interface GameClient {
   startMatch(): Promise<StartResult>;
   /** Hand the finished match to the server, which re-verifies and settles it on chain. */
   settle(matchId: string, record: MatchRecord): Promise<SettleResult>;
+  // ---- T3 ----
+  /** Sign in with a NEAR wallet (real account: can earn $BOUNTY, sponsor, keeps progress). One wallet popup, then gasless again. */
+  signIn(): Promise<string>;
+  signOut(): Promise<void>;
+  /** $BOUNTY balance of the current account (0 for guests). */
+  balance(): Promise<number>;
+  progress(): Promise<Progress>;
+  market(): Promise<BotMarket[]>;
+  mySponsorships(): Promise<Sponsorship[]>;
+  sponsor(bot: string, amount: number): Promise<{ tx: string | null }>;
+  unsponsor(bot: string): Promise<{ tx: string | null; returned: number }>;
+  leaderboard(kind: "bots" | "players"): Promise<LeaderRow[]>;
+  history(account: string): Promise<FighterEvent[]>;
   explorerTx(hash: string): string;
   explorerAccount(account: string): string;
 }
