@@ -1020,11 +1020,7 @@ impl Contract {
         todo.extend(self.pending_paid_ids());
         let more = todo.len() > TEARDOWN_SWEEP;
         for id in todo.into_iter().take(TEARDOWN_SWEEP) {
-            if self.matches.get(&id).is_some() {
-                self.close_unsettled(id, "season over");
-            } else {
-                self.pending_free.retain(|x| *x != id);
-            }
+            self.close_pending_for_teardown(id);
         }
         if more {
             event("teardown_progress", &near_sdk::serde_json::json!({ "left": self.pending_free.len() + self.pending_paid_ids().len() }));
@@ -1049,20 +1045,21 @@ impl Contract {
         let mut todo: Vec<u64> = self.pending_free.clone();
         todo.extend(self.pending_paid_ids());
         for id in todo.into_iter().take(TEARDOWN_SWEEP) {
-            if self.matches.get(&id).is_some() {
-                self.close_unsettled(id, "season over");
-            } else {
-                self.pending_free.retain(|x| *x != id);
-            }
+            self.close_pending_for_teardown(id);
         }
-        // 2. match records by id
+        // 2. match records by id - only once nothing is in flight (escrow and credit stay intact), and
+        //    never a Pending one
         let mut cursor = env::storage_read(CLEAR_MATCH_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(1);
-        let end = (cursor + max_matches.unwrap_or(60).min(200) as u64).min(self.next_match_id);
-        let mut credit = near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches);
-        while cursor < end {
-            self.matches.remove(&cursor);
-            credit.remove(&cursor);
-            cursor += 1;
+        if self.pending_free.is_empty() && self.pending_paid_ids().is_empty() {
+            let end = (cursor + max_matches.unwrap_or(60).min(200) as u64).min(self.next_match_id);
+            let mut credit = near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches);
+            while cursor < end {
+                if self.load_match(cursor).is_none_or(|m| m.status != MatchStatus::Pending) {
+                    self.matches.remove(&cursor);
+                    credit.remove(&cursor);
+                }
+                cursor += 1;
+            }
         }
         env::storage_write(CLEAR_MATCH_KEY, &cursor.to_le_bytes());
         self.recent.clear();
@@ -1647,7 +1644,23 @@ impl Contract {
         env::storage_write(PAID_IDS_KEY, &borsh::to_vec(ids).unwrap());
     }
 
-    /// A guest's free-start marker is only needed during the cooldown: drop it afterwards (bounded:
+    /// Teardown sweep of one in-flight match: close it by the abandon rules, or (no record) just drop
+    /// the id from whichever pending list holds it, keeping the counters consistent.
+    fn close_pending_for_teardown(&mut self, id: u64) {
+        if self.matches.get(&id).is_some() {
+            self.close_unsettled(id, "season over");
+            return;
+        }
+        self.pending_free.retain(|x| *x != id);
+        let mut ids = self.pending_paid_ids();
+        if ids.contains(&id) {
+            ids.retain(|x| *x != id);
+            self.set_pending_paid_ids(&ids);
+            self.pending_paid = self.pending_paid.saturating_sub(1);
+        }
+    }
+
+        /// A guest's free-start marker is only needed during the cooldown: drop it afterwards (bounded:
     /// one per settle / close), so the contract doesn't pay for it forever.
     fn prune_free_start(&mut self, player: &AccountId) {
         let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);

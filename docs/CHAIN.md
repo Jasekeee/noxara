@@ -37,6 +37,8 @@ dev patch.
 | migration 5: sponsorship review fixes (code only, V2 → V2) | `EBxwrtQymR9RuxVBxm93oGgYdM6f33RyoBUKwUJMdqUC` |
 | migration 6: deposit payer / refund to payer (code only) | `7Brr5XP1kTSyhviC6N5nif2cHEAdMkMvTxPZYf7J6hJt` |
 | migration 7: V1 player records fail closed to the relayer as payer (code only) | `6v2dzRbizjP3QaF2kcTjHymjKESKxez7GwQdvaJNy4cb` |
+| migration 8: NOXARA + audits #1/#2 (code only; Nox/NOX metadata) / `set_teardown_beneficiary(br-7e8492.testnet)` | `He34ga4cPqAmAKzt21m3wCTKpTtvwzNH2eaZv5eWQ8cS` / `1wo26HWKkHEhYZtYuHyqZTREt9QvEzaNi9AzPaerJdq` |
+| live check after migration 8: guest match #50 start / settle (verified, played in real time) | `2QtTrSx4oZ4bQJpMtuQMkE2mQ3Cn5h4sy6MKdHVFsHDc` / `HtHbHewJmJMNfX1cyDArRXCqCdbq26HoTKdueD6Pmgcj` |
 | T3 live (game client): real account created / wallet adds the game key | `DBxrCqzzSwc9SrHUdQ4wHhV1tHvTbmuF4SHCd2xq4iA7` / `iwpQgpWqkjpADK9TVmzJt6WERewsCBH72SzfyNikEc4` |
 | T3 live: `house_grant` 60 (testing on-ramp) / relayed `sponsor` Pep 20 | `9RnX2RXNaswbbSZKrijUyAauBE8fhuBDfAm1pL9u5gVG` / `D4bU7p7cSzDGzyJfm25C6nhfaVGRpUSP1Unzc9AKV2Z8` |
 | T3 live: paid match #42 start / settle (Pep won, sponsor got 7.04 cash) | `Frk8ex3MUgn6oTawvfBSmEyJoi61zqLVg9PDW1wBwx8L` / `EZNFJ1SMGGqjMNjg4EKkep4B8VX84SQbdJq25Koo7QBy` |
@@ -314,6 +316,7 @@ receives the balance.
 | 6 LOW | free-start markers never removed | pruned at settlement / close | `audit2_free_start_markers_are_pruned` |
 | 7 LOW | sybils eat the welcome cap | self-registration / `claim_welcome` have their own sub-cap (10 of the 50 a day); the relayer path is rate-limited per IP | `audit2_self_registration_has_its_own_welcome_sub_cap` |
 | 8 INFO | init / owner / grant | beneficiary ≠ contract at `new`; two-step owner change; `house_grant` respects the floor; admin powers table above | `audit2_house_grant_respects_the_floor_and_owner_change_is_two_step` |
+| review | clearing could delete Pending match records / desync pending counters | range deletion only once nothing is in flight (and never a Pending record); every sweep branch keeps `pending_paid` and its id list in step | `teardown_clear_never_loses_escrow_or_credit_and_keeps_counters` (escrow == pending pots, counter == list, supply invariant after every batch) |
 | 9 DEPENDABOT | wee_alloc (unmaintained) via near-sdk default features | `near-sdk` with `default-features = false, features = ["legacy"]`: the Rust allocator (no `wee_alloc` in the tree) | wasm 375,865 → 382,179 B (+6.3 KB, dlmalloc); with this round's new methods 393,730 B. Gas unchanged: start_match + resolve 13 Tgas (was 13), settle 10 / 11 / 12 Tgas (was 10 / 11 / 12), retirement wave 71 Tgas (was 72) |
 
 ## Independent audit (NO-GO → fixes; second audit pending)

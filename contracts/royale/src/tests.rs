@@ -1541,3 +1541,55 @@ fn audit2_teardown_clear_empties_state_in_bounded_batches() {
     assert!(c.get_player(acc(GUEST)).is_none());
     println!("teardown_clear: {calls} calls");
 }
+
+
+#[test]
+fn teardown_clear_never_loses_escrow_or_credit_and_keeps_counters() {
+    // review: clearing must wait for in-flight matches and keep the pending counters consistent
+    let mut c = setup();
+    register_as(&mut c, RELAY, "cred.testnet", 1); // credit-paid entries
+    grant(&mut c, ALICE, 50 * ONE);
+    let mut paid_players = vec![ALICE.to_string(), "cred.testnet".to_string()];
+    for i in 0..6 {
+        let who = format!("p{i}.testnet");
+        ctx(&who, 140, STORAGE_DEPOSIT);
+        c.storage_deposit(None, None);
+        grant(&mut c, &who, 10 * ONE);
+        paid_players.push(who);
+    }
+    let mut h = 200;
+    for p in &paid_players {
+        start(&mut c, p, h);
+        h += 2;
+    }
+    for i in 0..6 {
+        let g = guest_n(&mut c, 700 + i);
+        start(&mut c, &g, h);
+        h += 2;
+    }
+    assert_eq!(c.pending_paid as usize, paid_players.len());
+    let check = |c: &Contract| {
+        // escrow on the contract == the sum of what pending matches hold
+        let held: u128 = c.pending_free.iter().chain(c.pending_paid_ids().iter()).filter_map(|id| c.load_match(*id)).map(|m| m.pot.0).sum();
+        assert_eq!(c.balance(&acc(ME)), held, "escrow matches the pending matches");
+        assert_eq!(c.pending_paid as usize, c.pending_paid_ids().len(), "counter == list");
+        assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
+    };
+    check(&c);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    let mut calls = 0;
+    loop {
+        testing_env!(b.build());
+        let p = c.teardown_clear(vec![], Some(5), Some(2));
+        calls += 1;
+        check(&c);
+        if p.done {
+            break;
+        }
+        assert!(calls < 20);
+    }
+    assert!(c.pending_free.is_empty() && c.pending_paid == 0);
+    assert_eq!(c.balance(&acc(ME)), 0, "every entry went back by the rules before any record was deleted");
+    assert_eq!(c.welcome_credit(&acc("cred.testnet")), WELCOME_STAKE - ENTRY_FEE, "a seeded credit entry is forfeited to the house, never lost");
+}
