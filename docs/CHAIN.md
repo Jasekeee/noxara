@@ -36,6 +36,7 @@ dev patch.
 | `set_max_free(24)` | `DycYSVwD5gmquH3fqaLRtXMHs3wUyw48xJuKsHPHAMRC` |
 | migration 5: sponsorship review fixes (code only, V2 → V2) | `EBxwrtQymR9RuxVBxm93oGgYdM6f33RyoBUKwUJMdqUC` |
 | migration 6: deposit payer / refund to payer (code only) | `7Brr5XP1kTSyhviC6N5nif2cHEAdMkMvTxPZYf7J6hJt` |
+| migration 7: V1 player records fail closed to the relayer as payer (code only) | `6v2dzRbizjP3QaF2kcTjHymjKESKxez7GwQdvaJNy4cb` |
 | T3 live (game client): real account created / wallet adds the game key | `DBxrCqzzSwc9SrHUdQ4wHhV1tHvTbmuF4SHCd2xq4iA7` / `iwpQgpWqkjpADK9TVmzJt6WERewsCBH72SzfyNikEc4` |
 | T3 live: `house_grant` 60 (testing on-ramp) / relayed `sponsor` Pep 20 | `9RnX2RXNaswbbSZKrijUyAauBE8fhuBDfAm1pL9u5gVG` / `D4bU7p7cSzDGzyJfm25C6nhfaVGRpUSP1Unzc9AKV2Z8` |
 | T3 live: paid match #42 start / settle (Pep won, sponsor got 7.04 cash) | `Frk8ex3MUgn6oTawvfBSmEyJoi61zqLVg9PDW1wBwx8L` / `EZNFJ1SMGGqjMNjg4EKkep4B8VX84SQbdJq25Koo7QBy` |
@@ -169,6 +170,11 @@ active names. Sandbox test `migrates_from_the_v1_contract` deploys the real V1 w
    still register with their own wallet). Tests: `a_subsidised_deposit_is_refunded_to_its_payer_not_the_account`
    (unit), `a_relayer_paid_deposit_goes_back_to_the_relayer` (sandbox),
    `register -> unregister -> register` and the hourly budget (relayer node tests).
+   Follow-up: V1 player records (written before the payer was tracked) **fail closed**: every V1 record
+   loads with the relayer as payer, guest or not (a player who truly paid their own V1 deposit loses at
+   most 0.02 NEAR to the relayer). `scripts/seed-subsidies.ts` seeded `relayer/data/subsidised.json`
+   from the relayer's on-chain `storage_deposit` txs (42 txs → 42 accounts, the only non-guest was the
+   T3 test account `pmwf85tyi.br-7e8492.testnet`). Test: `a_migrated_v1_non_guest_refunds_the_relayer`.
 
 **Judge #2 fixes:** progressive bot entry (sim: ~1 retirement per 17 matches, tier 2 by match ~9; it
 barely changes wealth concentration — richest bot ≈ 19% of bot wealth either way; the bounty and the

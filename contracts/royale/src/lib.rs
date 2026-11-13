@@ -210,7 +210,7 @@ pub struct PlayerV2 {
 
 impl From<PlayerV1> for PlayerV2 {
     fn from(p: PlayerV1) -> Self {
-        // every V1 registration was a guest or a self-paid real account; guests were relayer-paid
+        // the payer is unknown here: `load_player` sets it (fail closed to the relayer)
         PlayerV2 {
             guest: p.guest,
             matches: p.matches,
@@ -1016,10 +1016,11 @@ impl Contract {
     pub(crate) fn load_player(&self, id: &AccountId) -> Option<PlayerV2> {
         self.players.get(id).map(|v| match v {
             VPlayer::V1(p) => {
+                // fail closed: V1 didn't record who paid the deposit, and the relayer paid for guests
+                // AND for signed-in accounts, so a V1 refund always goes to the relayer (a player who
+                // really paid their own V1 deposit can ask the owner; 0.02 NEAR at most)
                 let mut p2: PlayerV2 = p.clone().into();
-                if p2.guest {
-                    p2.deposit_payer = Some(self.guest_parent.clone());
-                }
+                p2.deposit_payer = Some(self.guest_parent.clone());
                 p2
             }
             VPlayer::V2(p) => p.clone(),

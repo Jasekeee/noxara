@@ -901,3 +901,18 @@ fn a_subsidised_deposit_is_refunded_to_its_payer_not_the_account() {
     let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
     assert_eq!(refund.receiver_id, acc("carol.test"));
 }
+
+#[test]
+fn a_migrated_v1_non_guest_refunds_the_relayer() {
+    // review: V1 records don't know who paid -> fail closed to the relayer
+    let mut c = setup();
+    let old = PlayerV1 { guest: false, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), ..Default::default() };
+    c.players.insert(acc("old.test"), VPlayer::V1(old));
+    c.ensure_registered(&acc("old.test"));
+    assert_eq!(c.get_player(acc("old.test")).unwrap().deposit_payer, Some(acc(RELAY)));
+    ctx("old.test", 300, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
+    assert_eq!(refund.receiver_id, acc(RELAY));
+}
