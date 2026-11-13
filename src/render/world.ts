@@ -258,7 +258,7 @@ export class World {
         }`,
     });
     this.stormGround = new THREE.Mesh(gGeo, gMat);
-    this.stormGround.position.y = 0.06;
+    this.stormGround.position.y = 0.11;
     this.stormGround.renderOrder = 4;
     this.group.add(this.stormGround);
 

@@ -75,6 +75,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
 .dmg.crit { color: var(--gold); font-size: 32px; }
 .dmg.me { color: var(--hot); }
 .dmg.heal { color: var(--hp); }
+.dmg.storm { color: #d9b8ff; font-size: 17px; }
 
 /* ---------- overlays ---------- */
 #vignette {
@@ -83,6 +84,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
   mix-blend-mode: multiply;
 }
 #vignette.on { opacity: 1; animation: pulse 1s ease-in-out infinite; }
+#vignette.low { opacity: 1; background: radial-gradient(ellipse at center, rgba(255,0,40,0) 55%, rgba(255,20,60,.38) 100%); animation: pulse .9s ease-in-out infinite; }
 #vignette.hurt { opacity: 1; background: radial-gradient(ellipse at center, rgba(255,0,40,0) 50%, rgba(255,20,60,.5) 100%); animation: none; }
 @keyframes pulse { 50% { opacity: .65; } }
 #flash { position: absolute; inset: 0; pointer-events: none; background: #fff; opacity: 0; }

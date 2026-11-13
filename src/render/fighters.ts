@@ -14,6 +14,7 @@ interface ClipSet {
   die: THREE.AnimationClip;
   hold: THREE.AnimationClip;
   shoot: THREE.AnimationClip;
+  emote: THREE.AnimationClip;
 }
 const clipCache = new Map<string, ClipSet>();
 
@@ -32,6 +33,7 @@ function clipsFor(charName: string): ClipSet {
     die: get("die"),
     hold: only(get("holding-right")),
     shoot: only(get("holding-right-shoot")),
+    emote: get("emote-yes"),
   };
   clipCache.set(charName, c);
   return c;
@@ -121,6 +123,7 @@ export class FighterView {
       die: this.mixer.clipAction(clips.die),
       hold: this.mixer.clipAction(clips.hold),
       shoot: this.mixer.clipAction(clips.shoot),
+      emote: this.mixer.clipAction(clips.emote),
     };
     const ht = clips.hold.tracks.find((t) => t.name === "arm-right.quaternion");
     if (ht) this.holdQ.fromArray(ht.values as unknown as number[], 0);
@@ -257,6 +260,15 @@ export class FighterView {
     this.acts.die.reset().fadeIn(0.1).play();
     this.crown.visible = false;
     if (this.aimLine) this.aimLine.visible = false;
+  }
+
+  celebrate() {
+    if (this.dead) return;
+    this.dead = true; // freezes locomotion; we keep the body visible
+    this.deadT = -999;
+    for (const k of ["idle", "walk", "sprint", "hold", "shoot"] as const) this.acts[k].fadeOut(0.2);
+    this.acts.emote.reset().fadeIn(0.2).play();
+    if (this.weaponObj) this.weaponObj.visible = false;
   }
 
   private setLoco(l: Loco) {

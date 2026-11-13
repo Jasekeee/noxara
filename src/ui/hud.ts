@@ -99,9 +99,10 @@ export class Hud {
     });
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
     const outside = me.alive && dx * dx + dy * dy > st.storm.r * st.storm.r;
-    this.set("out", outside ? 1 : 0, () => {
+    const low = me.alive && me.hp / Math.max(1, me.maxHp) < 0.3;
+    this.set("out", (outside ? 1 : 0) + (low ? 2 : 0), () => {
       this.stormWarn.classList.toggle("hidden", !outside);
-      this.vignette.className = outside ? "on" : "";
+      this.vignette.className = outside ? "on" : low ? "low" : "";
     });
 
     const w = watching;

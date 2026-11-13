@@ -84,6 +84,10 @@ let endShown = false;
 let spectating = false;
 let matchStartT = 0;
 let stormTickT = 0;
+let introT = 0;
+const INTRO = 1.6;
+let lastAmmo = -1;
+let myKillTimes: number[] = [];
 const humanInput: Input = { mx: 0, my: 0, aim: 0, fire: false };
 const inputs = new Map<number, Input>();
 const killerOf = new Map<number, number | null>();
@@ -136,6 +140,10 @@ function startMatch() {
   buildMatch(seedFromUrl());
   phase = "playing";
   matchStartT = time;
+  introT = INTRO;
+  myKillTimes = [];
+  lastAmmo = -1;
+  hud.banner("READY…", "gold");
   $("title").classList.add("hidden");
   $("end").classList.add("hidden");
   $("hud").classList.remove("hidden");
@@ -190,8 +198,15 @@ function onEvents(evs: SimEvent[]) {
         const v = views[e.who];
         v.hit();
         const x = e.x * U, z = e.y * U;
-        fx.impact(x, 1.1, z, BOLT_COLOR[st.fighters[e.by]?.weapon ?? "popper"], e.crit);
+        const storm = e.by < 0;
         const mine = e.by === 0, me = e.who === 0;
+        if (storm) {
+          fx.spark(x, z, PAL.stormHot);
+          if (me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, "storm");
+          if (me) { hud.hurtFlash(); shake(0.08); }
+          break;
+        }
+        fx.impact(x, 1.1, z, BOLT_COLOR[st.fighters[e.by]?.weapon ?? "popper"], e.crit);
         if (mine || me || canSeeNow(e.who)) hud.floater(String(Math.round(e.dmg)), v.pos.x, 3.1, v.pos.z, (e.crit ? "crit " : "") + (me ? "me" : ""));
         if (mine) {
           const p = project(v.pos.x, 1.2, v.pos.z);
@@ -214,7 +229,10 @@ function onEvents(evs: SimEvent[]) {
         hud.feedItem(nameOf(e.by), nameOf(e.who)!, e.weapon, { me: e.by === 0 || e.who === 0, bounty: f.bounty });
         if (e.by === 0) {
           sfx.kill(true);
-          hud.banner(`ELIMINATED ${f.name.toUpperCase()}`, "hot");
+          myKillTimes.push(time);
+          const streak = myKillTimes.filter((t) => time - t < 5).length;
+          const tag = streak >= 3 ? "TRIPLE! " : streak === 2 ? "DOUBLE! " : "";
+          hud.banner(`${tag}ELIMINATED ${f.name.toUpperCase()}`, streak >= 2 ? "gold" : "hot");
           const p = project(v.pos.x, 1.2, v.pos.z);
           if (p) hud.hitMark(p.x, p.y, true);
           slow(0.35, 0.5);
@@ -268,10 +286,15 @@ function onEvents(evs: SimEvent[]) {
         hud.banner("THE STORM IS CLOSING IN", "storm");
         sfx.stormWarn();
         break;
-      case "win":
+      case "win": {
         if (e.who === 0) sfx.victory();
         slow(0.3, 1.0);
+        const v = views[e.who];
+        v.celebrate();
+        fx.confetti(v.pos.x, v.pos.z);
+        watch = e.who;
         break;
+      }
     }
   }
 }
@@ -403,7 +426,15 @@ function frame(now: number) {
   const dt = rdt * timeScale;
   time += rdt;
 
-  if (match && (phase === "playing" || phase === "over")) {
+  if (introT > 0) {
+    introT -= rdt;
+    if (introT <= 0) {
+      hud.popup("GO!");
+      sfx.ui();
+      matchStartT = time;
+    }
+  }
+  if (match && (phase === "playing" || phase === "over") && introT <= 0) {
     acc += dt * SPEED;
     let n = 0;
     while (acc >= DT && n < 8 * SPEED) {
@@ -419,6 +450,10 @@ function frame(now: number) {
     const st = match.state;
     const me = st.fighters[0];
     if (me.alive) lastTickAlive = st.tick;
+    if (me.alive && phase === "playing") {
+      if (lastAmmo === 0 && me.ammo > 0) sfx.reload();
+      lastAmmo = me.ammo;
+    }
     if (meDeadAt >= 0 && !endShown && time - meDeadAt > 1.8 && !AUTOPLAY) showEnd(false);
 
     // fighters
@@ -476,9 +511,13 @@ function frame(now: number) {
   // camera placement
   const portrait = camera.aspect < 1;
   let dist = CAM_DIST || (portrait ? 25 * Math.pow(1 / camera.aspect, 0.5) : 25);
+  if (introT > 0) {
+    const k = introT / INTRO;
+    dist *= 1 + k * k * 1.8;
+  }
   if (phase === "title") {
     const a = time * 0.06;
-    dist = 46;
+    dist = portrait ? 58 * Math.pow(1 / camera.aspect, 0.5) : 58;
     camTarget.set(Math.cos(a) * 4, 0, Math.sin(a) * 4);
     camera.position.set(Math.sin(a) * dist * 0.6, dist * 0.55, Math.cos(a) * dist * 0.6);
     camera.lookAt(0, -2, 0);

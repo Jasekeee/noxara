@@ -268,7 +268,7 @@ export class Fx {
     this.particles.burst(x, 0.6, z, 14, r * 3, 5, 0.9, 0.28, 0xffe07a, -12, 1.5);
     for (let k = 0; k < 12; k++) {
       const a = Math.random() * Math.PI * 2, d = Math.random() * r * 0.7;
-      this.particles.emit(x + Math.cos(a) * d, 0.5, z + Math.sin(a) * d, Math.cos(a) * 1.5, 2.2 + Math.random(), Math.sin(a) * 1.5, 1.3, 0.7 + Math.random() * 0.4, 0x6b6577, 0.6, 1.8);
+      this.particles.emit(x + Math.cos(a) * d, 0.5, z + Math.sin(a) * d, Math.cos(a) * 1.5, 2.2 + Math.random(), Math.sin(a) * 1.5, 1.3, 0.7 + Math.random() * 0.4, 0xcfc8da, 0.6, 1.8);
     }
   }
 
@@ -298,6 +298,16 @@ export class Fx {
     this.flashes.spawn(x, 1, z, 0xffe7a0, 2.6, 0.25, 0.6, 0);
     this.ring(x, z, 2, 0xffc93c, 0.4);
     this.lights.flash(x, 1.5, z, 0xffc93c, 40, 8, 0.3);
+  }
+
+  confetti(x: number, z: number) {
+    const cols = [0xffc93c, 0x3df2ff, 0xff4d6d, 0x9be15d, 0xb46cff, 0xffffff];
+    for (let k = 0; k < 90; k++) {
+      const a = Math.random() * Math.PI * 2, s = 2 + Math.random() * 5;
+      this.particles.emit(x, 2, z, Math.cos(a) * s, 6 + Math.random() * 8, Math.sin(a) * s, 2.2 + Math.random(), 0.14 + Math.random() * 0.08, cols[k % cols.length], -7, 1.2);
+    }
+    this.ring(x, z, 4, 0xffc93c, 0.8);
+    this.lights.flash(x, 2, z, 0xffc93c, 60, 10, 1);
   }
 
   healBurst(x: number, z: number) {
