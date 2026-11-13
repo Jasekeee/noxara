@@ -1106,7 +1106,7 @@ async function boot() {
   bootDone = true;
   wantPlay ||= (window as unknown as { __brWantPlay?: boolean }).__brWantPlay === true;
   if (SKIP_TITLE || AUTOPLAY || wantPlay) void startMatch();
-  else if (document.activeElement === document.body || !document.activeElement) play.focus({ preventScroll: true });
+  // (no autofocus: Tab from the top of the page reaches PLAY first)
   // after first paint: HUD icons and portraits, one small chunk per frame
   hud.icons = await makeWeaponIcons(renderer);
   await nextFrame();

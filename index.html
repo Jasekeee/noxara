@@ -86,18 +86,18 @@
 
       <!-- title -->
       <section id="title" class="screen" aria-labelledby="logo">
-        <div class="acct-bar">
-          <span id="lv-badge" class="lv-badge"></span>
-          <button id="signin" class="btn-near hidden">Sign in with NEAR <small>earn $BOUNTY</small></button>
-          <div id="welcome" class="welcome hidden"></div>
-          <div id="acct-chip" class="acct-chip hidden"><span id="acct-name"></span><b id="acct-bal"></b><button id="signout" class="link-btn">Sign out</button></div>
-        </div>
         <div class="title-inner">
           <h1 id="logo" class="logo"><span class="l1">BOUNTY</span><span class="l2">ROYALE</span></h1>
           <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the pot.</p>
           <button id="play" class="btn-primary" aria-disabled="true">LOADING…</button>
           <div class="loadbar" aria-hidden="true"><div id="loadfill"></div></div>
           <p class="hint-line"><span class="kb"><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim · <kbd>click</kbd> shoot · hide in bushes</span><span class="tch">left thumb moves · right thumb aims &amp; shoots</span></p>
+        </div>
+        <div class="acct-bar">
+          <span id="lv-badge" class="lv-badge"></span>
+          <button id="signin" class="btn-near hidden">Sign in with NEAR <small>earn $BOUNTY</small></button>
+          <div id="welcome" class="welcome hidden"></div>
+          <div id="acct-chip" class="acct-chip hidden"><span id="acct-name"></span><b id="acct-bal"></b><button id="signout" class="link-btn">Sign out</button></div>
         </div>
         <div class="lobby" aria-labelledby="lobby-title">
           <div class="lobby-head">
@@ -110,7 +110,7 @@
             </span>
           </div>
           <div id="ticker" class="ticker hidden" aria-live="polite"><b>LAST MATCH</b><span id="ticker-text"></span></div>
-          <ol id="roster" class="roster" tabindex="0" aria-label="AI fighters and their wallets"></ol>
+          <ol id="roster" class="roster" aria-label="AI fighters and their wallets"></ol>
         </div>
       </section>
 
