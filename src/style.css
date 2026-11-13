@@ -723,3 +723,26 @@ kbd {
   .etable td.rank { display: none !important; }
   .board.etable th:nth-child(6) { display: none; }
 }
+
+/* real NEAR account ids (bots) */
+.acct { font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--cyan); opacity: .85; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: inline-block; }
+a.acct:hover { text-decoration: underline; opacity: 1; }
+.fc-acct { font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--cyan); opacity: .75; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-acct { font-size: 13px; word-break: break-all; white-space: normal; }
+.board .nm .acct, .etable td.nm .acct { display: block; margin-top: 3px; }
+.lg-winner .acct { display: block; margin-top: 4px; }
+
+/* pause menu */
+.pause-btn { left: auto; right: 12px; top: calc(12px + var(--safe-t)); bottom: auto; width: 44px; height: 44px; pointer-events: auto; }
+.hud-tr { padding-top: 52px; }
+.pause { z-index: 10; }
+.pause-card .pause-note { margin: 0 0 4px; color: var(--paper); opacity: .8; font-size: 14px; }
+.pause-card button { min-height: 44px; }
+.pause-card .danger { color: #ff8a8e; }
+.pause-help { font-size: 13px; line-height: 1.4; opacity: .9; }
+.pause-help h3 { margin: 6px 0 2px; font: 900 13px/1 var(--display); color: var(--gold); letter-spacing: .06em; text-transform: uppercase; }
+.pause-help p { margin: 0; }
+@media (max-width: 720px) {
+  .pause-btn { left: auto; transform: none; right: 10px; top: calc(106px + var(--safe-t)); bottom: auto; width: 44px; height: 44px; }
+  .hud-tr { padding-top: 50px; }
+}

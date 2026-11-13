@@ -1,5 +1,6 @@
 // Post-match LEDGER: who won, where the pot and the bounty went, what the bots did with their money.
 import type { SettleResult, StartResult } from "../net/api";
+import { acctTag, isChainAcct } from "./acct";
 import { h, icon, ICON, fmt } from "./dom";
 
 export interface LedgerInput {
@@ -37,7 +38,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   face.height = 72;
   if (w !== null && L.portraits[w]) face.src = L.portraits[w];
   el.appendChild(
-    h("div", "lg-winner", undefined, face, h("div", "", undefined, h("small", "", "WINNER"), h("b", "", w === 0 ? "YOU TOOK THE ISLAND" : `${wName.toUpperCase()} TOOK THE ISLAND`))),
+    h("div", "lg-winner", undefined, face, h("div", "", undefined, h("small", "", "WINNER"), h("b", "", w === 0 ? "YOU TOOK THE ISLAND" : `${wName.toUpperCase()} TOOK THE ISLAND`), w !== null && w > 0 && L.chain ? acctTag(L.accounts[w], L.explorerAccount(L.accounts[w])) : null)),
   );
 
   const rows = h("ul", "lg-rows");
@@ -103,8 +104,8 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   const box = h("div", "lg-links");
   if (L.start.tx) box.appendChild(link("start_match tx", L.explorerTx(L.start.tx)));
   if (s && s !== "pending" && s.tx) box.appendChild(link("settle_match tx", L.explorerTx(s.tx)));
-  if (w !== null && w > 0 && L.accounts[w]) box.appendChild(link(`${wName}'s wallet`, L.explorerAccount(L.accounts[w])));
-  if (L.start.bountyIdx !== null && L.accounts[L.start.bountyIdx]) box.appendChild(link(`${L.names[L.start.bountyIdx]}'s wallet`, L.explorerAccount(L.accounts[L.start.bountyIdx])));
+  if (w !== null && w > 0 && L.accounts[w]) box.appendChild(link(isChainAcct(L.accounts[w]) ? L.accounts[w] : `${wName}'s wallet`, L.explorerAccount(L.accounts[w])));
+  if (L.start.bountyIdx !== null && L.accounts[L.start.bountyIdx]) box.appendChild(link(isChainAcct(L.accounts[L.start.bountyIdx]) ? L.accounts[L.start.bountyIdx] : `${L.names[L.start.bountyIdx]}'s wallet`, L.explorerAccount(L.accounts[L.start.bountyIdx])));
   // one link per account / tx
   const seen = new Set<string>();
   for (const a of [...box.querySelectorAll("a")]) {

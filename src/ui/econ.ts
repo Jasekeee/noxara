@@ -1,6 +1,7 @@
 // ECONOMY page (EVE-style monthly economic report in our game style) and HOW NEAR POWERS NOXARA.
 // Pure view code: reads GameClientEcon, never throws into the UI (every view has neutral fallbacks).
 import type { EconomyInfo, FighterInfo, GameClient, GameClientEcon, Holding, Listing, SeasonRow, ShareMarketRow } from "../net/api";
+import { acctTag } from "./acct";
 import { h, icon, ICON, fmt } from "./dom";
 import type { PageDeps } from "./pages";
 
@@ -142,7 +143,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
         cls: r.pnl < 0 ? "neg" : "",
         cells: [
           { t: String(i + 1), l: "#", c: "rank" },
-          { t: r.name, l: "Fighter", c: "nm" },
+          { t: r.name, n: acctTag(r.bot) ?? undefined, l: "Fighter", c: "nm" },
           { t: fmt(r.income), l: "Income" },
           { t: fmt(r.costs), l: "Costs" },
           { t: signed(r.pnl), l: "P&L", c: r.pnl < 0 ? "red" : "mint" },
@@ -188,7 +189,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
         return {
           cls: r.status === "retired" ? "gone" : "",
           cells: [
-            { t: r.name + (r.status === "retired" ? " (retired)" : "") + (own ? ` · you own ${own.shares}` : ""), l: "Fighter", c: "nm" },
+            { t: r.name + (r.status === "retired" ? " (retired)" : "") + (own ? ` · you own ${own.shares}` : ""), n: acctTag(r.bot) ?? undefined, l: "Fighter", c: "nm" },
             { t: r.status === "retired" ? "–" : r.ipoLeft ? String(r.ipoLeft) : "sold out", l: "IPO left" },
             { t: r.ipoLeft ? `${fmt(r.ipoPrice)} NOX` : "–", l: "IPO price" },
             { t: r.lastPrice === null ? "no trades" : `${fmt(r.lastPrice)} NOX`, l: "Last price" },
@@ -211,7 +212,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
     body.appendChild(
       table(
         ["Fighter", "Shares", "Value", "Dividends waiting"],
-        mine.map((m) => ({ cells: [{ t: m.name, l: "Fighter", c: "nm" }, { t: String(m.shares), l: "Shares" }, { t: `${fmt(m.value)} NOX`, l: "Value", c: "gold" }, { t: `${fmt(m.claimable)} NOX`, l: "Dividends", c: "mint" }] })),
+        mine.map((m) => ({ cells: [{ t: m.name, n: acctTag(m.bot) ?? undefined, l: "Fighter", c: "nm" }, { t: String(m.shares), l: "Shares" }, { t: `${fmt(m.value)} NOX`, l: "Value", c: "gold" }, { t: `${fmt(m.claimable)} NOX`, l: "Dividends", c: "mint" }] })),
         "",
         "Your shares",
       ),
@@ -227,7 +228,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
         if (!guest) acts.appendChild(l.seller === me ? mkBtn("CANCEL", `Cancel your listing of ${l.name}`, () => act(x, () => c.cancelListing(l.id), "Listing cancelled"), "btn-chip small") : mkBtn("BUY (WALLET)", `Buy ${l.shares} ${l.name} shares, confirmed in your wallet`, () => act(x, () => c.buyListing(l.id), `Bought ${l.shares} ${l.name} shares`, true), "btn-chip small"));
         return {
           cells: [
-            { t: l.name, l: "Fighter", c: "nm" },
+            { t: l.name, n: acctTag(l.bot) ?? undefined, l: "Fighter", c: "nm" },
             { t: String(l.shares), l: "Shares" },
             { t: `${fmt(l.pricePerShare)} NOX`, l: "Price" },
             { t: `${fmt(l.shares * l.pricePerShare * 1.02)} NOX`, l: "Total", c: "gold" },
@@ -247,7 +248,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   body.appendChild(
     table(
       ["#", "Fighter", "Points", "Wins", "Kills"],
-      [...season].sort((a, b) => b.points - a.points).map((r, i) => ({ cls: i < 3 ? `top${i + 1}` : "", cells: [{ t: String(i + 1), l: "#", c: "rank" }, { t: r.name, l: "Fighter", c: "nm" }, { t: String(r.points), l: "Points", c: "gold" }, { t: String(r.wins), l: "Wins" }, { t: String(r.kills), l: "Kills" }] })),
+      [...season].sort((a, b) => b.points - a.points).map((r, i) => ({ cls: i < 3 ? `top${i + 1}` : "", cells: [{ t: String(i + 1), l: "#", c: "rank" }, { t: r.name, n: acctTag(r.bot) ?? undefined, l: "Fighter", c: "nm" }, { t: String(r.points), l: "Points", c: "gold" }, { t: String(r.wins), l: "Wins" }, { t: String(r.kills), l: "Kills" }] })),
       "No standings yet.",
       "Season standings: 10 points per win, 2 per kill",
     ),

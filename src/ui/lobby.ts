@@ -1,5 +1,6 @@
 // Title-screen lobby: the 9 AI fighters as cards (their wallets, upgrades, record, bounty, rookies).
 import type { FighterInfo } from "../net/api";
+import { acctTag, isChainAcct } from "./acct";
 import { h, icon, ICON, PERSONALITY_COLOR, PERSONALITY_ICON, fmt } from "./dom";
 
 function pips(label: string, n: number, max = 2): HTMLElement {
@@ -77,12 +78,13 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
     li.append(
       top,
       h("div", "fc-name", f.name),
+      acctTag(f.account, undefined, "fc-acct") ?? "",
       h("div", "fc-pers", undefined, icon(PERSONALITY_ICON[f.personality] ?? PERSONALITY_ICON.balanced), h("span", "", f.personality)),
       h("div", "fc-bal", undefined, icon(ICON.coin, "ic coin"), h("b", "", fmt(f.balance)), deltaEl),
       h("div", "fc-up", undefined, pips("W", f.upgrades.weaponTier), pips("A", f.upgrades.armor)),
       h("div", "fc-rec", `${f.record.wins}W · ${f.record.kills}K · ${f.record.matches}M`),
     );
-    li.title = `${f.name} — ${f.personality}. Wallet ${fmt(f.balance)} NOX. ${f.record.wins} wins, ${f.record.kills} kills in ${f.record.matches} matches.` + (f.bounty ? ` Carries a ${fmt(f.bountyValue)} NOX bounty.` : "");
+    li.title = `${f.name}${isChainAcct(f.account) ? ` (${f.account})` : ""} — ${f.personality}. Wallet ${fmt(f.balance)} NOX. ${f.record.wins} wins, ${f.record.kills} kills in ${f.record.matches} matches.` + (f.bounty ? ` Carries a ${fmt(f.bountyValue)} NOX bounty.` : "");
     list.appendChild(li);
   }
 }

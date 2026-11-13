@@ -3,6 +3,10 @@ import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
+import { isChainAcct } from "./ui/acct";
+import { PauseMenu } from "./ui/menu";
+import { AimLine } from "./render/aimline";
+import { saveAimAssist } from "./input/input";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
 import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
@@ -125,6 +129,8 @@ scene.add(water.mesh, safeArrow);
 const fx = new Fx(scene);
 const hud = new Hud();
 const controls = new Controls(canvas, camera);
+const aimLine = new AimLine();
+scene.add(aimLine.group);
 
 function resize() {
   const w = innerWidth, h = innerHeight;
@@ -496,6 +502,7 @@ async function startMatch() {
 
 function toLobby() {
   sfx.ui();
+  menu?.forceClose();
   endOpen = false;
   phase = "title";
   $("end").classList.add("hidden");
@@ -527,6 +534,13 @@ function shake(a: number) {
 function nameOf(i: number | null) {
   if (i === null || !match) return null;
   return i === 0 ? "You" : match.state.fighters[i].name;
+}
+
+/** The bot's real chain sub-account (undefined offline and for the player). */
+function acctOf(i: number | null): string | undefined {
+  if (i === null || i === 0 || !match) return undefined;
+  const a = match.cfg.fighters[i]?.id;
+  return isChainAcct(a) ? a : undefined;
 }
 
 // ------------------------------------------------------------------ events
@@ -588,7 +602,7 @@ function onEvents(evs: SimEvent[]) {
         v.die();
         fx.poof(v.pos.x, v.pos.z, v.color);
         sfx.poof(distVol(v.pos.x, v.pos.z));
-        hud.feedItem(nameOf(e.by), nameOf(e.who)!, e.weapon, { me: e.by === 0 || e.who === 0, bounty: f.bounty });
+        hud.feedItem(nameOf(e.by), nameOf(e.who)!, e.weapon, { me: e.by === 0 || e.who === 0, bounty: f.bounty, kAcct: acctOf(e.by), vAcct: acctOf(e.who) });
         if (e.by === 0) {
           sfx.kill(true);
           myKillTimes.push(time);
@@ -694,7 +708,15 @@ function stepSim() {
     const b = botInput(match, 0);
     humanInput.mx = b.mx; humanInput.my = b.my; humanInput.aim = b.aim; humanInput.fire = b.fire;
   } else if (me.alive && controls.enabled) {
-    controls.touchRange = WEAPONS[me.weapon].range / 1000;
+    const rangeW = WEAPONS[me.weapon].range / 1000;
+    controls.touchRange = rangeW;
+    // aim help input: visible enemies within weapon range (never ones hidden in bushes)
+    controls.targets.length = 0;
+    for (const f of st.fighters) {
+      if (f.idx === 0 || !f.alive || !match.canSee(0, f.idx)) continue;
+      const tx = f.x * U, tz = f.y * U;
+      if (Math.hypot(tx - views[0].pos.x, tz - views[0].pos.z) <= rangeW) controls.targets.push({ x: tx, z: tz });
+    }
     controls.read(views[0].pos.x, views[0].pos.z, humanInput);
   } else {
     humanInput.mx = 0; humanInput.my = 0; humanInput.fire = false;
@@ -861,6 +883,22 @@ $("play").addEventListener("click", () => {
   void startMatch();
 });
 const muteBtn = $("mute");
+let menuPaused = false;
+const menu = new PauseMenu({
+  canOpen: () => phase === "playing" && !!match && !match.state.over && !spectating && !endOpen && !starting && !AUTOPLAY && $("page").classList.contains("hidden"),
+  offline: () => !client || client.mode !== "chain" || !!current?.matchId.startsWith("local-"),
+  muted: () => sfx.muted,
+  toggleMute: () => toggleMute(),
+  aimAssist: () => controls.aimAssist,
+  setAimAssist: (on) => { controls.aimAssist = on; saveAimAssist(on); },
+  exit: () => { toLobby(); }, // chain match: left unsettled (the contract's abandon/expiry rules handle it); offline: just a loss
+  onChange: (open) => {
+    controls.blocked = open;
+    menuPaused = open && (!client || client.mode !== "chain" || !!current?.matchId.startsWith("local-"));
+  },
+  sfx: () => sfx.ui(),
+});
+menu.mount($("app"), $("hud"));
 function toggleMute() {
   const m = sfx.toggleMute();
   muteBtn.classList.toggle("muted", m);
@@ -888,6 +926,8 @@ function frame(now: number) {
   last = now;
   if (rdt > 0.25) rdt = 0.25;
   fpsBuf[fpsI++ % 60] = rdt;
+  const rawDt = rdt;
+  if (menuPaused) rdt = 0; // offline practice: the menu really pauses the game
   if (fpsI % 15 === 0) {
     let s = 0;
     const n = Math.min(fpsI, 60);
@@ -900,7 +940,7 @@ function frame(now: number) {
   }
   const dt = rdt * timeScale;
   time += rdt;
-  autoQuality(rdt);
+  autoQuality(rawDt);
 
   if (introT > 0) {
     introT -= rdt;
@@ -1005,6 +1045,11 @@ function frame(now: number) {
 
     if (phase !== "title" && !starting) {
       hud.update(match, me, st.fighters[watch]);
+      {
+        const pv = controls.preview;
+        const show = phase === "playing" && me.alive && controls.enabled && !controls.blocked && pv.active && !AUTOPLAY && introT <= 0;
+        aimLine.update(show, views[0].pos.x, views[0].pos.z, pv.ang, Math.min(pv.dist, WEAPONS[me.weapon].range / 1000), pv.locked, pv.tx, pv.tz, time);
+      }
       hud.updateHints(controls.used, time - matchStartT);
       miniT -= rdt;
       if (miniT <= 0) { hud.minimap(match, 0, visibleNow); miniT = 0.05; }
