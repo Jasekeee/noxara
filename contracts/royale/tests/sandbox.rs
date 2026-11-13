@@ -224,39 +224,46 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     let r = alice.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
     assert!(format!("{:?}", r.into_result().unwrap_err()).contains("register first"));
     alice.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
-    // owner decision: a real account's registration brings a one-time welcome stake from the house
+    // owner decision: a real account's registration brings a one-time WELCOME CREDIT (not $BOUNTY)
     let welcome: u128 = 30 * ONE;
-    assert_eq!(ft(c, alice.id().as_str()).await?, welcome);
-    let got: bool = c.view("got_welcome").args_json(json!({"account_id": alice.id()})).await?.json()?;
-    assert!(got);
-    // spend it on the house (a gift) to test the no-$BOUNTY path
-    alice.call(c.id(), "ft_transfer").args_json(json!({"receiver_id": house, "amount": welcome.to_string()})).deposit(NearToken::from_yoctonear(1)).transact().await?.into_result()?;
+    assert_eq!(ft(c, alice.id().as_str()).await?, 0);
+    let credit: String = c.view("get_welcome_credit").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    assert_eq!(credit, welcome.to_string());
+    // it can't be transferred
+    let r = alice.call(c.id(), "ft_transfer").args_json(json!({"receiver_id": house, "amount": ONE.to_string()})).deposit(NearToken::from_yoctonear(1)).transact().await?;
+    assert!(r.into_result().is_err());
 
-    // review fix #3: no $BOUNTY -> plays free but can't win: the pot goes to the house
-    let (s, _) = start(&alice, c).await?;
+    // review fix #3: a real account with neither credit nor $BOUNTY plays free but can't win
+    // (bob was registered by a third party: no credit)
+    let bob = wd.w.root_account()?.create_subaccount("bob").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    wd.owner.call(c.id(), "storage_deposit").args_json(json!({"account_id": bob.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let (s, _) = start(&bob, c).await?;
     assert_eq!(s["player_paid"], "0");
     let (r, _) = settle(&wd.server, c, &s["match_id"], 0, None).await?;
     let r = r.map_err(anyhow::Error::msg)?;
     assert_eq!(r["prize_to"], house.as_str());
-    assert_eq!(ft(c, alice.id().as_str()).await?, 0);
+    assert_eq!(ft(c, bob.id().as_str()).await?, 0);
 
-    // the on-ramp: the owner grants from the house treasury (no minting)
-    wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": alice.id(), "amount": (30 * ONE).to_string()})).transact().await?.into_result()?;
+    // alice's credit pays her entry (the house funds it), so she can win real $BOUNTY
     let (s, _) = start(&alice, c).await?;
     assert_eq!(s["player_paid"], E.to_string());
     let (r, _) = settle(&wd.server, c, &s["match_id"], 0, None).await?;
     let r = r.map_err(anyhow::Error::msg)?;
     let prize: u128 = r["prize"].as_str().unwrap().parse()?;
     assert_eq!(r["prize_to"], alice.id().as_str());
-    assert_eq!(ft(c, alice.id().as_str()).await?, 30 * ONE - E + prize);
+    assert_eq!(ft(c, alice.id().as_str()).await?, prize, "winnings are normal $BOUNTY");
+    let credit: String = c.view("get_welcome_credit").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    assert_eq!(credit, (welcome - E).to_string());
 
     // review fix #1: abandoning a seeded match forfeits the entry (bots are refunded)
     let (s1, _) = start(&alice, c).await?;
     let before_house = ft(c, &house).await?;
     let (s2, _) = start(&alice, c).await?;
     assert_ne!(s1["match_id"], s2["match_id"]);
-    assert_eq!(ft(c, alice.id().as_str()).await?, 30 * ONE - 3 * E + prize, "two entries gone: one forfeited, one in escrow");
-    assert_eq!(ft(c, &house).await?, before_house + E);
+    assert_eq!(ft(c, alice.id().as_str()).await?, prize, "entries came from the credit, not her $BOUNTY");
+    let credit: String = c.view("get_welcome_credit").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    assert_eq!(credit, (welcome - 3 * E).to_string(), "two more entries: one forfeited, one in escrow");
+    assert_eq!(ft(c, &house).await?, before_house - E + E, "the house funded the new entry and got the forfeit");
     let gone: Value = c.view("get_match").args_json(json!({"match_id": s1["match_id"]})).await?.json()?;
     assert_eq!(gone, Value::Null);
     let p: Value = c.view("get_player").args_json(json!({"account_id": alice.id()})).await?.json()?;
@@ -350,12 +357,12 @@ async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result
     let back: String = r.into_result()?.json()?;
     let alice_end = ft(c, alice.id().as_str()).await?;
     println!("alice staked 25, earned {}, got back {} -> {} total", earned / ONE, back.parse::<u128>()? / ONE, alice_end / ONE);
-    assert!(alice_end > 130 * ONE, "backing a winner paid off (100 granted + 30 welcome)");
+    assert!(alice_end > 100 * ONE, "backing a winner paid off (the welcome is a credit, not $BOUNTY)");
     // bob: the bot retired broke -> the pool closed, the stake is (mostly) gone
     let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": bob.id()})).await?.json()?;
     assert!(sp.is_empty());
     let bob_end = ft(c, bob.id().as_str()).await?;
-    assert!(bob_end < 130 * ONE, "bob lost his stake: {}", bob_end / ONE);
+    assert!(bob_end < 100 * ONE, "bob lost his stake: {}", bob_end / ONE);
     let hist: Vec<Value> = c.view("get_history").args_json(json!({"account_id": loser})).await?.json()?;
     assert_eq!(hist[0]["kind"], "retired");
     // progression: the guest earned XP every match

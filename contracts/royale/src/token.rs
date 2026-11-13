@@ -76,9 +76,10 @@ impl StorageManagement for Contract {
         let deposit_payer = (payer != account).then(|| payer.clone());
         self.save_player(&account, PlayerV2 { guest, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), deposit_payer, ..Default::default() });
         self.ensure_registered(&account);
-        // a real account's first registration brings its one-time welcome stake (never guests)
-        if !guest {
-            self.welcome(&account);
+        // the one-time welcome credit: only when the account registers itself or via the trusted relayer
+        // (a third party registering someone else grants nothing and never touches the daily cap)
+        if !guest && (payer == account || payer == self.guest_parent) {
+            self.grant_welcome(&account);
         }
         let refund = amount.saturating_sub(STORAGE_DEPOSIT);
         if !refund.is_zero() {
@@ -113,8 +114,11 @@ impl StorageManagement for Contract {
         self.token.accounts.remove(&id);
         self.xp.remove(&id);
         self.history.remove(&id);
+        // the permanent "welcomed" record outlives the registration: its storage stays paid from the deposit
+        let kept = if self.is_welcomed(&id) { crate::WELCOME_RECORD_NEAR.as_yoctonear() } else { 0 };
+        self.set_welcome_credit(&id, 0);
         let refund_to = p.deposit_payer.clone().unwrap_or(id);
-        let _ = Promise::new(refund_to).transfer(NearToken::from_yoctonear(p.storage_paid.0));
+        let _ = Promise::new(refund_to).transfer(NearToken::from_yoctonear(p.storage_paid.0.saturating_sub(kept)));
         true
     }
 

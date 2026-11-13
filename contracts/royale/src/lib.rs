@@ -79,9 +79,13 @@ pub const MAX_PENDING_FREE: u32 = 24;
 pub const MAX_PENDING_PAID: u32 = 1_000;
 /// Most the owner can hand out from the house treasury per `house_grant` call.
 pub const MAX_GRANT: u128 = 100 * ONE;
-/// Owner decision: a real NEAR account's first $BOUNTY is a one-time welcome stake from the house.
+/// Owner decision: a real NEAR account's first stake is a one-time WELCOME CREDIT. It is not $BOUNTY:
+/// it can only pay match entries (the house funds each entry when it is used), can't be transferred,
+/// sponsored with or withdrawn. Winnings from those matches are normal $BOUNTY.
 pub const WELCOME_STAKE: u128 = 30 * ONE;
-/// Abuse brake: at most this many welcome stakes per UTC day.
+/// Part of the player's storage deposit kept for the permanent "welcomed" record (it outlives unregister).
+pub const WELCOME_RECORD_NEAR: NearToken = NearToken::from_millinear(1);
+/// Abuse brake: at most this many welcome credits per UTC day.
 pub const WELCOME_DAILY_CAP: u32 = 50;
 const WELCOME_DAY_KEY: &[u8] = b"welcome_day";
 pub const RECENT_MATCHES: usize = 50;
@@ -128,8 +132,10 @@ enum Key {
     Sponsoring,
     History,
     Xp,
-    // no state field: opened on demand, so adding it needed no state migration
+    // no state fields: opened on demand, so adding them needed no state migration
     Welcomed,
+    WelcomeCredit,
+    CreditMatches,
 }
 
 #[near(serializers = [borsh, json])]
@@ -585,13 +591,12 @@ impl Contract {
             p = self.load_player(&id).unwrap();
         }
         let guest = self.is_guest(&id);
-        // a real account that registered while the house was low / the day was full gets its welcome now
-        if !guest {
-            self.welcome(&id);
-        }
         let player_level = progression::level_for_xp(self.xp.get(&id).copied().unwrap_or(0) as i64);
         // free and paid matches have separate pools: free players can never crowd out paying ones
-        let will_pay = !guest && self.balance(&id) >= ENTRY_FEE;
+        // the welcome credit pays first (the house funds it while above its floor), else the wallet
+        let house = self.house.clone();
+        let use_credit = !guest && self.welcome_credit(&id) >= ENTRY_FEE && self.balance(&house) >= HOUSE_FLOOR + ENTRY_FEE;
+        let will_pay = use_credit || (!guest && self.balance(&id) >= ENTRY_FEE);
         if will_pay {
             require!(self.pending_paid < MAX_PENDING_PAID, "too many paid matches in flight: try again in a minute");
         } else {
@@ -602,7 +607,13 @@ impl Contract {
         let mut pot = 0u128;
         // a real player pays the entry if they can (guests never pay and never win)
         let mut player_paid = 0u128;
-        if will_pay {
+        if use_credit {
+            self.token.internal_transfer(&house, &me, ENTRY_FEE, Some("match entry (welcome credit)".into()));
+            self.set_welcome_credit(&id, self.welcome_credit(&id) - ENTRY_FEE);
+            near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches).insert(self.next_match_id);
+            player_paid = ENTRY_FEE;
+            pot += ENTRY_FEE;
+        } else if will_pay {
             self.token.internal_transfer(&id, &me, ENTRY_FEE, Some("match entry".into()));
             player_paid = ENTRY_FEE;
             pot += ENTRY_FEE;
@@ -845,6 +856,7 @@ impl Contract {
         self.unlist_pending(&m);
         self.save_match(m);
         self.matches_settled += 1;
+        near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches).remove(&match_id.0);
         self.finish_retired_pools(&roster_accounts, match_id.0);
         self.recent.push(match_id.0);
         if self.recent.len() > RECENT_MATCHES {
@@ -1016,9 +1028,24 @@ impl Contract {
         }
     }
 
-    /// Did this account already receive its one-time welcome stake?
+    /// Did this account already receive its one-time welcome credit?
     pub fn got_welcome(&self, account_id: AccountId) -> bool {
         self.is_welcomed(&account_id)
+    }
+
+    /// Welcome credit left (only pays match entries; not $BOUNTY).
+    pub fn get_welcome_credit(&self, account_id: AccountId) -> U128 {
+        U128(self.welcome_credit(&account_id))
+    }
+
+    /// For an account whose registration fell on a full day: claim the welcome credit yourself later.
+    pub fn claim_welcome(&mut self) -> U128 {
+        let id = env::predecessor_account_id();
+        require!(self.load_player(&id).is_some(), "register first: storage_deposit");
+        require!(!self.is_guest(&id), "guests play for free and earn no $BOUNTY: sign in with a NEAR account");
+        require!(!self.is_welcomed(&id), "you already got your welcome credit");
+        require!(self.grant_welcome(&id), "today's welcome credits are gone: try again tomorrow");
+        U128(WELCOME_STAKE)
     }
 
     pub fn is_guest_account(&self, account_id: AccountId) -> bool {
@@ -1164,8 +1191,13 @@ impl Contract {
             self.move_tokens(&me, &r.account, r.paid.0, "entry refund");
         }
         let seeded = m.seed != 0;
-        let to = if seeded { self.house.clone() } else { m.player.clone() };
+        // an entry paid with the welcome credit goes back to the house, and (unseeded) to the credit
+        let by_credit = near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches).remove(&match_id);
+        let to = if seeded || by_credit { self.house.clone() } else { m.player.clone() };
         self.move_tokens(&me, &to, m.player_paid.0, if seeded { "entry forfeited" } else { "entry refund" });
+        if by_credit && !seeded {
+            self.set_welcome_credit(&m.player, self.welcome_credit(&m.player) + m.player_paid.0);
+        }
         if let Some(mut p) = self.load_player(&m.player) {
             if p.pending == Some(m.id) {
                 p.pending = None;
@@ -1313,20 +1345,15 @@ impl Contract {
         f
     }
 
-    /// The one-time welcome stake (real accounts only): paid by the house while it stays above its
-    /// floor, at most WELCOME_DAILY_CAP per UTC day, recorded forever (survives unregister).
-    /// Returns what was paid (0 if not eligible now).
-    pub(crate) fn welcome(&mut self, account: &AccountId) -> u128 {
+    /// Grant the one-time welcome credit (real accounts only, at most WELCOME_DAILY_CAP per UTC day).
+    /// Recorded forever (survives unregister). Returns whether it was granted now.
+    pub(crate) fn grant_welcome(&mut self, account: &AccountId) -> bool {
         if self.is_guest(account) || self.fighters.get(account).is_some() || account == &self.house || account == &env::current_account_id() {
-            return 0;
+            return false;
         }
         let mut welcomed = near_sdk::store::LookupSet::<AccountId>::new(Key::Welcomed);
         if welcomed.contains(account) {
-            return 0;
-        }
-        let house = self.house.clone();
-        if self.balance(&house) < HOUSE_FLOOR + WELCOME_STAKE {
-            return 0;
+            return false;
         }
         let day = env::block_timestamp_ms() / 86_400_000;
         let (d, n) = env::storage_read(WELCOME_DAY_KEY)
@@ -1334,13 +1361,27 @@ impl Contract {
             .unwrap_or((day, 0));
         let n = if d == day { n } else { 0 };
         if n >= WELCOME_DAILY_CAP {
-            return 0;
+            return false;
         }
         env::storage_write(WELCOME_DAY_KEY, &[&day.to_le_bytes()[..], &(n + 1).to_le_bytes()].concat());
         welcomed.insert(account.clone());
-        self.move_tokens(&house, account, WELCOME_STAKE, "welcome stake");
-        event("welcome", &near_sdk::serde_json::json!({ "account": account, "amount": U128(WELCOME_STAKE), "today": n + 1 }));
-        WELCOME_STAKE
+        self.set_welcome_credit(account, WELCOME_STAKE);
+        event("welcome", &near_sdk::serde_json::json!({ "account": account, "credit": U128(WELCOME_STAKE), "today": n + 1 }));
+        true
+    }
+
+    pub(crate) fn welcome_credit(&self, account: &AccountId) -> u128 {
+        near_sdk::store::LookupMap::<AccountId, u128>::new(Key::WelcomeCredit).get(account).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn set_welcome_credit(&mut self, account: &AccountId, v: u128) {
+        let mut m = near_sdk::store::LookupMap::<AccountId, u128>::new(Key::WelcomeCredit);
+        if v == 0 {
+            m.remove(account);
+        } else {
+            m.insert(account.clone(), v);
+        }
+        m.flush();
     }
 
     pub(crate) fn is_welcomed(&self, account: &AccountId) -> bool {

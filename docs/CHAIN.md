@@ -192,7 +192,41 @@ Zero new dependencies. For multi-wallet support (Meteor, HOT, Intear…) I propo
 `@hot-labs/near-connect` **0.12.0** (no runtime deps, 234 KB unpacked) — not added, awaiting the lead.
 The live run used a script in place of the wallet (it adds the same key), see the T3 txs above.
 
-## Real players' first $BOUNTY (proposals, not implemented)
+## Welcome credit (owner decision: real accounts' first stake)
+
+- Every real NEAR account gets ONE welcome credit of **30** (≈ 7 entries at the base 4), never guests,
+  bots, the house or the contract. It is **not $BOUNTY**: it only pays the player's match entries; it
+  can't be `ft_transfer`red, used to `sponsor`, or withdrawn. Nothing is minted for it: when the credit
+  pays an entry, **the house funds that entry** at `start_match` (only while the house stays above its
+  1,000 floor; otherwise the credit simply waits and the player plays free). A credit-paid entry makes
+  the player prize-eligible; winnings are normal $BOUNTY. An unseeded refund goes back to the house and
+  the credit (never to the wallet); a seeded abandon/expiry forfeits it to the house as usual.
+- Granted only when the account registers itself (`storage_deposit` paid by the account) or through
+  the trusted relayer's `/api/register`. A third party's `storage_deposit` for someone else grants
+  nothing and never counts toward the cap. If the day's cap (50 per UTC day) was full, the account
+  calls `claim_welcome()` itself later (once, cap-checked). The "welcomed" record is permanent; its
+  storage is paid from the player's deposit (0.001 NEAR kept on `storage_unregister`), so unregister →
+  register brings no new credit. Measured storage per real player: 1,897 of 2,000 bytes.
+- Views: `got_welcome`, `get_welcome_credit`. Event `welcome`. The client exposes `welcomeCredit()` and
+  `claimWelcome()` (proposed for GameClientT3; `claim_welcome` is in the sign-in key's methods).
+- Economy: worst case the house funds 50 × 30 = 1,500 $BOUNTY of entries a day, but only above its
+  floor — the house hovers ~1,600 in the simulation, so credits are paid out of house income (cut,
+  upgrades, guest wins) and pause when it runs low; supply is unaffected (no minting).
+- Tests: `welcome_credit_once_per_real_account_never_guests`,
+  `the_credit_pays_entries_funded_by_the_house_and_wins_are_real`,
+  `the_credit_cannot_be_transferred_or_sponsored_with`, `an_unseeded_refund_returns_to_the_credit_and_the_house`,
+  `below_the_house_floor_the_credit_waits`, `third_parties_never_grant_or_touch_the_daily_cap`
+  (100 third-party registrations leave the cap at 0), `the_daily_cap_and_a_later_self_claim`,
+  `unregister_then_register_brings_no_new_credit_and_keeps_the_record_paid`; sandbox `real_player_pays_and_earns`.
+
+**Multi-wallet sign-in:** `signIn()` now uses `@hot-labs/near-connect` 0.12.0 (lazy-loaded chunk,
+58 KB): `connector.connect({addFunctionCallKey: {contractId, publicKey, allowMethods: start_match,
+sweep_match, sponsor, unsponsor, claim_welcome}})` — the picker only offers wallets that add the key
+during sign-in (seen: Meteor, Intear, Ledger, Nightly, NEAR CLI), so it stays exactly ONE approval.
+Cancel → "Sign-in was cancelled."; if the connector fails to load or run, it falls back to the
+MyNearWallet login redirect. Verified in a browser (Vite dev on my own port): the wallet picker opens.
+
+## Real players' first $BOUNTY (the proposals the owner chose from: option 1, as a credit)
 
 Today a real account gets $BOUNTY only from `house_grant` (owner-only, ≤ 100 per call; testing only),
 transfers, or winning a paid match — which it can't enter without $BOUNTY. A real account that plays

@@ -37,7 +37,7 @@ const serverId = process.env.SERVER_ACCOUNT_ID;
 const serverKey = process.env.SERVER_PRIVATE_KEY;
 const rpcUrl = env("NEAR_RPC", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 // methods anyone may have relayed / that a guest's function-call key may call
-const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match,sponsor,unsponsor").split(",");
+const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match,sponsor,unsponsor,claim_welcome").split(",");
 const GUEST_METHODS = env("GUEST_METHODS", "start_match,sweep_match").split(",");
 const TGAS = 1_000_000_000_000n;
 const policy: RelayPolicy = {
@@ -46,7 +46,7 @@ const policy: RelayPolicy = {
   allowedMethods: GAME_METHODS,
   maxGasPerAction: 100n * TGAS,
   maxActions: 1,
-  methodGas: { start_match: 100n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS },
+  methodGas: { start_match: 100n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS, claim_welcome: 30n * TGAS },
 };
 // Gas budgets (attached gas, an upper bound on what we pay): per sender and for everyone, per hour.
 const senderGas = new Budget(BigInt(env("GAS_PER_SENDER_PER_HOUR_TGAS", "3000")) * TGAS, 3_600_000);
