@@ -1,0 +1,322 @@
+{
+ "description": "BOUNTY ROYALE progression test vectors (src/sim/progression.ts). Integer math only. Out-of-range placement counts as 10th; kills clamped to 0..9; level clamped to 1..10.",
+ "constants": {
+  "PLACEMENT_XP": [
+   100,
+   70,
+   55,
+   45,
+   38,
+   32,
+   26,
+   20,
+   15,
+   10
+  ],
+  "XP_PER_KILL": 15,
+  "MAX_KILLS_XP": 9,
+  "BOUNTY_XP": 50,
+  "LEVELS": [
+   0,
+   90,
+   200,
+   340,
+   510,
+   710,
+   940,
+   1200,
+   1490,
+   1800
+  ]
+ },
+ "xpForMatch": [
+  {
+   "placement": 1,
+   "kills": 0,
+   "bountyClaimed": false,
+   "xp": 100
+  },
+  {
+   "placement": 1,
+   "kills": 3,
+   "bountyClaimed": false,
+   "xp": 145
+  },
+  {
+   "placement": 1,
+   "kills": 5,
+   "bountyClaimed": true,
+   "xp": 225
+  },
+  {
+   "placement": 2,
+   "kills": 1,
+   "bountyClaimed": false,
+   "xp": 85
+  },
+  {
+   "placement": 3,
+   "kills": 0,
+   "bountyClaimed": true,
+   "xp": 105
+  },
+  {
+   "placement": 4,
+   "kills": 2,
+   "bountyClaimed": false,
+   "xp": 75
+  },
+  {
+   "placement": 5,
+   "kills": 0,
+   "bountyClaimed": false,
+   "xp": 38
+  },
+  {
+   "placement": 5,
+   "kills": 1,
+   "bountyClaimed": false,
+   "xp": 53
+  },
+  {
+   "placement": 6,
+   "kills": 2,
+   "bountyClaimed": true,
+   "xp": 112
+  },
+  {
+   "placement": 7,
+   "kills": 0,
+   "bountyClaimed": false,
+   "xp": 26
+  },
+  {
+   "placement": 8,
+   "kills": 1,
+   "bountyClaimed": false,
+   "xp": 35
+  },
+  {
+   "placement": 9,
+   "kills": 0,
+   "bountyClaimed": false,
+   "xp": 15
+  },
+  {
+   "placement": 10,
+   "kills": 0,
+   "bountyClaimed": false,
+   "xp": 10
+  },
+  {
+   "placement": 10,
+   "kills": 1,
+   "bountyClaimed": true,
+   "xp": 75
+  },
+  {
+   "placement": 1,
+   "kills": 9,
+   "bountyClaimed": true,
+   "xp": 285
+  },
+  {
+   "placement": 1,
+   "kills": 15,
+   "bountyClaimed": false,
+   "xp": 235
+  },
+  {
+   "placement": 0,
+   "kills": 2,
+   "bountyClaimed": false,
+   "xp": 40
+  },
+  {
+   "placement": 11,
+   "kills": 0,
+   "bountyClaimed": false,
+   "xp": 10
+  },
+  {
+   "placement": -3,
+   "kills": 1,
+   "bountyClaimed": false,
+   "xp": 25
+  },
+  {
+   "placement": 3,
+   "kills": -2,
+   "bountyClaimed": false,
+   "xp": 55
+  }
+ ],
+ "levelForXp": [
+  {
+   "xp": 0,
+   "level": 1
+  },
+  {
+   "xp": 1,
+   "level": 1
+  },
+  {
+   "xp": 89,
+   "level": 1
+  },
+  {
+   "xp": 90,
+   "level": 2
+  },
+  {
+   "xp": 91,
+   "level": 2
+  },
+  {
+   "xp": 199,
+   "level": 2
+  },
+  {
+   "xp": 200,
+   "level": 3
+  },
+  {
+   "xp": 339,
+   "level": 3
+  },
+  {
+   "xp": 340,
+   "level": 4
+  },
+  {
+   "xp": 509,
+   "level": 4
+  },
+  {
+   "xp": 510,
+   "level": 5
+  },
+  {
+   "xp": 709,
+   "level": 5
+  },
+  {
+   "xp": 710,
+   "level": 6
+  },
+  {
+   "xp": 939,
+   "level": 6
+  },
+  {
+   "xp": 940,
+   "level": 7
+  },
+  {
+   "xp": 1199,
+   "level": 7
+  },
+  {
+   "xp": 1200,
+   "level": 8
+  },
+  {
+   "xp": 1489,
+   "level": 8
+  },
+  {
+   "xp": 1490,
+   "level": 9
+  },
+  {
+   "xp": 1799,
+   "level": 9
+  },
+  {
+   "xp": 1800,
+   "level": 10
+  },
+  {
+   "xp": 5000,
+   "level": 10
+  },
+  {
+   "xp": -50,
+   "level": 1
+  }
+ ],
+ "upgradesForLevel": [
+  {
+   "level": 0,
+   "weaponTier": 0,
+   "armor": 0,
+   "skin": 0
+  },
+  {
+   "level": 1,
+   "weaponTier": 0,
+   "armor": 0,
+   "skin": 0
+  },
+  {
+   "level": 2,
+   "weaponTier": 0,
+   "armor": 0,
+   "skin": 10
+  },
+  {
+   "level": 3,
+   "weaponTier": 1,
+   "armor": 0,
+   "skin": 10
+  },
+  {
+   "level": 4,
+   "weaponTier": 1,
+   "armor": 0,
+   "skin": 11
+  },
+  {
+   "level": 5,
+   "weaponTier": 1,
+   "armor": 1,
+   "skin": 11
+  },
+  {
+   "level": 6,
+   "weaponTier": 1,
+   "armor": 1,
+   "skin": 12
+  },
+  {
+   "level": 7,
+   "weaponTier": 2,
+   "armor": 1,
+   "skin": 12
+  },
+  {
+   "level": 8,
+   "weaponTier": 2,
+   "armor": 1,
+   "skin": 13
+  },
+  {
+   "level": 9,
+   "weaponTier": 2,
+   "armor": 1,
+   "skin": 14
+  },
+  {
+   "level": 10,
+   "weaponTier": 2,
+   "armor": 1,
+   "skin": 14
+  },
+  {
+   "level": 11,
+   "weaponTier": 2,
+   "armor": 1,
+   "skin": 14
+  }
+ ]
+}
