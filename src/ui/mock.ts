@@ -66,6 +66,12 @@ export function withMock(base: GameClient): GameClientT3 {
       const names = ["marlo.testnet", "quinn.testnet", "g-4f2a1c", "ash.testnet", "g-9b77e0", "you.testnet"];
       return names.map((n, i) => ({ account: n, name: n === "you.testnet" ? "You" : n, bot: false, wins: 6 - i, kills: 30 - i * 4, earnings: n.startsWith("g-") ? 0 : 120 - i * 18, matches: 20 - i })).sort((a, b) => b.earnings - a.earnings);
     },
+    async welcomeCredit(): Promise<number> {
+      return 30;
+    },
+    async claimWelcome(): Promise<number> {
+      return 0;
+    },
     async history(account: string): Promise<FighterEvent[]> {
       const f = fightersCache.find((x) => x.account === account);
       const name = f?.name ?? account.split(".")[0];
