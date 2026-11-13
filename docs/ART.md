@@ -80,3 +80,13 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
   offline shows placements without amounts.
 - Chests are gold + emissive + hex pad + light beam; solid crates are dull grey-brown (terrain).
 - Storm: red/pink edge vignette, white ground arrow toward the safe zone, big pink self-damage numbers, tick each second.
+
+## T3 screens
+- Pages slide over the title (near-opaque ink panel, BACK + Esc): FIGHTERS grid (balance-sorted, gold glow on the
+  bounty carrier, greyscale "Hall of the Broke"), PROFILE (150 px portrait, personality colour wash, 2-line original
+  backstory, 6 stat tiles, sponsor box, STORY timeline with coloured dots: gold = wins/bounties, mint = upgrades,
+  red = deaths/retirement, cyan = rookies), LEADERBOARD (AI fighters / players tabs, podium tints), MY SPONSORSHIPS.
+- Sponsor modal: presets 10/25/50/100 + slider, live share %, sponsor cut, red risk line, CONFIRM STAKE.
+- Progression: cyan XP bar on the end card (fills, level tile pops, "LEVEL N!" banner + 5-note arpeggio, unlock lines);
+  "Lv N" badge in the lobby and HUD. Human skins 10–14 = female-c, male-d, female-f, male-g, soldier.
+- `?mock` fills the T3 client API locally (sign-in, market, history, leaderboards) for screen work only.
