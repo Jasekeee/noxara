@@ -82,7 +82,7 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
       h("div", "fc-up", undefined, pips("W", f.upgrades.weaponTier), pips("A", f.upgrades.armor)),
       h("div", "fc-rec", `${f.record.wins}W · ${f.record.kills}K · ${f.record.matches}M`),
     );
-    li.title = `${f.name} — ${f.personality}. Wallet ${fmt(f.balance)} $BOUNTY. ${f.record.wins} wins, ${f.record.kills} kills in ${f.record.matches} matches.` + (f.bounty ? ` Carries a ${fmt(f.bountyValue)} $BOUNTY bounty.` : "");
+    li.title = `${f.name} — ${f.personality}. Wallet ${fmt(f.balance)} NOX. ${f.record.wins} wins, ${f.record.kills} kills in ${f.record.matches} matches.` + (f.bounty ? ` Carries a ${fmt(f.bountyValue)} NOX bounty.` : "");
     list.appendChild(li);
   }
 }

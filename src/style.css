@@ -267,7 +267,12 @@ kbd {
   text-shadow: 0 clamp(6px, 1vw, 10px) 0 var(--ink);
 }
 .logo .l1 { color: var(--gold); animation: bob 3s ease-in-out infinite; }
-.logo .l2 { color: #fff; font-size: clamp(44px, 10vw, 100px); animation: bob 3s ease-in-out .3s infinite; }
+.logo .l2 {
+  color: var(--paper); margin-top: clamp(8px, 1.4vw, 14px); text-transform: uppercase;
+  font: 900 clamp(15px, 3.4vw, 30px)/1 var(--display); letter-spacing: .2em; padding-left: .2em;
+  -webkit-text-stroke: clamp(3px, .45vw, 5px) var(--ink); text-shadow: 0 clamp(3px, .5vw, 5px) 0 var(--ink);
+  animation: bob 3s ease-in-out .3s infinite;
+}
 @keyframes bob { 50% { transform: translateY(-6px); } }
 .tag { margin: 4px 0 6px; font-weight: 800; font-size: clamp(14px, 2.2vw, 18px); text-shadow: 0 2px 0 rgba(20,17,43,.6); }
 .btn-primary {
