@@ -34,6 +34,8 @@ const AUTOPLAY = params.has("autoplay");
 const SKIP_TITLE = params.get("bots") === "1";
 const CAM_DIST = Number(params.get("cam") ?? 0) || 0;
 const MOCK = params.has("mock");
+/** ?offline: the whole session stays local (no network at all), like ?seed. */
+const OFFLINE = params.has("offline");
 const SPEED = Math.max(0.25, Math.min(16, Number(params.get("speed") ?? 1) || 1));
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -56,7 +58,7 @@ const SOFTWARE_GL = (() => {
   }
 })();
 await yieldTask();
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !SOFTWARE_GL, powerPreference: "high-performance" });
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !SOFTWARE_GL, alpha: true, powerPreference: "high-performance" });
 const FORCED_Q = params.has("q") ? Math.max(0, Math.min(4, Number(params.get("q")) || 0)) : -1;
 const BASE_DPR = Math.min(2, devicePixelRatio || 1);
 renderer.setPixelRatio(BASE_DPR);
@@ -183,7 +185,7 @@ function localSeed(): number {
 let client: GameClient | null = null;
 // ?seed=N is a deterministic local match (tests / replays): no network at all.
 const clientP: Promise<GameClient | null> =
-  SEED_PARAM !== null
+  SEED_PARAM !== null || OFFLINE
     ? Promise.resolve(null)
     : createGameClient()
         .then((c) => (client = MOCK ? withMock(c) : c))
@@ -207,7 +209,9 @@ async function refreshLobby() {
   const c = await clientP;
   const mode = $("net-mode");
   if (!c) {
-    mode.textContent = "offline practice";
+    mode.textContent = "offline practice — results aren't recorded";
+    if (!fighters.length) fighters = localFighters();
+    if (portraits.length) renderLobby($("roster"), fighters, portraits, null);
     await refreshAccount();
     return;
   }
@@ -272,12 +276,45 @@ async function refreshAccount() {
   $("signin").classList.toggle("hidden", !c || c.mode !== "chain" || !guest);
   $("acct-chip").classList.toggle("hidden", !t3 || guest);
   $("nav-sponsor").classList.toggle("hidden", !t3);
+  const wel = $("welcome");
+  wel.classList.add("hidden");
   if (t3 && !guest) {
     $("acct-name").textContent = await c.account().catch(() => "");
     const b = await c.balance().catch(() => 0);
     $("acct-bal").textContent = `${fmt(b)} $BOUNTY`;
+    // welcome credit: play-money that only pays match entries (never transferable)
+    const credit = await c.welcomeCredit().catch(() => 0);
+    wel.textContent = "";
+    if (credit > 0) {
+      wel.append(Object.assign(document.createElement("b"), { textContent: `Welcome credit ${fmt(credit)}` }), Object.assign(document.createElement("span"), { className: "wel-note", textContent: " play-money · pays your entry fees" }));
+      wel.title = "Welcome credit: play-money that pays your match entry fees. It can't be withdrawn or transferred.";
+      wel.classList.remove("hidden");
+    } else if (!welcomeDone()) {
+      const btn = document.createElement("button");
+      btn.className = "btn-chip claim";
+      btn.textContent = "Claim welcome credit";
+      btn.addEventListener("click", async () => {
+        btn.disabled = true;
+        try {
+          const got = await c.claimWelcome();
+          markWelcomeDone();
+          sfx.heal();
+          toast(`Welcome! ${fmt(got)} in entry credit — your next matches are on the house`);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : "Couldn't claim the welcome credit";
+          if (/already/i.test(msg)) markWelcomeDone();
+          toast(msg);
+        }
+        await refreshAccount();
+      });
+      wel.appendChild(btn);
+      wel.classList.remove("hidden");
+    }
+  }
+  // the client is the source of truth for XP (chain for signed-in players and guests, its own store offline)
+  if (isT3(c)) {
     const p = await c.progress().catch(() => null);
-    if (p) myXp = p.xp;
+    myXp = p ? p.xp : myXp;
   } else myXp = localXp();
   levelBadge($("lv-badge"), myXp);
   levelBadge($("lv-chip"), myXp);
@@ -300,6 +337,21 @@ async function signIn() {
   btn.disabled = false;
   await refreshLobby();
 }
+const WELCOME_KEY = "bountyroyale.welcomed.v1";
+const welcomeDone = () => {
+  try {
+    return localStorage.getItem(WELCOME_KEY) === "1";
+  } catch {
+    return false;
+  }
+};
+const markWelcomeDone = () => {
+  try {
+    localStorage.setItem(WELCOME_KEY, "1");
+  } catch {
+    /* ignore */
+  }
+};
 let toastT = 0;
 function toast(text: string) {
   const el = $("toast");
@@ -338,6 +390,25 @@ $("roster").addEventListener("keydown", (e) => {
   const f = li && fighters.find((x) => x.account === li.dataset.acct);
   if (f) { e.preventDefault(); pages.profile(f); }
 });
+
+/** The local roster as lobby cards (no wallets: offline practice). */
+function localFighters(): FighterInfo[] {
+  return t1Roster()
+    .slice(1)
+    .map((f, i) => ({
+      slot: i,
+      account: f.id,
+      name: f.name,
+      personality: f.personality,
+      balance: 0,
+      upgrades: { ...f.upgrades },
+      record: { matches: 0, wins: 0, kills: 0, deaths: 0, earnings: 0 },
+      bounty: f.bounty,
+      bountyValue: 0,
+      generation: 0,
+      status: "active" as const,
+    }));
+}
 
 function localStart(): StartResult {
   const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
@@ -381,7 +452,7 @@ async function startMatch() {
   starting = true;
   endOpen = false;
   iClaimedBounty = false;
-  if (!fighters.length && SEED_PARAM === null) await withTimeout(refreshLobby(), 4000);
+  if (!fighters.length && SEED_PARAM === null && !OFFLINE) await withTimeout(refreshLobby(), 4000);
   if (fighters.length) {
     saveSnap(fighters);
     prevSnap = loadSnap();
@@ -392,7 +463,7 @@ async function startMatch() {
   $("end").classList.add("hidden");
   // ?seed=N (tests, replays) always plays the local deterministic roster
   let start: StartResult | null = null;
-  const c = SEED_PARAM === null ? await withTimeout(clientP, 3000) : null;
+  const c = SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
   if (c && c.mode === "chain") {
     $("dropping").classList.remove("hidden");
     $("drop-sub").textContent = "sealing the match seed on NEAR…";
@@ -654,7 +725,7 @@ function stepSim() {
       xpBefore = myXp;
       xpAfter = myXp + gained;
       myXp = xpAfter;
-      if (!(isT3(client) && client.mode === "chain" && !client.isGuest())) setLocalXp(xpAfter);
+      if (!isT3(client)) setLocalXp(xpAfter); // with a T3 client, progress() is refreshed after settle
     }
     const rec = record;
     const cur = current;
@@ -666,6 +737,7 @@ function stepSim() {
           if (current !== cur) return;
           settleState = r;
           if (r.verified) lastSettleLines = settleLines(r);
+          void refreshAccount();
           if (endShown) drawLedger();
           void refreshLobby();
         })
@@ -1013,7 +1085,8 @@ async function boot() {
   buildMatch(localStart().cfg);
   await nextFrame();
   // compile shaders without blocking the main thread (KHR_parallel_shader_compile when available)
-  await renderer.compileAsync(scene, camera).catch(() => undefined);
+  if (renderer.extensions.has("KHR_parallel_shader_compile")) await renderer.compileAsync(scene, camera).catch(() => undefined);
+  else renderer.compile(scene, camera);
   sceneReady = true;
   await nextFrame();
   const play = $("play") as HTMLButtonElement;

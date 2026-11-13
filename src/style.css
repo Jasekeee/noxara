@@ -436,6 +436,10 @@ kbd {
 .lg-signin { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; background: rgba(62,240,192,.08); border: 2px solid rgba(62,240,192,.35); }
 .acct-chip { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 12px; background: rgba(21,17,43,.8); border: 2px solid rgba(255,201,60,.5); font: 800 12px/1 var(--font); }
 .acct-chip b { color: var(--gold); font: 900 14px/1 var(--display); }
+.welcome { font: 700 11px/1.2 var(--font); padding: 6px 10px; border-radius: 10px; background: rgba(62,240,192,.14); border: 2px solid rgba(62,240,192,.5); max-width: 260px; }
+.welcome b { color: var(--mint); font: 900 13px/1 var(--display); }
+.welcome:has(button) { padding: 0; border: 0; background: none; }
+.btn-chip.claim { border-color: var(--mint); color: var(--mint); }
 .link-btn { background: none; border: 0; color: var(--paper); opacity: .7; font: 700 11px/1 var(--font); text-decoration: underline; cursor: pointer; padding: 4px; min-height: 28px; }
 .lobby-nav { display: flex; gap: 6px; margin-left: auto; }
 .lobby-head { flex-wrap: wrap; }
@@ -624,7 +628,11 @@ kbd {
   .lg-rows li { font-size: 13px; padding: 7px 10px; }
   .lg-winner b { font-size: 17px; }
   .lg-face { width: 56px; height: 56px; }
-  .acct-bar { top: calc(8px + var(--safe-t)); right: 8px; gap: 6px; }
+  .acct-bar { top: calc(8px + var(--safe-t)); right: 8px; gap: 6px; flex-wrap: wrap; justify-content: flex-end; max-width: calc(100% - 16px); }
+  .welcome { max-width: 200px; font-size: 10px; padding: 5px 8px; }
+  .welcome .wel-note { display: none; }
+  .acct-chip { padding: 5px 8px; gap: 6px; }
+  .lv-badge .lv-bar { width: 28px; }
   .btn-near { padding: 6px 10px; font-size: 12px; min-height: 40px; }
   .lobby-nav { margin-left: 0; width: 100%; overflow-x: auto; }
   .btn-chip { font-size: 12px; padding: 0 10px; white-space: nowrap; }
@@ -647,7 +655,7 @@ kbd {
   .lb-face, .lb-dot { width: 28px; height: 28px; }
   .levelup { font-size: 44px; }
   .xp-lvl { width: 50px; height: 50px; }
-  #title .title-inner { margin-top: 44px; }
+  #title .title-inner { margin-top: 84px; }
 }
 @media not ((max-width: 720px) or (pointer: coarse)) {
   .hint-line .tch { display: none; }
