@@ -26,6 +26,7 @@ dev patch.
 | live e2e: relayed `start_match` #4 | `CsJCwCBjjeLHfVJ1fgHtnmY627ZagcoeCXo6ofjGPPiU` |
 | live e2e: `settle_match` #4 (Vex won, real sim replayed by the server) | `8ikqTyFN2J7KjqTJ6B4LDBgekV4yk5eyWTbTbYWSMsC9` |
 | live e2e: `settle_match` #5..#7 | `64Zy8cYWExbDdLKJvRvm5p71UfNKVj5K3azkH1oQyFWw`, `3pnDcuqbD4duCYzt4YFxf4VfSgQc1Dombvx4bLymyXRf`, `6daxzXywUnYSgQbA6msNCLtdWux8zs1F3EdNyUJmsdXQ` |
+| live e2e: `settle_match` #9 (sim round 2): Bramble + Ox went broke and retired, rookies Pep + Kit spawned with new keyless accounts (29 Tgas) | `W19iJAQ4GbxpjKeyiBuL9m1m6sWAXVTYEzXyXF5W65r` |
 
 All NPC accounts were checked to have 0 access keys after deploy (`scripts/deployments/testnet.json`).
 Keys of `server.*` and `relay.*` live only in the worktree's `.env` (gitignored, mode 600).
