@@ -1,6 +1,6 @@
 // Full-screen pages over the title: FIGHTERS (+ profile with story + sponsoring), LEADERBOARD, MY SPONSORSHIPS.
 // Uses the T3 client API only when present (`"signIn" in client`), otherwise shows what the T2 data allows.
-import type { BotMarket, FighterInfo, GameClient, GameClientT3, LeaderRow, Sponsorship } from "../net/api";
+import type { BotMarket, FighterEvent, FighterInfo, GameClient, GameClientT3, LeaderRow, Sponsorship } from "../net/api";
 import { acctTag, isChainAcct } from "./acct";
 import { h, icon, ICON, PERSONALITY_COLOR, PERSONALITY_ICON, fmt } from "./dom";
 import { hasEcon, renderEconomy, renderNear } from "./econ";
@@ -55,6 +55,29 @@ export function backstory(f: { name: string; personality: string }): string {
   const list = STORIES[f.personality] ?? STORIES.balanced;
   const k = [...f.name].reduce((a, c) => a + c.charCodeAt(0), 0) % list.length;
   return list[k].replace(/\{n\}/g, f.name);
+}
+
+/** 2-3 generated sentences from the fighter's record (+ history when loaded): personality, results, bounties, upgrades. */
+export function storySummary(f: FighterInfo, evs: FighterEvent[] = []): string {
+  const r = f.record;
+  const a = /^[aeiou]/i.test(f.personality) ? "an" : "a";
+  const origin = f.generation > 0 ? `rookie #${f.generation} in its slot (the last one went broke)` : "one of the island's first nine";
+  const out = [`${f.name} is ${a} ${f.personality} fighter, ${origin}.`];
+  if (r.matches > 0) {
+    const rate = Math.round((r.wins / r.matches) * 100);
+    out.push(`In ${r.matches} match${r.matches === 1 ? "" : "es"} it has ${r.wins} win${r.wins === 1 ? "" : "s"} (${rate}%), ${r.kills} kill${r.kills === 1 ? "" : "s"} and ${fmt(r.earnings)} NOX earned.`);
+  } else out.push("It hasn't fought a recorded match yet.");
+  const won = evs.filter((e) => e.kind === "bounty" && /claimed/i.test(e.text) && !/lost/i.test(e.text)).length;
+  const lost = evs.filter((e) => e.kind === "bounty" && /lost/i.test(e.text)).length;
+  const ups = evs.filter((e) => e.kind === "upgrade").length;
+  const bits: string[] = [];
+  if (won) bits.push(`claimed ${won} bount${won === 1 ? "y" : "ies"}`);
+  if (lost) bits.push(`been hunted down with a price on its head ${lost} time${lost === 1 ? "" : "s"}`);
+  if (ups) bits.push(`bought ${ups} upgrade${ups === 1 ? "" : "s"} (weapon T${f.upgrades.weaponTier}, armor ${f.upgrades.armor})`);
+  if (f.status === "retired") out.push("It went broke and retired.");
+  else if (bits.length) out.push(`It has ${bits.join(", ")}.`);
+  else if (f.upgrades.weaponTier + f.upgrades.armor > 0) out.push(`It fights with weapon T${f.upgrades.weaponTier} and armor ${f.upgrades.armor}.`);
+  return out.join(" ");
 }
 
 const KIND_ICON: Record<string, string> = {
@@ -266,14 +289,33 @@ export class Pages {
       if (c && c.mode === "chain") sbox.appendChild(extLink(isChainAcct(fresh.account) ? fresh.account : `${fresh.name}'s wallet on NEAR`, c.explorerAccount(fresh.account)));
       body.appendChild(sbox);
 
+      // read-only "what if" for guests and owners alike: an ESTIMATE from the season's profit per match
+      if (fresh.status === "active" && hasEcon(c)) {
+        const pv = h("p", "pf-preview", "If you owned 10% of " + fresh.name + ": estimating…");
+        body.appendChild(pv);
+        void c.sharesMarket().then((rows) => {
+          const row = rows.find((x) => x.bot === fresh.account);
+          const n = Math.max(1, fresh.record.matches);
+          if (!row || fresh.record.matches === 0) { pv.textContent = `If you owned 10% of ${fresh.name}: no matches on record yet, so there is nothing to estimate.`; return; }
+          const per = row.seasonPnl / n; // season profit averaged over its matches
+          const profit10 = Math.max(0, per * Math.min(10, n));
+          const div = profit10 * 0.2 * 0.1;
+          pv.textContent = `If you owned 10% of ${fresh.name}: about ${fmt(Math.round(div * 100) / 100)} NOX per 10 matches (20% of profit × 10%, using its season profit of ${fmt(Math.round(per * 100) / 100)} NOX per match). Estimate only — a past average, not a promise; shares go to zero if it goes broke.`;
+          pv.title = "Read-only preview. NOX is play-money.";
+        }).catch(() => { pv.textContent = `If you owned 10% of ${fresh.name}: the market data is unreachable right now.`; });
+      }
+
       // story timeline
       body.appendChild(h("h3", "page-h3", "STORY"));
+      const sum = h("p", "pf-summary", storySummary(fresh));
+      body.appendChild(sum);
       const tl = h("ol", "timeline");
       tl.appendChild(h("li", "muted", "Loading the island's records…"));
       body.appendChild(tl);
       if (isT3(c)) {
         c.history(fresh.account)
           .then((evs) => {
+            sum.textContent = storySummary(fresh, evs);
             tl.textContent = "";
             if (!evs.length) tl.appendChild(h("li", "muted", "No matches on record yet."));
             for (const e of evs) {

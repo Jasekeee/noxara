@@ -73,6 +73,16 @@ const aimGeo = (() => {
   return g;
 })();
 
+// "this is you" markers: pulsing ground ring + a bobbing arrow above the head (first seconds of a match)
+const youRingGeo = new THREE.RingGeometry(0.9, 1.05, 48).rotateX(-Math.PI / 2);
+const youArrowGeo = (() => {
+  const g = new THREE.ConeGeometry(0.34, 0.6, 4);
+  g.rotateX(Math.PI); // tip down
+  return g;
+})();
+/** constant cyan glow on the player's own fighter so it never reads as a dark silhouette from above */
+const ME_EMISSIVE = 0.32;
+
 type Loco = "idle" | "walk" | "sprint";
 
 export class FighterView {
@@ -116,6 +126,11 @@ export class FighterView {
   tagY = 0;
   private wasHidden = false;
   private holdQ = new THREE.Quaternion();
+  private youRing: THREE.Mesh | null = null;
+  private youArrow: THREE.Mesh | null = null;
+  private youTag: HTMLElement | null = null;
+  private youShown = false;
+  private youT = 0;
 
   constructor(readonly idx: number, f: FighterState, tagsEl: HTMLElement, skin = 0) {
     const charName = charFor(idx, skin);
@@ -126,8 +141,8 @@ export class FighterView {
       const m = o as THREE.Mesh;
       if (m.isMesh) {
         const mat = (m.material as THREE.MeshStandardMaterial).clone();
-        mat.emissive = new THREE.Color(0xffffff);
-        mat.emissiveIntensity = 0;
+        mat.emissive = new THREE.Color(idx === 0 ? PAL.me : 0xffffff);
+        mat.emissiveIntensity = idx === 0 ? ME_EMISSIVE : 0;
         mat.onBeforeCompile = rimCompile;
         mat.customProgramCacheKey = rimKey;
         m.material = mat;
@@ -172,6 +187,16 @@ export class FighterView {
     this.root.add(fill);
 
     if (idx === 0) {
+      const ym = new THREE.MeshBasicMaterial({ color: PAL.me, transparent: true, opacity: 0.8, depthWrite: false, blending: THREE.AdditiveBlending });
+      this.youRing = new THREE.Mesh(youRingGeo, ym);
+      this.youRing.position.y = 0.15;
+      this.youRing.renderOrder = 3;
+      this.root.add(this.youRing);
+      this.youArrow = new THREE.Mesh(youArrowGeo, new THREE.MeshBasicMaterial({ color: PAL.me, transparent: true, opacity: 0.95, depthWrite: false, depthTest: false }));
+      this.youArrow.renderOrder = 8;
+      this.youArrow.position.y = 3.3;
+      this.youArrow.visible = false;
+      this.root.add(this.youArrow);
       const aim = new THREE.Mesh(aimGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }));
       aim.position.y = 0.14;
       aim.renderOrder = 3;
@@ -209,6 +234,11 @@ export class FighterView {
       this.tag.appendChild(nm);
     }
     if (idx === 0) {
+      this.youTag = document.createElement("div");
+      this.youTag.className = "you";
+      this.youTag.textContent = "YOU";
+      this.youTag.style.display = "none";
+      this.tag.appendChild(this.youTag);
       this.tagHidden = document.createElement("div");
       this.tagHidden.className = "hid";
       this.tagHidden.textContent = "HIDDEN";
@@ -345,6 +375,15 @@ export class FighterView {
     }
   }
 
+  /** First seconds of a match: arrow above the head + "YOU" label (elapsed < 0 or > 10 hides them). */
+  setYouMarker(on: boolean) {
+    on = on && !this.dead;
+    if (on === this.youShown) return;
+    this.youShown = on;
+    if (this.youArrow) this.youArrow.visible = on;
+    if (this.youTag) this.youTag.style.display = on ? "block" : "none";
+  }
+
   setBountyValue(v: number) {
     if (!this.tagBv) return;
     const sp = this.tagBv.querySelector("span")!;
@@ -397,9 +436,18 @@ export class FighterView {
     }
     this.mixer.update(dt);
 
+    if (this.youRing) {
+      this.youT += dt;
+      const k = (this.youT * 0.9) % 1; // expanding ping every ~1.1 s
+      const hot = this.youShown;
+      this.youRing.scale.setScalar(0.85 + k * (hot ? 1.1 : 0.6));
+      (this.youRing.material as THREE.MeshBasicMaterial).opacity = (hot ? 0.85 : 0.4) * (1 - k * k) * (this.dead ? 0 : 1);
+      if (this.youArrow?.visible) this.youArrow.position.y = 3.3 + Math.sin(this.youT * 6) * 0.15;
+    }
+
     if (this.flash > 0) {
       this.flash = Math.max(0, this.flash - dt * 7);
-      for (const m of this.mats) m.emissiveIntensity = this.flash * 1.6;
+      for (const m of this.mats) m.emissiveIntensity = (this.idx === 0 ? ME_EMISSIVE : 0) + this.flash * 1.6;
     }
     if (f.bounty && !this.dead) {
       this.crown.visible = true;
@@ -433,5 +481,7 @@ export class FighterView {
     this.tag.remove();
     for (const m of this.mats) m.dispose();
     this.ringMat.dispose();
+    if (this.youRing) (this.youRing.material as THREE.Material).dispose();
+    if (this.youArrow) (this.youArrow.material as THREE.Material).dispose();
   }
 }

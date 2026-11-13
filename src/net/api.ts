@@ -20,6 +20,7 @@ export interface StartResult {
   matchId: string;
   cfg: MatchConfig; // built with matchConfigFromChain — the sim MUST use exactly this
   pot: number; // NOX in the pot (entries + house top-up)
+  entries?: number; // the entry fees inside `pot` (pot - entries = the House top-up); absent offline / mock
   bountyIdx: number | null; // sim fighter idx of the bounty carrier
   bountyValue: number;
   playerPaid: number; // 0 for guests (they can't win tokens)

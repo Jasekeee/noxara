@@ -80,3 +80,21 @@ export function configDiff(a: MatchConfig, b: MatchConfig): string | null {
   }
   return null;
 }
+
+/** Minimal lobby card fields needed to rebuild a roster (FighterInfo is a superset). */
+export type RosterCard = { slot: number; account: string; name: string; personality: string; upgrades: ChainUpgrades; bounty: boolean; status: string };
+
+/** The 9 active bots of the last chain lobby as sim specs (offline practice reuses tonight's real names), or null. */
+export function specsFromFighters(list: readonly RosterCard[] | null | undefined): FighterSpec[] | null {
+  if (!list) return null;
+  const active = list.filter((f) => f.status === "active").sort((a, b) => a.slot - b.slot);
+  if (active.length !== 9) return null;
+  return active.map((f) => ({
+    id: f.account,
+    name: f.name,
+    personality: PERSONALITIES.includes(f.personality as Personality) ? (f.personality as Personality) : "balanced",
+    human: false,
+    upgrades: { weaponTier: f.upgrades.weaponTier, armor: f.upgrades.armor, skin: f.upgrades.skin },
+    bounty: f.bounty,
+  }));
+}

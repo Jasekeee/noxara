@@ -119,7 +119,7 @@ export class PauseMenu {
     this.confirming = false;
     const c = this.card;
     c.textContent = "";
-    const title = h("h2", "", "PAUSED");
+    const title = h("h2", "", this.d.offline() ? "PAUSED" : "MENU");
     title.id = "pause-title";
     const note = h("p", "pause-note", this.d.offline() ? "Practice match: the game is paused." : "The match continues while this menu is open.");
     const resume = this.btnEl("RESUME", "btn-primary", () => this.hide());
