@@ -21,3 +21,4 @@ Guardrails: no mainnet, no public repo, no hosting deploys, no posts. Approval-n
 | ~22:18 | Testnet upgraded with daily check-in/quests/rookie protection (tx 3ovpnnJoVTsPU2UymyfxEAKT5Bv9q3BF8CbthCBsAjdF, supply unchanged); play-test relayer restarted with the social endpoints | done |
 | 22:22 | Daily rewards UI (check-in + quests) on the DAILY page; screenshots daily-{desktop,mobile}.jpg | done |
 | 22:35 | CI secret scan failed on a test-only HMAC literal in the helper's relayer test → allowlisted that exact pattern (default rules kept) | fixed |
+| 22:46 | Cold judge #3 = 53/70 (log in JUDGE_LOG.md); lead fixes for #1 (v1 legacy mint explained, verify checks 0 minted since v2 → 11/11 PASS) and docs; Sonnet helper fixing UI items 2–5 on ovn-judge | in progress |
