@@ -15,7 +15,8 @@
     "verify-match": "node tools/verify-match.ts",
     "make-record": "node tools/make-record.ts",
     "capture": "node tools/capture.ts",
-    "lighthouse": "node tools/lighthouse.ts"
+    "lighthouse": "node tools/lighthouse.ts",
+    "verify": "node tools/verify.ts"
   },
   "dependencies": {
     "three": "0.187.0"
