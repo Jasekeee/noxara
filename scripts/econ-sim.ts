@@ -17,10 +17,13 @@ const arg = (k: string, d: number) => {
 // ---- contract constants (keep in sync with lib.rs) -------------------------------------------
 export const C = {
   ENTRY: arg("entry", 4),
+  WEALTH_BPS: arg("wealth-bps", 200),
+  MAX_ENTRY: arg("max-entry", 16),
   TOP_UP: arg("topup", 30),
   BURN_BPS: 200,
   HOUSE_BPS: 500,
   BOUNTY_BPS: arg("bounty-bps", 1500),
+  SPONSOR_CUT: arg("sponsor-cut", 0.1),
   STARTER: arg("starter", 100),
   HOUSE_GENESIS: 2000,
   HOUSE_FLOOR: arg("house-floor", 1000),
@@ -34,6 +37,9 @@ const RUNS = arg("runs", 400);
 const HUMAN_WIN = arg("human-win", 8) / 100;
 const UPGRADE_EDGE = arg("edge", 0.12);
 const BOUNTY_KILL_P = 0.75;
+const SPONSORS = !process.argv.includes("--no-sponsors");
+const TAX_TO_HOUSE = process.argv.includes("--tax-to-house"); // contract: everything goes to the pot
+const SPONSOR_EVERY = arg("sponsor-every", 4);
 
 const balance = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../docs/balance.json"), "utf8")) as {
   perPersonality: { personality: string; winRatePerFighter: number }[];
@@ -55,6 +61,12 @@ function rng(seed: number) {
   };
 }
 
+type Stake = { who: number; shares: number; staked: number; earned: number; since: number; holdUntil: number };
+type Pool = { t: number; stakes: Stake[] };
+type Closed = { staked: number; back: number; lost: boolean };
+
+const entryFor = (bal: number) => Math.min(C.MAX_ENTRY, C.ENTRY + (Math.max(0, bal - C.RESERVE) * C.WEALTH_BPS) / 10_000);
+
 function run(seed: number) {
   const r = rng(seed);
   const pick = (w: number[]) => {
@@ -64,25 +76,64 @@ function run(seed: number) {
   };
   let house = C.HOUSE_GENESIS;
   const bots: Bot[] = GENESIS.map((p) => ({ p, bal: C.STARTER, w: 0, a: 0, matches: 0, gen: 0 }));
+  const pools: Pool[] = bots.map(() => ({ t: 0, stakes: [] }));
+  const closed: Closed[] = [];
   let retirements = 0;
   let firstTier2: number | null = null;
   let firstUpgrade: number | null = null;
   let upgrades = 0;
   const curve: { m: number; house: number; total: number; maxBal: number; retired: number; upgrades: number }[] = [];
+  const closePool = (s: number, lost: boolean) => {
+    const p = pools[s];
+    for (const st of p.stakes) {
+      const back = p.t > 0 ? (st.shares * bots[s].bal) / p.t : 0;
+      bots[s].bal -= back;
+      closed.push({ staked: st.staked, back: back + st.earned, lost });
+    }
+    pools[s] = { t: 0, stakes: [] };
+  };
   const rookie = (s: number) => {
     retirements++;
+    closePool(s, true);
     const g = Math.min(C.STARTER, house);
     house -= g;
     bots[s] = { p: PERS[Math.floor(r() * 6)], bal: g, w: 0, a: 0, matches: 0, gen: bots[s].gen + 1 };
   };
+  // the contract: 30% of every prize/bounty a sponsored bot collects goes to its sponsors, by shares
+  const dividends = (s: number, amount: number) => {
+    const p = pools[s];
+    const sp = p.stakes.reduce((a, x) => a + x.shares, 0);
+    if (!sp) return;
+    const total = Math.min(bots[s].bal, amount * C.SPONSOR_CUT);
+    for (const st of p.stakes) st.earned += (total * st.shares) / sp;
+    bots[s].bal -= total;
+  };
   for (let m = 1; m <= N; m++) {
+    // sponsors [assumed]: every SPONSOR_EVERY matches a player backs the bot with the most wins so far
+    // (or a random one), up to the 30% cap; they hold 5-30 matches then withdraw
+    if (SPONSORS && m % SPONSOR_EVERY === 0) {
+      const s = r() < 0.6 ? bots.reduce((best, b, i) => (b.matches > 0 && b.bal > bots[best].bal ? i : best), 0) : Math.floor(r() * 9);
+      const p = pools[s];
+      if (p.t === 0) p.t = bots[s].bal;
+      const sp = p.stakes.reduce((a, x) => a + x.shares, 0);
+      const amt = 20;
+      const shares = (amt * p.t) / bots[s].bal;
+      if ((sp + shares) / (p.t + shares) <= 0.3) {
+        p.stakes.push({ who: m, shares, staked: amt, earned: 0, since: bots[s].matches, holdUntil: bots[s].matches + 5 + Math.floor(r() * 25) });
+        p.t += shares;
+        bots[s].bal += amt;
+      }
+    }
     // start
     let pot = 0;
     for (let s = 0; s < 9; s++) {
       if (bots[s].bal < C.ENTRY && bots[s].matches > 0) rookie(s);
-      const paid = Math.min(C.ENTRY, bots[s].bal);
+      const paid = Math.min(entryFor(bots[s].bal), bots[s].bal);
       bots[s].bal -= paid;
-      pot += paid;
+      // the wealth part of the entry goes to the house (a tax), the base part into the pot
+      const base = Math.min(paid, C.ENTRY);
+      pot += TAX_TO_HOUSE ? base : paid;
+      if (TAX_TO_HOUSE) house += paid - base;
     }
     let carrier = 0;
     for (let s = 1; s < 9; s++) if (bots[s].bal > bots[carrier].bal) carrier = s;
@@ -99,14 +150,20 @@ function run(seed: number) {
     const prize = pot - burn - cut;
     house += cut;
     if (winner === 0) house += prize;
-    else bots[winner - 1].bal += prize;
+    else {
+      bots[winner - 1].bal += prize;
+      dividends(winner - 1, prize);
+    }
     if (winner !== carrier + 1 && r() < BOUNTY_KILL_P) {
       const others = weights.map((w, i) => (i === carrier + 1 ? 0 : w));
       const killer = pick(others);
       const amt = (bots[carrier].bal * C.BOUNTY_BPS) / 10_000;
       bots[carrier].bal -= amt;
       if (killer === 0) house += amt;
-      else bots[killer - 1].bal += amt;
+      else {
+        bots[killer - 1].bal += amt;
+        dividends(killer - 1, amt);
+      }
     }
     for (const b of bots) b.matches++;
     // economy
@@ -123,10 +180,21 @@ function run(seed: number) {
         if (b.w === 2 && firstTier2 === null) firstTier2 = m;
       }
       if (b.bal < C.ENTRY) rookie(s);
+      // sponsors whose holding time is up withdraw the stake's current value
+      const p = pools[s];
+      for (const st of [...p.stakes]) {
+        if (b.matches >= st.holdUntil) {
+          const back = (st.shares * b.bal) / p.t;
+          b.bal -= back;
+          p.t -= st.shares;
+          p.stakes.splice(p.stakes.indexOf(st), 1);
+          closed.push({ staked: st.staked, back: back + st.earned, lost: false });
+        }
+      }
     }
     curve.push({ m, house, total: house + bots.reduce((a, b) => a + b.bal, 0), maxBal: Math.max(...bots.map((b) => b.bal)), retired: retirements, upgrades });
   }
-  return { retirements, firstTier2, firstUpgrade, upgrades, house, curve, bots };
+  return { retirements, firstTier2, firstUpgrade, upgrades, house, curve, bots, closed };
 }
 
 const results = Array.from({ length: RUNS }, (_, i) => run(i + 1));
@@ -140,7 +208,17 @@ console.log(JSON.stringify(C));
 console.log(`${RUNS} runs x ${N} matches (human = guest winning ${HUMAN_WIN * 100}%, upgrade edge ${UPGRADE_EDGE}/tier)`);
 console.log(`retirements: median ${med(ret)} (= 1 per ${(N / Math.max(1, med(ret))).toFixed(1)} matches), p10 ${med(ret.slice().sort((a, b) => a - b).slice(0, RUNS / 5))}, max ${Math.max(...ret)}`);
 console.log(`first upgrade: median match ${med(results.map((x) => x.firstUpgrade ?? Infinity))}; first weapon tier 2: median match ${med(t2)}, by match 20 in ${((t2.filter((x) => x <= 20).length / RUNS) * 100).toFixed(0)}% of runs`);
+const topShare = results.map((x) => Math.max(...x.bots.map((b) => b.bal)) / x.bots.reduce((a, b) => a + b.bal, 0));
+console.log(`richest bot's share of all bot wealth at the end: median ${(med(topShare) * 100).toFixed(0)}% (equal = 11%)`);
 console.log(`upgrades bought: median ${med(results.map((x) => x.upgrades))}; house at end: median ${med(results.map((x) => x.house)).toFixed(0)}, min ${Math.min(...results.map((x) => x.house)).toFixed(0)}`);
+if (SPONSORS) {
+  const all = results.flatMap((x) => x.closed);
+  const roi = all.map((c) => (c.back - c.staked) / c.staked);
+  const lost = all.filter((c) => c.lost);
+  console.log(
+    `sponsorships (a 20-$BOUNTY stake every ${SPONSOR_EVERY} matches): ${all.length} closed, profitable ${((all.filter((c) => c.back > c.staked).length / all.length) * 100).toFixed(0)}%, median ROI ${(med(roi) * 100).toFixed(0)}%, lost to retirement ${((lost.length / all.length) * 100).toFixed(0)}% (median ROI there ${(med(lost.map((c) => (c.back - c.staked) / c.staked)) * 100).toFixed(0)}%)`,
+  );
+}
 if (process.argv.includes("--curve")) {
   const c = results[0].curve;
   console.log("run 1 curve (every 20 matches): match, house, total supply, richest bot, retirements, upgrades");

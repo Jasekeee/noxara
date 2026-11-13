@@ -34,9 +34,13 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::{LazyOption, LookupMap};
 use near_sdk::{env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise};
 
+mod market;
+pub mod progression;
 mod token;
 
-pub const STATE_VERSION: u16 = 1;
+pub use market::{BotPool, HistEntry, MarketEntry, SponsorEntry, SponsorshipView};
+
+pub const STATE_VERSION: u16 = 2;
 /// Fighters per match: idx 0 = the player, idx 1..=9 = bot slots 0..=8.
 pub const FIGHTERS: usize = 10;
 pub const BOTS: usize = 9;
@@ -46,6 +50,10 @@ pub const ONE: u128 = 1_000_000_000_000_000_000;
 // Economy constants tuned with scripts/econ-sim.ts against docs/balance.json (200 matches: ~1
 // retirement per 17-25 matches, the strongest bot reaches weapon tier 2 around match 10-13).
 pub const ENTRY_FEE: u128 = 4 * ONE;
+/// Progressive entry (anti rich-get-richer): + ENTRY_WEALTH_BPS of the wallet above `RESERVE`,
+/// up to `MAX_ENTRY` in total.
+pub const ENTRY_WEALTH_BPS: u128 = 200;
+pub const MAX_ENTRY: u128 = 16 * ONE;
 pub const POT_TOP_UP: u128 = 30 * ONE;
 /// The house keeps this much for rookie grants; above it, the house funds the pot top-up itself.
 pub const HOUSE_FLOOR: u128 = 1_000 * ONE;
@@ -66,14 +74,14 @@ pub const EXPIRY_BLOCKS: u64 = 1_200;
 /// Free matches recycle faster (a match is 3 minutes of play).
 pub const EXPIRY_FREE_BLOCKS: u64 = 500;
 /// Default cap on unsettled FREE matches (guests / players who paid nothing); owner-adjustable.
-pub const MAX_PENDING_FREE: u32 = 100;
+pub const MAX_PENDING_FREE: u32 = 24;
 /// Cap on unsettled PAID matches (each one costs its player an entry that is forfeited if abandoned).
 pub const MAX_PENDING_PAID: u32 = 1_000;
 /// Most the owner can hand out from the house treasury per `house_grant` call.
 pub const MAX_GRANT: u128 = 100 * ONE;
 pub const RECENT_MATCHES: usize = 50;
 pub const RETIRED_SHOWN: usize = 30;
-pub const LEADERBOARD_SIZE: usize = 20;
+pub const LEADERBOARD_SIZE: usize = 50;
 pub const MAX_HASH_LEN: usize = 128;
 /// NEP-145 deposit per player (guests: prepaid by the relayer). Covers the FT account, the player
 /// record and one pending match (measured in the unit tests).
@@ -110,6 +118,11 @@ enum Key {
     Matches,
     Leaderboard,
     Retired,
+    // state V2
+    Sponsors,
+    Sponsoring,
+    History,
+    Xp,
 }
 
 #[near(serializers = [borsh, json])]
@@ -226,9 +239,27 @@ pub struct MatchResult {
     pub settled_block: U64,
 }
 
-#[near(serializers = [borsh, json])]
+/// State-V1 match layout (only decoded; converted to `MatchV2` on load).
+#[near(serializers = [borsh])]
 #[derive(Clone, Debug)]
 pub struct MatchV1 {
+    pub id: U64,
+    pub player: AccountId,
+    pub guest: bool,
+    pub player_paid: U128,
+    pub seed: u32,
+    pub status: MatchStatus,
+    pub start_block: U64,
+    pub start_ms: U64,
+    pub roster: Vec<RosterEntry>,
+    pub bounty_idx: Option<u8>,
+    pub pot: U128,
+    pub result: Option<MatchResult>,
+}
+
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug)]
+pub struct MatchV2 {
     pub id: U64,
     pub player: AccountId,
     pub guest: bool,
@@ -244,12 +275,40 @@ pub struct MatchV1 {
     /// entries escrowed (the minted top-up is added at settlement)
     pub pot: U128,
     pub result: Option<MatchResult>,
+    /// the player's fighter upgrades from their level (progression); fighter idx 0 uses exactly these
+    pub player_upgrades: Upgrades,
+    pub player_level: u8,
 }
 
 #[near(serializers = [borsh])]
 #[derive(Clone)]
 pub enum VMatch {
     V1(MatchV1),
+    V2(MatchV2),
+}
+
+impl From<VMatch> for MatchV2 {
+    fn from(v: VMatch) -> Self {
+        match v {
+            VMatch::V2(m) => m,
+            VMatch::V1(m) => MatchV2 {
+                id: m.id,
+                player: m.player,
+                guest: m.guest,
+                player_paid: m.player_paid,
+                seed: m.seed,
+                status: m.status,
+                start_block: m.start_block,
+                start_ms: m.start_ms,
+                roster: m.roster,
+                bounty_idx: m.bounty_idx,
+                pot: m.pot,
+                result: m.result,
+                player_upgrades: Upgrades::default(),
+                player_level: 1,
+            },
+        }
+    }
 }
 
 #[near(serializers = [json])]
@@ -262,6 +321,9 @@ pub struct MatchStart {
     pub bounty_idx: Option<u8>,
     pub pot: U128,
     pub roster: Vec<RosterEntry>,
+    /// fighter idx 0's upgrades (from the player's level)
+    pub player_upgrades: Upgrades,
+    pub player_level: u8,
 }
 
 #[near(serializers = [json])]
@@ -308,6 +370,8 @@ pub struct ConfigView {
     pub matches_settled: u64,
     pub rookies: u32,
     pub entry_fee: U128,
+    pub entry_wealth_bps: u16,
+    pub max_entry: U128,
     pub pot_top_up: U128,
     pub house_floor: U128,
     pub burn_bps: u16,
@@ -358,6 +422,41 @@ pub struct Contract {
     rookies: u32,
     total_minted: u128,
     total_burned: u128,
+    // ---- state V2
+    /// sponsorship pool per bot (bounded: MAX_SPONSORS_PER_BOT entries)
+    sponsors: LookupMap<AccountId, BotPool>,
+    /// bots each player sponsors (bounded: MAX_SPONSORSHIPS_PER_PLAYER)
+    sponsoring: LookupMap<AccountId, Vec<AccountId>>,
+    /// recent events per fighter (ring of HISTORY_LEN)
+    history: LookupMap<AccountId, Vec<HistEntry>>,
+    /// progression XP per player (guests too)
+    xp: LookupMap<AccountId, u64>,
+}
+
+/// State-V1 layout, read once by `migrate`.
+#[near(serializers = [borsh])]
+pub struct ContractV1 {
+    version: u16,
+    owner: AccountId,
+    server: AccountId,
+    guest_parent: AccountId,
+    house: AccountId,
+    token: FungibleToken,
+    fighters: LookupMap<AccountId, VFighter>,
+    slots: Vec<AccountId>,
+    retired: LazyOption<Vec<AccountId>>,
+    players: LookupMap<AccountId, VPlayer>,
+    matches: LookupMap<u64, VMatch>,
+    recent: Vec<u64>,
+    pending_free: Vec<u64>,
+    max_free: u32,
+    pending_paid: u32,
+    leaderboard: LazyOption<Vec<LeaderEntry>>,
+    next_match_id: u64,
+    matches_settled: u64,
+    rookies: u32,
+    total_minted: u128,
+    total_burned: u128,
 }
 
 #[near]
@@ -390,6 +489,10 @@ impl Contract {
             rookies: 0,
             total_minted: 0,
             total_burned: 0,
+            sponsors: LookupMap::new(Key::Sponsors),
+            sponsoring: LookupMap::new(Key::Sponsoring),
+            history: LookupMap::new(Key::History),
+            xp: LookupMap::new(Key::Xp),
         };
         c.token.internal_register_account(&me); // the escrow for pots
         c.token.internal_register_account(&house);
@@ -436,6 +539,7 @@ impl Contract {
             p = self.load_player(&id).unwrap();
         }
         let guest = self.is_guest(&id);
+        let player_level = progression::level_for_xp(self.xp.get(&id).copied().unwrap_or(0) as i64);
         // free and paid matches have separate pools: free players can never crowd out paying ones
         let will_pay = !guest && self.balance(&id) >= ENTRY_FEE;
         if will_pay {
@@ -456,15 +560,16 @@ impl Contract {
         let mut roster = Vec::with_capacity(BOTS);
         for slot in 0..BOTS {
             let mut f = self.slot_fighter(slot);
-            // broke = can't pay AND nothing in escrow (escrowed entries come back or pay out later)
-            if self.balance(&f.account) < ENTRY_FEE && f.escrowed.0 == 0 && f.record.matches > 0 {
-                self.retire(slot, "broke");
+            // broke = can't pay the entry now (entries escrowed elsewhere don't count: a bot never plays
+            // on money it doesn't have). Only a brand-new rookie the house couldn't fully fund is exempt.
+            if self.balance(&f.account) < ENTRY_FEE && f.record.matches > 0 {
+                self.retire(slot, "broke", self.next_match_id);
                 let e = env::sha256_array(&[&entropy[..], &(slot as u64).to_le_bytes()].concat());
-                f = self.spawn_rookie(slot, &e);
+                f = self.spawn_rookie(slot, &e, self.next_match_id);
             }
-            // a bot short of cash (funds in escrow, or a rookie the house couldn't fully fund) pays
-            // what it has, maybe nothing
-            let paid = ENTRY_FEE.min(self.balance(&f.account));
+            // progressive entry: rich bots pay more (a fresh rookie short of cash pays what it has)
+            let bal = self.balance(&f.account);
+            let paid = entry_fee_for(bal).min(bal);
             if paid > 0 {
                 self.token.internal_transfer(&f.account, &me, paid, Some("match entry".into()));
                 pot += paid;
@@ -487,7 +592,7 @@ impl Contract {
         }
         let match_id = self.next_match_id;
         self.next_match_id += 1;
-        self.save_match(MatchV1 {
+        self.save_match(MatchV2 {
             id: U64(match_id),
             player: id.clone(),
             guest,
@@ -500,6 +605,8 @@ impl Contract {
             bounty_idx,
             pot: U128(pot),
             result: None,
+            player_upgrades: progression::upgrades_for_level(player_level as i64),
+            player_level,
         });
         if will_pay {
             self.pending_paid += 1;
@@ -535,6 +642,8 @@ impl Contract {
             bounty_idx: m.bounty_idx,
             pot: m.pot,
             roster: m.roster.clone(),
+            player_upgrades: m.player_upgrades.clone(),
+            player_level: m.player_level,
         };
         self.save_match(m);
         out
@@ -588,6 +697,10 @@ impl Contract {
         self.move_tokens(&me, &prize_to, prize, "match prize");
         self.move_tokens(&me, &house, house_cut, "house cut");
         self.burn(&me, burned, "pot burn");
+        // a bot's sponsors take their part of the prize in cash
+        if winner.is_some_and(|w| w > 0) {
+            self.pay_dividends(&prize_to, prize, match_id.0);
+        }
         event("match_prize", &near_sdk::serde_json::json!({ "match_id": match_id, "winner": winner, "to": prize_to, "prize": U128(prize), "burned": U128(burned), "house_cut": U128(house_cut) }));
 
         // ---- the bounty: the carrier's killer takes a share of the carrier's wallet
@@ -601,6 +714,11 @@ impl Contract {
                 bounty_amount = self.balance(&carrier) * BOUNTY_BPS / 10_000;
                 self.move_tokens(&carrier, &to, bounty_amount, "bounty");
                 event("bounty_paid", &near_sdk::serde_json::json!({ "match_id": match_id, "carrier": carrier, "killer_idx": k, "to": to, "amount": U128(bounty_amount) }));
+                self.push_history(&carrier, match_id.0, "bounty", bounty_amount, "lost");
+                if k > 0 {
+                    self.push_history(&to, match_id.0, "bounty", bounty_amount, "collected");
+                    self.pay_dividends(&to, bounty_amount, match_id.0);
+                }
                 bounty_to = Some(to);
             }
         }
@@ -630,6 +748,12 @@ impl Contract {
                 let who = m.player.clone();
                 self.save_player(&who, p);
                 self.update_leaderboard(lb);
+                // progression (guests too): mirrors src/sim/progression.ts
+                let gained = progression::xp_for_match(placements[0] as i64, kills[0] as i64, bounty_killer == Some(0) && bounty_to.is_some());
+                let before = self.xp.get(&who).copied().unwrap_or(0);
+                self.xp.insert(who.clone(), before + gained);
+                let (l0, l1) = (progression::level_for_xp(before as i64), progression::level_for_xp((before + gained) as i64));
+                event("xp", &near_sdk::serde_json::json!({ "player": who, "gained": gained, "xp": before + gained, "level": l1, "level_up": l1 > l0 }));
             } else {
                 let acct = m.roster[i - 1].account.clone();
                 let mut f = self.load_fighter(&acct).expect("fighter");
@@ -639,12 +763,14 @@ impl Contract {
                 f.record.kills += kills[i] as u32;
                 f.record.earnings = U128(f.record.earnings.0 + earned);
                 self.save_fighter(f);
+                let kind = if won { "win" } else { "death" };
+                self.push_history(&acct, match_id.0, kind, earned, &format!("{}:{}", placements[i], kills[i]));
             }
         }
 
         // ---- the bot economy: deterministic, no dev patch
         let entropy = env::sha256_array(&[&m.seed.to_le_bytes()[..], &match_id.0.to_le_bytes()].concat());
-        self.run_economy(&entropy);
+        self.run_economy(&entropy, match_id.0);
 
         let result = MatchResult {
             placements,
@@ -716,9 +842,44 @@ impl Contract {
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
-        let old: Contract = env::state_read().expect("no state");
-        require!(old.version <= STATE_VERSION, "downgrade");
-        Self { version: STATE_VERSION, ..old }
+        // V2 state is a superset of V1: try V2 first (code-only upgrade), else convert V1
+        // `version` is the first field of every layout: peek at it before choosing one
+        let raw = env::storage_read(b"STATE").expect("no state");
+        let v = u16::from_le_bytes([raw[0], raw[1]]);
+        if v == STATE_VERSION {
+            return env::state_read::<Contract>().expect("state");
+        }
+        let o: ContractV1 = env::state_read().expect("no state");
+        require!(o.version <= STATE_VERSION, "downgrade");
+        let mut c = Contract {
+            version: STATE_VERSION,
+            owner: o.owner,
+            server: o.server,
+            guest_parent: o.guest_parent,
+            house: o.house,
+            token: o.token,
+            fighters: o.fighters,
+            slots: o.slots,
+            retired: o.retired,
+            players: o.players,
+            matches: o.matches,
+            recent: o.recent,
+            pending_free: o.pending_free,
+            max_free: o.max_free,
+            pending_paid: o.pending_paid,
+            leaderboard: o.leaderboard,
+            next_match_id: o.next_match_id,
+            matches_settled: o.matches_settled,
+            rookies: o.rookies,
+            total_minted: o.total_minted,
+            total_burned: o.total_burned,
+            sponsors: LookupMap::new(Key::Sponsors),
+            sponsoring: LookupMap::new(Key::Sponsoring),
+            history: LookupMap::new(Key::History),
+            xp: LookupMap::new(Key::Xp),
+        };
+        c.dedupe_names();
+        c
     }
 
     // ------------------------------------------------------------------ views
@@ -743,12 +904,12 @@ impl Contract {
         ids.iter().rev().filter_map(|a| self.load_fighter(a)).map(|f| self.view_fighter(f, false)).collect()
     }
 
-    pub fn get_match(&self, match_id: U64) -> Option<MatchV1> {
+    pub fn get_match(&self, match_id: U64) -> Option<MatchV2> {
         self.load_match(match_id.0)
     }
 
     /// The newest settled matches first (at most `RECENT_MATCHES` are kept).
-    pub fn get_recent_matches(&self, n: Option<u32>) -> Vec<MatchV1> {
+    pub fn get_recent_matches(&self, n: Option<u32>) -> Vec<MatchV2> {
         let n = n.unwrap_or(10).min(RECENT_MATCHES as u32) as usize;
         self.recent.iter().rev().take(n).filter_map(|id| self.load_match(*id)).collect()
     }
@@ -780,6 +941,8 @@ impl Contract {
             matches_settled: self.matches_settled,
             rookies: self.rookies,
             entry_fee: U128(ENTRY_FEE),
+            entry_wealth_bps: ENTRY_WEALTH_BPS as u16,
+            max_entry: U128(MAX_ENTRY),
             pot_top_up: U128(POT_TOP_UP),
             house_floor: U128(HOUSE_FLOOR),
             burn_bps: BURN_BPS as u16,
@@ -824,11 +987,11 @@ impl Contract {
     fn slot_fighter(&self, slot: usize) -> FighterV1 {
         self.load_fighter(&self.slots[slot]).expect("slot fighter")
     }
-    fn load_match(&self, id: u64) -> Option<MatchV1> {
-        self.matches.get(&id).map(|VMatch::V1(m)| m.clone())
+    fn load_match(&self, id: u64) -> Option<MatchV2> {
+        self.matches.get(&id).map(|v| v.clone().into())
     }
-    fn save_match(&mut self, m: MatchV1) {
-        self.matches.insert(m.id.0, VMatch::V1(m));
+    fn save_match(&mut self, m: MatchV2) {
+        self.matches.insert(m.id.0, VMatch::V2(m));
     }
 
     pub(crate) fn balance(&self, a: &AccountId) -> u128 {
@@ -850,7 +1013,7 @@ impl Contract {
 
     /// Who gets paid for fighter idx `i` of match `m`: the bot's own wallet, the real player who
     /// paid the entry, or the house (guests and players who paid nothing earn zero).
-    fn payee(&self, m: &MatchV1, i: u8) -> AccountId {
+    fn payee(&self, m: &MatchV2, i: u8) -> AccountId {
         match i {
             0 if !player_eligible(m) => self.house.clone(),
             0 => m.player.clone(),
@@ -896,7 +1059,7 @@ impl Contract {
     }
 
     /// Bots' escrowed entries of `m` are no longer in escrow (refunded or paid into the pot).
-    fn release_escrow(&mut self, m: &MatchV1) {
+    fn release_escrow(&mut self, m: &MatchV2) {
         for r in &m.roster {
             if r.paid.0 == 0 {
                 continue;
@@ -939,7 +1102,7 @@ impl Contract {
         event("match_closed", &near_sdk::serde_json::json!({ "match_id": U64(match_id), "reason": why, "seeded": seeded, "player_forfeited": if seeded { m.player_paid } else { U128(0) } }));
     }
 
-    fn unlist_pending(&mut self, m: &MatchV1) {
+    fn unlist_pending(&mut self, m: &MatchV2) {
         if m.player_paid.0 > 0 {
             self.pending_paid = self.pending_paid.saturating_sub(1);
         } else {
@@ -964,7 +1127,7 @@ impl Contract {
     /// After every settled match, in slot order: each bot buys at most one upgrade it can afford
     /// while keeping `RESERVE` (weapon tier, then armor, then a new skin; the price goes to the
     /// house), then a bot that can't pay the next entry retires and a rookie takes the slot.
-    fn run_economy(&mut self, entropy: &[u8; 32]) {
+    fn run_economy(&mut self, entropy: &[u8; 32], match_id: u64) {
         let house = self.house.clone();
         for slot in 0..BOTS {
             let mut f = self.slot_fighter(slot);
@@ -985,12 +1148,18 @@ impl Contract {
                     _ => f.upgrades.skin = (f.upgrades.skin + 1 + entropy[slot] % (SKINS - 1)) % SKINS,
                 }
                 event("upgrade", &near_sdk::serde_json::json!({ "account": f.account, "what": what, "price": U128(price), "upgrades": f.upgrades }));
+                let label = match what {
+                    "weapon" => format!("weapon {}", f.upgrades.weapon_tier),
+                    "armor" => format!("armor {}", f.upgrades.armor),
+                    _ => format!("skin {}", f.upgrades.skin),
+                };
+                self.push_history(&acct, match_id, "upgrade", price, &label);
                 self.save_fighter(f.clone());
             }
             if self.balance(&f.account) < ENTRY_FEE && f.escrowed.0 == 0 {
-                self.retire(slot, "broke");
+                self.retire(slot, "broke", match_id);
                 let e = env::sha256_array(&[&entropy[..], &(slot as u64).to_le_bytes()].concat());
-                self.spawn_rookie(slot, &e);
+                self.spawn_rookie(slot, &e, match_id);
             }
         }
         if let Some(s) = self.richest_slot() {
@@ -998,15 +1167,21 @@ impl Contract {
         }
     }
 
-    fn retire(&mut self, slot: usize, why: &str) {
+    fn retire(&mut self, slot: usize, why: &str, match_id: u64) {
         let mut f = self.slot_fighter(slot);
         f.active = false;
         f.retired_block = Some(env::block_height());
         event("retire", &near_sdk::serde_json::json!({ "account": f.account, "slot": slot, "reason": why, "record": f.record, "balance": U128(self.balance(&f.account)) }));
+        let acct = f.account.clone();
+        self.close_pool(&acct, match_id);
+        let left = self.balance(&acct);
+        self.push_history(&acct, match_id, "retired", left, why);
         let mut list = self.retired.get().clone().unwrap_or_default();
-        list.push(f.account.clone());
+        list.push(acct);
         if list.len() > RETIRED_SHOWN {
-            list.remove(0);
+            // bounded: the oldest shown retiree's history goes (its record stays)
+            let old = list.remove(0);
+            self.history.remove(&old);
         }
         self.retired.set(Some(list));
         self.save_fighter(f);
@@ -1014,7 +1189,7 @@ impl Contract {
 
     /// A rookie gets a fresh sub-account (no access keys), a name and a play style drawn from
     /// `entropy`, and a starter grant from the house (whatever the house can afford).
-    fn spawn_rookie(&mut self, slot: usize, entropy: &[u8; 32]) -> FighterV1 {
+    fn spawn_rookie(&mut self, slot: usize, entropy: &[u8; 32], match_id: u64) -> FighterV1 {
         let prev = self.slot_fighter(slot);
         self.rookies += 1;
         let n = self.rookies;
@@ -1049,7 +1224,27 @@ impl Contract {
         self.slots[slot] = account.clone();
         create_npc_account(&account);
         event("fighter_born", &near_sdk::serde_json::json!({ "account": account, "name": name, "personality": personality, "slot": slot, "generation": f.generation, "replaces": prev.account, "grant": U128(grant) }));
+        self.push_history(&account, match_id, "rookie", grant, &prev.name);
         f
+    }
+
+    /// Legacy fix (migration to V2): active fighters with the same display name get unused names.
+    fn dedupe_names(&mut self) {
+        let mut seen: Vec<String> = vec![];
+        for slot in 0..BOTS {
+            let mut f = self.slot_fighter(slot);
+            if seen.iter().any(|n| n.eq_ignore_ascii_case(&f.name)) {
+                let all: Vec<String> = (0..BOTS).map(|s| self.slot_fighter(s).name.to_ascii_lowercase()).collect();
+                if let Some(base) = ROOKIE_NAMES.iter().find(|n| !all.iter().any(|a| a == *n) && !seen.iter().any(|s| s.eq_ignore_ascii_case(n))) {
+                    let mut name = base.to_string();
+                    name[..1].make_ascii_uppercase();
+                    event("renamed", &near_sdk::serde_json::json!({ "account": f.account, "from": f.name, "to": name }));
+                    f.name = name;
+                    self.save_fighter(f.clone());
+                }
+            }
+            seen.push(f.name.clone());
+        }
     }
 
     fn update_leaderboard(&mut self, e: LeaderEntry) {
@@ -1062,12 +1257,17 @@ impl Contract {
     }
 }
 
-fn expiry_of(m: &MatchV1) -> u64 {
+fn expiry_of(m: &MatchV2) -> u64 {
     if m.player_paid.0 > 0 { EXPIRY_BLOCKS } else { EXPIRY_FREE_BLOCKS }
 }
 
+/// A bot's entry for this match: the base fee + 2% of its wallet above the reserve, capped.
+pub fn entry_fee_for(balance: u128) -> u128 {
+    (ENTRY_FEE + balance.saturating_sub(RESERVE) * ENTRY_WEALTH_BPS / 10_000).min(MAX_ENTRY)
+}
+
 /// Only a real (non-guest) player who paid the entry can win the pot or a bounty.
-fn player_eligible(m: &MatchV1) -> bool {
+fn player_eligible(m: &MatchV2) -> bool {
     !m.guest && m.player_paid.0 > 0
 }
 
