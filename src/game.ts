@@ -436,6 +436,10 @@ function localFighters(): FighterInfo[] {
     }));
 }
 
+/** set by the TRAINING ISLAND buttons: the next match is offline with easy bots (cfg.training) */
+let wantTraining = false;
+let inTraining = false;
+
 function localStart(): StartResult {
   const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
   // offline fallback after a chain failure: tonight's real roster from the lobby, not the stale default one
@@ -492,6 +496,14 @@ async function startMatch() {
   $("end").classList.add("hidden");
   // ?seed=N (tests, replays) always plays the local deterministic roster
   let start: StartResult | null = await social.forcedStart(); // challenge / daily: fixed config, no chain
+  inTraining = false;
+  if (start === null && wantTraining) {
+    // training island: offline, easy bots against you, nothing recorded or settled
+    start = localStart();
+    start.cfg.training = true;
+    inTraining = true;
+  }
+  wantTraining = false;
   const forced = start !== null;
   const c = start === null && SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
   // "chain_error" = a transient failure last time: the client tries the chain again (and says so if it still fails)
@@ -514,12 +526,13 @@ async function startMatch() {
   myKillTimes = [];
   lastAmmo = -1;
   if (fellBack) toast("Couldn't reach the NEAR island — playing offline practice (not recorded)");
+  if (inTraining) toast("Training island: the bots go easy on you. Nothing is recorded.");
   coach.startMatch(!AUTOPLAY);
   gotChest = false;
   meBushSeen = false;
   const st = current;
   if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
-  else hud.banner("READY…", "gold");
+  else hud.banner(inTraining ? "TRAINING ISLAND" : "READY…", "gold");
   $("title").classList.add("hidden");
   $("hud").classList.remove("hidden");
   $("pot-chip").classList.toggle("hidden", !(current.pot > 0));
@@ -786,7 +799,8 @@ function stepSim() {
     phase = "over";
     {
       const me = st.fighters[0];
-      const gained = xpForMatch(me.placement || 1, me.kills, iClaimedBounty);
+      // training island: no rewards of any kind (no XP either)
+      const gained = inTraining ? 0 : xpForMatch(me.placement || 1, me.kills, iClaimedBounty);
       xpBefore = myXp;
       xpAfter = myXp + gained;
       myXp = xpAfter;
@@ -827,7 +841,7 @@ function drawLedger() {
     el.textContent = "";
     const n = document.createElement("p");
     n.className = "lg-note";
-    n.textContent = `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
+    n.textContent = inTraining ? `${st.alive} still fighting — training island: nothing is paid or recorded. Spectate to watch it end.` : `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
     el.appendChild(n);
     return;
   }
@@ -868,6 +882,12 @@ function showEnd(force: boolean) {
   const winnerLine = st.over ? (st.winner === null ? "no winner" : won ? "" : `${nameOf(st.winner)} won`) : `${st.alive} still fighting`;
   $("end-sub").textContent = [`of ${FIGHTERS}`, how, winnerLine].filter(Boolean).join(" — ");
   $("end-kills").textContent = String(me.kills);
+  // a fast early exit in a real match: offer the training island
+  const fast = !won && !inTraining && me.placement >= 7 && (match.state.tick < 70 * 20 || me.kills === 0);
+  $("again-training").classList.toggle("hidden", !fast && !inTraining);
+  // after training: the main button is a real match; the secondary one trains again
+  $("again").textContent = inTraining ? "PLAY REAL MATCH" : "PLAY AGAIN";
+  $("again-training").textContent = inTraining ? "TRAIN AGAIN" : "TRY THE TRAINING ISLAND";
   $("end-dmg").textContent = String(Math.round(me.damageDealt));
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
@@ -876,7 +896,7 @@ function showEnd(force: boolean) {
   social.endShown(st.over);
   drawLedger();
   const xb = $("xp-box");
-  xb.classList.toggle("hidden", !st.over || SEED_PARAM !== null && AUTOPLAY);
+  xb.classList.toggle("hidden", !st.over || inTraining || (SEED_PARAM !== null && AUTOPLAY));
   if (st.over) {
     renderXp(xb, xpBefore, xpAfter, (lvl, unlocks) => {
       sfx.levelUp();
@@ -927,11 +947,25 @@ $("play").addEventListener("click", () => {
   }
   void startMatch();
 });
+const startTraining = () => {
+  wantTraining = true;
+  if (!bootDone) {
+    wantPlay = true;
+    return;
+  }
+  void startMatch();
+};
+$("training").addEventListener("click", startTraining);
+$("again-training").addEventListener("click", () => {
+  $("end").classList.add("hidden");
+  startTraining();
+});
 const muteBtn = $("mute");
 let menuPaused = false;
 const menu = new PauseMenu({
   canOpen: () => phase === "playing" && !!match && !match.state.over && !spectating && !endOpen && !starting && !AUTOPLAY && $("page").classList.contains("hidden"),
   offline: () => !client || client.mode !== "chain" || !!current?.matchId.startsWith("local-"),
+  training: () => inTraining,
   muted: () => sfx.muted,
   toggleMute: () => toggleMute(),
   aimAssist: () => controls.aimAssist,
@@ -939,7 +973,7 @@ const menu = new PauseMenu({
   exit: () => {
     const chain = !current?.matchId.startsWith("local-") && !!client && client.mode === "chain";
     toLobby();
-    toast(chain ? "You left — the match counts as a loss" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
+    toast(chain ? "You left — the match counts as a loss" : inTraining ? "You left the training island" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
   },
   onChange: (open) => {
     controls.blocked = open;

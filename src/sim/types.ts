@@ -8,7 +8,7 @@
  * Version of the simulation RULES. Bump on ANY change that can alter a replay (rules, AI, mapgen,
  * numbers). The match server refuses records made with a different version.
  */
-export const SIM_VERSION = "r5";
+export const SIM_VERSION = "r6";
 
 export const TICK_HZ = 20;
 export const MATCH_SECONDS = 180;
@@ -42,6 +42,12 @@ export interface FighterSpec {
 export interface MatchConfig {
   seed: number; // uint32 (from next-block randomness in T2)
   fighters: FighterSpec[]; // exactly FIGHTERS entries; index = fighter idx
+  /**
+   * Training island (r6): bots aim worse and react slower AGAINST THE HUMAN. Offline only — never set on chain
+   * matches (their config comes from the contract), the daily tournament or challenges (the server rebuilds
+   * those configs without it), so a training run can't be passed off as a real one.
+   */
+  training?: boolean;
 }
 
 /** One fighter's control for one tick. Humans: from keyboard/mouse/touch. Bots: from their AI. */

@@ -244,6 +244,10 @@ function steer(match: Match, me: FighterState, b: Brain, want: number, avoidStor
   return best;
 }
 
+/** training island (cfg.training): extra aim error (angle units) and reaction ticks against the human */
+const TRAINING_JITTER = 260;
+const TRAINING_REACT = 24;
+
 export function botInput(match: Match, idx: number): Input {
   const s = match.state;
   const me = s.fighters[idx];
@@ -627,8 +631,10 @@ export function botInput(match: Match, idx: number): Input {
   let aim = me.aim;
   let aimDist: number | undefined;
   let fire = false;
+  // training island: against the human, bots aim much worse and take longer to open fire
+  const trainingVsHuman = match.cfg.training === true && T !== null && match.cfg.fighters[T.idx].human;
   if (t >= b.aimErrUntil) {
-    const j = b.jitter;
+    const j = trainingVsHuman ? b.jitter + TRAINING_JITTER : b.jitter;
     b.aimErr = b.rng.range(-j, j);
     b.aimErrUntil = t + b.rng.range(6, 12);
   }
@@ -650,7 +656,7 @@ export function botInput(match: Match, idx: number): Input {
     const ambushR = P.camp && me.inBush ? Math.trunc((w.range * 85) / 100) : maxR;
     const clear = me.weapon === "grenade" || lineClear(match, me.x, me.y, T.x, T.y);
     const allowed = (willFight && !mode.startsWith("flee")) || ((mode.startsWith("flee") || mode.startsWith("hide")) && (hurtRecently || dT < 4 * FP));
-    fire = allowed && aimed && clear && dT <= Math.min(maxR, ambushR) && t - b.targetSince >= P.react && t >= me.readyTick;
+    fire = allowed && aimed && clear && dT <= Math.min(maxR, ambushR) && t - b.targetSince >= P.react + (trainingVsHuman ? TRAINING_REACT : 0) && t >= me.readyTick;
     if (me.ammo === 0 || t < SPAWN_PROTECT) fire = false; // no point shooting protected fighters
     // Human-like bursts: a few shots, then a short pause to re-aim / move.
     if (fire && t < b.burstPause) fire = false;
