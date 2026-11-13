@@ -29,11 +29,19 @@ node tools/headless.ts 200 --from 5001 --p0 sniper   # other seeds / personality
 Note: a personality that fills many slots wins more often by count — if the roster has, say, 3+ fighters
 of one personality, check win/fighter before re-tuning.
 
-## Results
-_Pending the real simulation (Agent B). Against the stub every match times out (`0/N finished`)._
-
+## Results (2026-11-13 16:55 UTC, main d0425f9, 1,000 matches, seeds 1..1000, idx 0 = balanced) — **PASS**
 | personality | fighters/match | win share | win/fighter | avg kills |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| balanced | 3 | 30.3 % | 10.1 % | 0.78 |
+| camper | 2 | 20.2 % | 10.1 % | 0.77 |
+| aggressive | 2 | 15.5 % | 7.8 % | 1.05 |
+| coward | 1 | 15.1 % | 15.1 % | 0.73 |
+| looter | 1 | 11.0 % | 11.0 % | 0.80 |
+| sniper | 1 | 7.9 % | 7.9 % | 0.84 |
 
-Avg match length: — · storm deaths: — · ended by clock: — · speed: — matches/s
+1000/1000 finished · avg match length 134.2 s · storm deaths 7.2 % of 9,000 · ended by clock 0 % ·
+determinism spot-check same hash twice · 25.8 matches/s. Raw: `docs/balance.json`.
+
+Reading: no personality is near the 40 % gate. Per fighter, **coward** over-performs (15 % vs a fair
+10 %: it survives to the end by avoiding fights) and **sniper**/**aggressive** under-perform (≈8 %);
+aggressive gets the most kills but dies more. The 300-match run in `npm run verify` shows the same order.
