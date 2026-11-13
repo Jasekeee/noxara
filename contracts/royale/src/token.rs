@@ -112,7 +112,7 @@ impl StorageManagement for Contract {
             // the season is ending: open sponsorships are closed at their current value
             self.close_all_sponsorships(&id);
         }
-        require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first");
+        require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first (from the season's end: wait until your bots are out of their match)");
         let bal = self.balance(&id);
         require!(bal == 0 || force.unwrap_or(false), "non-zero $NOX balance: pass force=true to burn it");
         self.burn(&id, bal, "unregistered");

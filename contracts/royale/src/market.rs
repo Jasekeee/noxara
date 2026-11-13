@@ -287,12 +287,16 @@ impl Contract {
         })
     }
 
-    /// Season end: close every sponsorship of `who` at its current value (no cooldown, escrow ignored:
-    /// pays what the bot's wallet holds). Returns the total paid back.
+    /// Season end: close every sponsorship of `who` at its current value, no cooldown — but only for
+    /// bots with nothing in escrow (no exit on an unsettled outcome); the others stay open and the
+    /// caller refuses to unregister until they're out of their match. Returns the total paid back.
     pub(crate) fn close_all_sponsorships(&mut self, who: &AccountId) -> u128 {
         let bots = self.sponsoring.get(who).cloned().unwrap_or_default();
         let mut total = 0u128;
         for bot in bots {
+            if self.load_fighter(&bot).is_some_and(|f| f.escrowed.0 > 0) {
+                continue;
+            }
             let Some(mut pool) = self.sponsors.get(&bot).cloned() else { continue };
             let Some(i) = pool.entries.iter().position(|e| &e.sponsor == who) else { continue };
             let e = pool.entries.remove(i);
@@ -303,8 +307,8 @@ impl Contract {
             self.move_tokens(&bot, who, pay, "sponsorship closed: season end");
             event("unsponsor", &near_sdk::serde_json::json!({ "sponsor": who, "bot": bot, "returned": U128(pay), "staked": e.staked, "earned": e.earned, "season_end": true }));
             total += pay;
+            self.forget_sponsoring(who, &bot);
         }
-        self.sponsoring.remove(who);
         total
     }
 

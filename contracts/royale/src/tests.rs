@@ -1081,17 +1081,45 @@ fn teardown_is_owner_only_time_locked_and_pays_the_fixed_beneficiary() {
 }
 
 #[test]
-fn no_teardown_while_a_match_is_in_flight() {
+fn a_griefer_cannot_block_teardown() {
     let mut c = setup();
-    let s = start(&mut c, GUEST, 200);
+    let house = c.house.clone();
+    c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
+    let s1 = start(&mut c, GUEST, 200); // free, pending
+    let s2 = start(&mut c, ALICE, 201); // paid, pending
     let mut b = VMContextBuilder::new();
-    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    // the season is over: nobody can start another match
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(GUEST)).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
     testing_env!(b.build());
-    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(); })).is_err(), "pending match");
-    settle(&mut c, s.match_id, 3, None, 300);
-    b.predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).is_err(), "season over");
+    // teardown closes what is still in flight, then deletes the account
+    b.predecessor_account_id(acc("owner.test"));
     testing_env!(b.build());
     let _ = c.teardown();
+    assert!(c.get_match(s1.match_id).is_none() && c.get_match(s2.match_id).is_none());
+    assert_eq!(bal(&c, ALICE), 50 * ONE - ENTRY_FEE, "a seeded paid entry is forfeited per the abandon rules");
+    assert!(c.get_fighters().iter().all(|f| f.fighter.escrowed.0 == 0), "bots got their entries back");
+    let r = near_sdk::test_utils::get_created_receipts();
+    assert!(r.iter().any(|x| x.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::DeleteAccount { .. }))));
+}
+
+#[test]
+fn season_end_exit_waits_for_bots_in_a_match() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[0].clone();
+    sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
+    let s = start(&mut c, GUEST, 200); // the bot now has an entry in escrow
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).block_timestamp(SEASON_END_MS * 1_000_000);
+    testing_env!(b.build());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.storage_unregister(Some(true)))).is_err(), "no exit on an unsettled outcome");
+    assert_eq!(c.get_sponsorships(acc(ALICE)).len(), 1, "still open");
+    settle(&mut c, s.match_id, 3, None, 300);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).block_timestamp(SEASON_END_MS * 1_000_000);
+    testing_env!(b.build());
+    assert!(c.storage_unregister(Some(true)));
 }
 
 #[test]

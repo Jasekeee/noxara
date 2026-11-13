@@ -92,6 +92,9 @@ const WELCOME_DAY_KEY: &[u8] = b"welcome_day";
 pub const TEARDOWN_AFTER_MS: u64 = 1_795_564_800_000;
 const TEARDOWN_KEY: &[u8] = b"teardown_after";
 const BENEFICIARY_KEY: &[u8] = b"teardown_beneficiary";
+const PAID_IDS_KEY: &[u8] = b"pending_paid_ids";
+/// Unsettled matches `teardown` closes per call (gas bound); call again if more remain.
+pub const TEARDOWN_SWEEP: usize = 60;
 /// From 2026-11-20 00:00 UTC the season is ending: players can leave even with open sponsorships
 /// (they are closed at their current value) to take their own deposits back before the teardown.
 pub const SEASON_END_MS: u64 = 1_795_132_800_000;
@@ -613,6 +616,8 @@ impl Contract {
     /// Start a match. Bots pay their entries now; the seed is fixed by `resolve_start` in a later
     /// block. The final value of this tx is a `MatchStart`.
     pub fn start_match(&mut self) -> Promise {
+        // after the season ends nobody can start (so nobody can keep matches in flight to block teardown)
+        require!(env::block_timestamp_ms() < self.teardown_after(), "the season is over: thanks for playing");
         let id = env::predecessor_account_id();
         let mut p = self
             .load_player(&id)
@@ -705,6 +710,9 @@ impl Contract {
         });
         if will_pay {
             self.pending_paid += 1;
+            let mut ids = self.pending_paid_ids();
+            ids.push(match_id);
+            self.set_pending_paid_ids(&ids);
         } else {
             self.pending_free.push(match_id);
         }
@@ -944,14 +952,28 @@ impl Contract {
     /// Works without any full-access key on the account. Keyless bot / house / rookie sub-accounts
     /// can't be deleted: their ~0.001 NEAR each stays. Storage deposits the relayer paid go back to
     /// the operator with the rest; players can take their own deposits back from the season's end.
-    pub fn teardown(&mut self) -> Promise {
+    pub fn teardown(&mut self) -> near_sdk::PromiseOrValue<bool> {
         require!(env::predecessor_account_id() == self.owner, "owner only");
-        let after = env::storage_read(TEARDOWN_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(TEARDOWN_AFTER_MS);
-        require!(env::block_timestamp_ms() >= after, "teardown is locked until 2026-11-25 00:00 UTC");
-        require!(self.pending_free.is_empty() && self.pending_paid == 0, "matches are still in flight: settle or sweep them first");
+        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-11-25 00:00 UTC");
         let beneficiary = self.teardown_beneficiary().unwrap_or_else(|| env::panic_str("no teardown beneficiary set"));
+        // close what is still in flight first (no new matches can start now): bots get their entries
+        // back, players' entries follow the abandon rules (credit-paid ones back to the house)
+        let mut todo: Vec<u64> = self.pending_free.clone();
+        todo.extend(self.pending_paid_ids());
+        let more = todo.len() > TEARDOWN_SWEEP;
+        for id in todo.into_iter().take(TEARDOWN_SWEEP) {
+            if self.matches.get(&id).is_some() {
+                self.close_unsettled(id, "season over");
+            } else {
+                self.pending_free.retain(|x| *x != id);
+            }
+        }
+        if more {
+            event("teardown_progress", &near_sdk::serde_json::json!({ "left": self.pending_free.len() + self.pending_paid_ids().len() }));
+            return near_sdk::PromiseOrValue::Value(false); // more matches to close: call teardown again
+        }
         event("teardown", &near_sdk::serde_json::json!({ "beneficiary": beneficiary, "at_ms": U64(env::block_timestamp_ms()) }));
-        Promise::new(env::current_account_id()).delete_account(beneficiary)
+        near_sdk::PromiseOrValue::Promise(Promise::new(env::current_account_id()).delete_account(beneficiary))
     }
 
     /// For contracts initialised before the beneficiary existed: the owner sets it ONCE.
@@ -972,7 +994,7 @@ impl Contract {
     }
 
     pub fn get_teardown_after(&self) -> U64 {
-        U64(env::storage_read(TEARDOWN_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(TEARDOWN_AFTER_MS))
+        U64(self.teardown_after())
     }
 
     pub fn set_server(&mut self, server: AccountId) {
@@ -1296,6 +1318,9 @@ impl Contract {
     fn unlist_pending(&mut self, m: &MatchV2) {
         if m.player_paid.0 > 0 {
             self.pending_paid = self.pending_paid.saturating_sub(1);
+            let mut ids = self.pending_paid_ids();
+            ids.retain(|x| *x != m.id.0);
+            self.set_pending_paid_ids(&ids);
         } else {
             self.pending_free.retain(|x| *x != m.id.0);
         }
@@ -1460,6 +1485,18 @@ impl Contract {
             m.insert(account.clone(), v);
         }
         m.flush();
+    }
+
+    /// Unsettled PAID match ids (kept beside the counter under a raw key, so no state migration).
+    fn pending_paid_ids(&self) -> Vec<u64> {
+        env::storage_read(PAID_IDS_KEY).map(|v| borsh::from_slice(&v).unwrap_or_default()).unwrap_or_default()
+    }
+    fn set_pending_paid_ids(&mut self, ids: &[u64]) {
+        env::storage_write(PAID_IDS_KEY, &borsh::to_vec(ids).unwrap());
+    }
+
+    fn teardown_after(&self) -> u64 {
+        env::storage_read(TEARDOWN_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(TEARDOWN_AFTER_MS)
     }
 
     fn teardown_beneficiary(&self) -> Option<AccountId> {

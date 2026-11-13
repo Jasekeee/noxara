@@ -444,8 +444,11 @@ async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
     let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
     let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
     let c = root.deploy(&std::fs::read(WASM_OVERRIDE)?).await?.into_result()?;
+    // the season ends 60 s from now (sandbox time); teardown is locked until then
+    let now_ms = w.view_block().await?.timestamp() / 1_000_000;
+    let season_end = now_ms + 60_000;
     c.call("new")
-        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id(), "teardown_after_ms": "1"}))
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id(), "teardown_after_ms": season_end.to_string()}))
         .gas(Gas::from_tgas(150))
         .transact()
         .await?
@@ -465,9 +468,18 @@ async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
         println!("delete key: {:?}", r.as_ref().map(|x| x.is_success()).map_err(|e| e.to_string()));
     }
     assert_eq!(w.view_access_keys(root.id()).await?.len(), 0);
-    // a stranger can't, the owner can (lock already passed: teardown_after_ms = 1)
+    // locked before the season's end; a griefer's pending match won't block it after
+    let r = owner.call(c.id(), "teardown").transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("locked"));
+    let pending: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
+    while w.view_block().await?.timestamp() / 1_000_000 < season_end {
+        w.fast_forward(50).await?;
+    }
+    let r = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("season is over"));
     let r = g.call(c.id(), "teardown").transact().await?;
-    assert!(r.into_result().is_err());
+    assert!(r.into_result().is_err(), "a stranger can't");
+    let _ = pending;
     let root_bal = w.view_account(root.id()).await?.balance;
     let owner0 = owner.view_account().await?.balance;
     let r = owner.call(c.id(), "teardown").gas(Gas::from_tgas(50)).transact().await?;
