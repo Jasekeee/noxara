@@ -10,6 +10,11 @@ const RELAY: &str = "relay.test";
 const GUEST: &str = "g-ab12.relay.test";
 const ALICE: &str = "alice.test";
 
+/// entry a genesis bot pays on its first match (progressive fee)
+fn e0() -> u128 {
+    entry_fee_for(STARTER)
+}
+
 fn acc(s: &str) -> AccountId {
     s.parse().unwrap()
 }
@@ -116,8 +121,9 @@ fn start_escrows_entries_and_fixes_seed_later() {
     assert_eq!(s.roster[0].idx, 1);
     assert!(s.guest);
     assert_eq!(s.player_paid.0, 0, "guests pay nothing");
-    assert_eq!(bal(&c, ME), 9 * ENTRY_FEE);
-    assert_eq!(s.pot.0, 9 * ENTRY_FEE);
+    assert_eq!(bal(&c, ME), 9 * e0());
+    assert_eq!(s.pot.0, 9 * e0());
+    assert_eq!(e0(), ENTRY_FEE + (STARTER - RESERVE) * ENTRY_WEALTH_BPS / 10_000, "progressive entry");
     // all equal -> the first richest slot carries the bounty
     assert_eq!(s.bounty_idx, Some(1));
     assert!(s.roster[0].bounty && s.roster.iter().filter(|r| r.bounty).count() == 1);
@@ -172,7 +178,7 @@ fn guest_win_goes_to_the_house() {
     assert_eq!(r.winner, Some(0));
     assert_eq!(r.prize_to, c.house);
     assert_eq!(bal(&c, GUEST), 0, "guests earn zero");
-    let pot = 9 * ENTRY_FEE + POT_TOP_UP;
+    let pot = 9 * e0() + POT_TOP_UP;
     assert_eq!(r.prize.0 + r.burned.0 + r.house_cut.0, pot);
     // the house (above its floor) paid the top-up itself: nothing minted
     assert_eq!(r.minted.0, 0);
@@ -192,8 +198,8 @@ fn bot_win_pays_the_bot_wallet() {
     let r = settle(&mut c, s.match_id, 4, None, 210);
     let winner = slot_acc(&c, 3);
     assert_eq!(r.prize_to.as_str(), winner);
-    // 90 + 102.3 >= 120 + reserve: the winner immediately buys weapon tier 1 (paid to the house)
-    assert_eq!(bal(&c, &winner), STARTER - ENTRY_FEE + r.prize.0 - WEAPON_PRICES[0]);
+    // the winner immediately buys weapon tier 1 (paid to the house)
+    assert_eq!(bal(&c, &winner), STARTER - e0() + r.prize.0 - WEAPON_PRICES[0]);
     let f = c.get_fighter(acc(&winner)).unwrap();
     assert_eq!(f.fighter.upgrades.weapon_tier, 1);
     assert_eq!((f.fighter.record.wins, f.fighter.record.kills, f.fighter.record.matches), (1, 3, 1));
@@ -252,7 +258,7 @@ fn bounty_is_paid_to_the_killer() {
     assert_eq!(r.bounty_to.as_ref().map(|a| a.as_str()), Some(killer.as_str()));
     assert_eq!(bal(&c, &carrier), before - r.bounty_amount.0);
     // the killer may immediately spend its windfall on its first upgrade
-    let k = STARTER - ENTRY_FEE + r.bounty_amount.0;
+    let k = STARTER - e0() + r.bounty_amount.0;
     let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
     assert_eq!(bal(&c, &killer), k);
     assert_eq!(c.get_fighter(acc(&killer)).unwrap().fighter.record.earnings, r.bounty_amount);
@@ -318,8 +324,12 @@ fn broke_bots_retire_and_rookies_take_the_slot() {
             break;
         }
     }
-    // starter / entry losses in a row and the wallet is empty
-    let losses = (STARTER / ENTRY_FEE) as u32;
+    // losses in a row (progressive entries) until the wallet can't pay the base entry
+    let (mut b, mut losses) = (STARTER, 0u32);
+    while b >= ENTRY_FEE {
+        b -= entry_fee_for(b);
+        losses += 1;
+    }
     assert_eq!(retired_at, Some(losses as usize - 1));
     let old = c.get_fighter(acc(&pip)).unwrap();
     assert_eq!(old.status, "retired");
@@ -353,10 +363,10 @@ fn abandon_after_seed_forfeits_the_players_entry() {
     assert!(c.get_match(s1.match_id).is_none());
     assert_eq!(bal(&c, ALICE), 50 * ONE - 2 * ENTRY_FEE, "first entry forfeited, second paid");
     assert_eq!(c.balance(&c.house), house0 + ENTRY_FEE);
-    assert_eq!(bal(&c, ME), 10 * ENTRY_FEE, "only s2 in escrow: bots were refunded for s1");
+    assert_eq!(bal(&c, ME), ENTRY_FEE + 9 * e0(), "only s2 in escrow: bots were refunded for s1");
     let p = c.get_player(acc(ALICE)).unwrap();
     assert_eq!((p.matches, p.deaths, p.pending), (1, 1, Some(s2.match_id)), "the abandoned match counts as a loss");
-    assert!(c.get_fighters().iter().all(|f| f.fighter.escrowed.0 == ENTRY_FEE));
+    assert!(c.get_fighters().iter().all(|f| f.fighter.escrowed.0 == e0()));
     assert_supply(&c);
 }
 
@@ -430,8 +440,8 @@ fn free_matches_are_capped_and_lazily_swept_but_never_block_paid_play() {
 }
 
 #[test]
-fn bots_short_only_because_of_escrow_are_not_retired() {
-    // review fix #2: escrowed entries are not "broke"
+fn a_bot_that_cannot_pay_retires_at_start_even_with_escrow() {
+    // judge #2: a bot at ~0 must not play another match on money that sits in escrow elsewhere
     let mut c = setup();
     let pip = c.slots[2].clone();
     let house = c.house.clone();
@@ -443,17 +453,14 @@ fn bots_short_only_because_of_escrow_are_not_retired() {
     c.save_fighter(f);
     let s1 = start(&mut c, GUEST, 200); // Pip pays an entry, keeps half an entry
     assert_eq!(s1.roster[2].paid.0, ENTRY_FEE);
-    let s2 = start(&mut c, ALICE, 205); // < entry, but an entry in escrow: still plays (pays what it has)
-    assert_eq!(c.slots[2], pip, "not retired");
-    assert_eq!(s2.roster[2].paid.0, ENTRY_FEE / 2);
-    assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, left);
-    // s1 settles (Pip loses): escrow released, balance 0, but s2 still holds 5 -> stays
+    let s2 = start(&mut c, ALICE, 205); // < entry: retires now, a rookie plays instead
+    assert_ne!(c.slots[2], pip, "retired at start");
+    assert_ne!(s2.roster[2].account, pip);
+    assert_eq!(c.get_fighter(pip.clone()).unwrap().status, "retired");
+    // its escrowed entry still settles normally (Pip appears in s1's records)
     settle(&mut c, s1.match_id, 4, None, 210);
-    assert_eq!(c.slots[2], pip);
-    // s2 settles: nothing left anywhere -> retires
-    settle(&mut c, s2.match_id, 4, None, 220);
-    assert_ne!(c.slots[2], pip);
     assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, 0);
+    assert_eq!(c.load_fighter(&pip).unwrap().record.matches, 4);
     assert_supply(&c);
 }
 
@@ -508,11 +515,15 @@ fn storage_deposit_covers_a_player_and_a_pending_match() {
     c.storage_deposit(Some(acc(who)), None);
     let s = start(&mut c, who, 301);
     let id_len = 4 + who.len();
-    let p = borsh::to_vec(&VPlayer::V1(c.get_player(acc(who)).unwrap())).unwrap().len();
-    let m = borsh::to_vec(&VMatch::V1(c.get_match(s.match_id).unwrap())).unwrap().len();
-    let used = rec(1 + id_len, p) + rec(1 + 8, m) + rec(1 + id_len, 16);
+    let p = borsh::to_vec(&VPlayer::V2(c.get_player(acc(who)).unwrap())).unwrap().len();
+    let m = borsh::to_vec(&VMatch::V2(c.get_match(s.match_id).unwrap())).unwrap().len();
+    // + what a real player can add on top: XP, and 3 sponsorships (one pool entry each + their list)
+    let bot_id = 4 + "yarrow-1234.royale.br-7e8492.testnet".len();
+    let entry = borsh::to_vec(&crate::SponsorEntry { sponsor: acc(who), shares: U128(u128::MAX), staked: U128(u128::MAX), earned: U128(u128::MAX), since_matches: 0 }).unwrap().len();
+    let extra = rec(1 + id_len, 8) + 3 * entry + rec(1 + id_len, 4 + 3 * bot_id);
+    let used = rec(1 + id_len, p) + rec(1 + 8, m) + rec(1 + id_len, 16) + extra;
     let cost = env::storage_byte_cost().as_yoctonear() * used as u128;
-    println!("player {p} B + pending match {m} B + ft account: {used} bytes = {cost} yocto (deposit {})", STORAGE_DEPOSIT.as_yoctonear());
+    println!("player {p} B + pending match {m} B + ft account + xp + 3 sponsorships ({extra} B): {used} bytes = {cost} yocto (deposit {})", STORAGE_DEPOSIT.as_yoctonear());
     assert!(cost < STORAGE_DEPOSIT.as_yoctonear(), "{used} bytes");
 }
 
@@ -581,4 +592,327 @@ fn the_house_reinvests_above_its_floor_and_mints_below_it() {
     assert_eq!(r.minted.0, POT_TOP_UP);
     assert_eq!(c.token.total_supply, supply1 + POT_TOP_UP - r.burned.0);
     assert_supply(&c);
+}
+
+// ---------------------------------------------------------------- T3: sponsorship, progression, history
+
+fn grant(c: &mut Contract, who: &str, amount: u128) {
+    let house = c.house.clone();
+    c.move_tokens(&house, &acc(who), amount, "test");
+}
+
+fn sponsor(c: &mut Contract, who: &str, bot: &AccountId, amount: u128, h: u64) -> crate::SponsorshipView {
+    ctx(who, h, NearToken::from_yoctonear(0));
+    c.sponsor(bot.clone(), U128(amount))
+}
+
+/// sponsors' value + the bot's own part == bankroll (nothing created or lost by the share math)
+fn assert_pool_consistent(c: &Contract, bot: &AccountId) {
+    if let Some(pool) = c.sponsors.get(bot) {
+        let s: u128 = pool.entries.iter().map(|e| e.shares.0).sum();
+        assert!(s <= pool.total_shares.0);
+    }
+}
+
+#[test]
+fn a_sponsor_profits_from_a_winning_bot() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let camper = c.slots[1].clone(); // idx 2
+    let v = sponsor(&mut c, ALICE, &camper, 20 * ONE, 150);
+    assert_eq!(v.staked.0, 20 * ONE);
+    assert_eq!(bal(&c, ALICE), 80 * ONE);
+    assert_eq!(c.balance(&camper), STARTER + 20 * ONE, "the stake funds the bot's bankroll");
+    assert_eq!(c.get_market()[1].sponsors, 1);
+    let mut h = 200;
+    let mut earned_seen = 0;
+    for i in 0..6 {
+        let s = start(&mut c, GUEST, h);
+        let r = settle(&mut c, s.match_id, if i % 2 == 0 { 2 } else { 5 }, None, h + 5);
+        h += 10;
+        if r.winner == Some(2) {
+            let now = c.get_sponsorships(acc(ALICE))[0].earned.0;
+            assert!(now > earned_seen, "a win pays a dividend");
+            earned_seen = now;
+        }
+        assert_pool_consistent(&c, &camper);
+        assert_supply(&c);
+    }
+    let v = &c.get_sponsorships(acc(ALICE))[0];
+    assert_eq!(v.cooldown_left, 0);
+    // cash received so far + what the stake is worth now beats the stake
+    assert!(v.earned.0 + v.value.0 > v.staked.0, "{} + {} > {}", v.earned.0, v.value.0, v.staked.0);
+    let before = bal(&c, ALICE);
+    ctx(ALICE, h, NearToken::from_yoctonear(0));
+    let back = c.unsponsor(camper.clone());
+    assert_eq!(bal(&c, ALICE), before + back.0);
+    assert!(bal(&c, ALICE) > 100 * ONE, "the sponsor ended up with more than they started with");
+    assert!(c.get_sponsorships(acc(ALICE)).is_empty());
+    assert!(c.get_history(camper.clone()).iter().any(|e| e.kind == "dividend"));
+    assert_supply(&c);
+}
+
+#[test]
+fn a_sponsor_loses_when_the_bot_retires_broke() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let coward = c.slots[4].clone(); // idx 5, never wins here
+    sponsor(&mut c, ALICE, &coward, 30 * ONE, 150);
+    let mut h = 200;
+    for _ in 0..60 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 2, None, h + 5);
+        h += 10;
+        if c.slots[4] != coward {
+            break;
+        }
+    }
+    assert_ne!(c.slots[4], coward, "the coward went broke");
+    assert!(c.get_sponsorships(acc(ALICE)).is_empty(), "the pool closed");
+    assert!(c.sponsors.get(&coward).is_none());
+    assert!(bal(&c, ALICE) < 100 * ONE, "the stake is gone: {}", bal(&c, ALICE));
+    assert!(c.get_history(coward.clone()).iter().any(|e| e.kind == "retired"));
+    assert_supply(&c);
+}
+
+#[test]
+fn sponsorship_rules() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = c.slots[0].clone();
+    let fails = |c: &mut Contract, who: &str, bot: &AccountId, amount: u128| {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| sponsor(c, who, bot, amount, 150))).is_err()
+    };
+    assert!(fails(&mut c, GUEST, &bot, 10 * ONE), "guests can't sponsor");
+    assert!(fails(&mut c, ALICE, &bot, ONE), "minimum stake");
+    assert!(fails(&mut c, ALICE, &bot, 50 * ONE), "30% cap: 50 into a 100 bankroll would be 33%");
+    assert_eq!(c.get_market()[0].capacity.0 / ONE, 42, "cap room = 100 * 0.3 / 0.7");
+    assert!(fails(&mut c, ALICE, &acc("nobody.royale.test"), 10 * ONE), "only active fighters");
+    sponsor(&mut c, ALICE, &bot, 40 * ONE, 150);
+    // cooldown
+    ctx(ALICE, 160, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.unsponsor(bot.clone()))).is_err(), "cooldown");
+    // at most 3 bots per player
+    let (b1, b2, b3) = (c.slots[1].clone(), c.slots[2].clone(), c.slots[3].clone());
+    sponsor(&mut c, ALICE, &b1, 10 * ONE, 150);
+    sponsor(&mut c, ALICE, &b2, 10 * ONE, 150);
+    assert!(fails(&mut c, ALICE, &b3, 10 * ONE), "max 3 bots");
+    assert_eq!(c.get_sponsorships(acc(ALICE)).len(), 3);
+    assert_supply(&c);
+}
+
+#[test]
+fn xp_progression_and_level_upgrades_in_the_roster() {
+    let mut c = setup();
+    let s = start(&mut c, GUEST, 200);
+    assert_eq!((s.player_level, s.player_upgrades.clone()), (1, Upgrades::default()));
+    // guest wins with 3 kills: 100 + 45
+    settle(&mut c, s.match_id, 0, None, 210);
+    let p = c.get_progress(acc(GUEST));
+    assert_eq!((p.xp, p.level, p.next_level_xp), (145, 2, Some(200)));
+    // level 2 -> skin 10, still base weapon
+    let s = start(&mut c, GUEST, 220);
+    assert_eq!(s.player_level, 2);
+    assert_eq!(s.player_upgrades, Upgrades { weapon_tier: 0, armor: 0, skin: 10 });
+    assert_eq!(c.get_match(s.match_id).unwrap().player_upgrades.skin, 10);
+    // a high-level player brings weapon tier 2 + armor 1 (never above the best bot)
+    c.xp.insert(acc(ALICE), 2_000);
+    let s = start(&mut c, ALICE, 230);
+    assert_eq!((s.player_level, s.player_upgrades.clone()), (10, Upgrades { weapon_tier: 2, armor: 1, skin: 14 }));
+}
+
+#[test]
+fn history_is_a_bounded_ring() {
+    let mut c = setup();
+    let ox = c.slots[1].clone();
+    let mut h = 200;
+    for _ in 0..30 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 2, None, h + 5);
+        h += 10;
+    }
+    let hist = c.get_history(ox.clone());
+    assert_eq!(hist.len(), crate::market::HISTORY_LEN);
+    assert!(hist[0].match_id.0 >= hist[hist.len() - 1].match_id.0, "newest first");
+    assert!(hist.iter().any(|e| e.kind == "win" && e.detail.starts_with("1:")));
+    let all_upgrades = c.history.get(&ox).unwrap().iter().filter(|e| e.kind == "upgrade").count();
+    let _ = all_upgrades;
+    let top = c.get_top("bots".into(), "wins".into(), Some(3));
+    assert_eq!(top[0].account, ox);
+    let players = c.get_top("players".into(), "earnings".into(), None);
+    assert_eq!(players[0].account.as_str(), GUEST);
+}
+
+#[test]
+fn duplicate_names_are_renamed() {
+    let mut c = setup();
+    let a = c.slots[2].clone();
+    let mut f = c.load_fighter(&a).unwrap();
+    f.name = c.slot_fighter(5).name;
+    c.save_fighter(f);
+    c.dedupe_names();
+    let mut names: Vec<String> = c.get_fighters().into_iter().map(|f| f.fighter.name.to_ascii_lowercase()).collect();
+    names.sort();
+    names.dedup();
+    assert_eq!(names.len(), BOTS);
+}
+
+#[test]
+fn migrate_from_state_v1() {
+    let mut c = setup();
+    c.fighters.flush();
+    c.players.flush();
+    c.matches.flush();
+    let fighter0 = c.slots[0].clone();
+    let supply = c.token.total_supply;
+    let v1 = ContractV1 {
+        version: 1,
+        owner: c.owner,
+        server: c.server,
+        guest_parent: c.guest_parent,
+        house: c.house,
+        token: c.token,
+        fighters: c.fighters,
+        slots: c.slots,
+        retired: c.retired,
+        players: c.players,
+        matches: c.matches,
+        recent: c.recent,
+        pending_free: c.pending_free,
+        max_free: c.max_free,
+        pending_paid: c.pending_paid,
+        leaderboard: c.leaderboard,
+        next_match_id: c.next_match_id,
+        matches_settled: c.matches_settled,
+        rookies: c.rookies,
+        total_minted: c.total_minted,
+        total_burned: c.total_burned,
+    };
+    env::state_write(&v1);
+    ctx(ME, 400, NearToken::from_yoctonear(0));
+    let m = Contract::migrate();
+    assert_eq!(m.version, STATE_VERSION);
+    assert_eq!(m.slots[0], fighter0);
+    assert_eq!(m.token.total_supply, supply);
+    assert!(m.get_market().iter().all(|e| e.sponsors == 0));
+}
+
+// ---------------------------------------------------------------- review fixes (sponsorship)
+
+#[test]
+fn unregister_needs_closed_sponsorships_and_cleans_xp() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 30 * ONE);
+    let bot = c.slots[0].clone();
+    sponsor(&mut c, ALICE, &bot, 10 * ONE, 150);
+    c.xp.insert(acc(ALICE), 500);
+    ctx(ALICE, 160, NearToken::from_yoctonear(1));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.storage_unregister(Some(true))));
+    assert!(r.is_err(), "open sponsorship blocks unregister");
+    // the bot plays its cooldown, alice withdraws, then leaves cleanly
+    let mut h = 200;
+    for _ in 0..5 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 3, None, h + 5);
+        h += 10;
+    }
+    ctx(ALICE, h, NearToken::from_yoctonear(0));
+    c.unsponsor(bot);
+    ctx(ALICE, h + 1, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    assert!(c.xp.get(&acc(ALICE)).is_none(), "xp removed");
+    assert!(c.sponsoring.get(&acc(ALICE)).is_none());
+    assert!(c.load_player(&acc(ALICE)).is_none());
+}
+
+#[test]
+fn no_sponsoring_or_withdrawing_while_the_bot_is_in_a_match() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[0].clone();
+    let s = start(&mut c, GUEST, 200); // every bot now has an entry in escrow
+    ctx(ALICE, 201, NearToken::from_yoctonear(0));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.sponsor(bot.clone(), U128(10 * ONE))));
+    assert!(r.is_err(), "no front-running a pending match");
+    settle(&mut c, s.match_id, 3, None, 210);
+    sponsor(&mut c, ALICE, &bot, 10 * ONE, 211); // fine once settled
+    let mut h = 220;
+    for _ in 0..5 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 3, None, h + 5);
+        h += 10;
+    }
+    start(&mut c, GUEST, h); // pending again
+    ctx(ALICE, h + 2, NearToken::from_yoctonear(0));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.unsponsor(bot.clone())));
+    assert!(r.is_err(), "no withdrawing while a match is pending");
+}
+
+#[test]
+fn a_pool_closes_only_after_the_retired_bots_escrow_comes_back() {
+    let mut c = setup();
+    ctx(RELAY, 101, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("g-2222.relay.test")), None);
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[2].clone(); // idx 3
+    sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
+    // drain the bot (test only) so that after one entry it can't pay the next
+    let house = c.house.clone();
+    let keep = ENTRY_FEE + ENTRY_FEE / 2;
+    let b = c.balance(&bot);
+    c.move_tokens(&bot, &house, b - keep, "test");
+    let mut f = c.load_fighter(&bot).unwrap();
+    f.record.matches = 3;
+    c.save_fighter(f);
+    let s1 = start(&mut c, GUEST, 200); // pays an entry: escrow > 0, wallet < entry
+    let _s2 = start(&mut c, "g-2222.relay.test", 201); // can't pay: retires, but its s1 entry is pending
+    assert_ne!(c.slots[2], bot, "retired at start");
+    assert!(c.sponsors.get(&bot).is_some(), "pool still open while s1 holds its entry");
+    let alice0 = bal(&c, ALICE);
+    // s1 settles and the retired bot WINS it: the prize, dividend and closing all reach the sponsor
+    let r = settle(&mut c, s1.match_id, 3, None, 210);
+    assert_eq!(r.prize_to, bot);
+    assert!(c.sponsors.get(&bot).is_none(), "closed after the escrow came back");
+    assert!(c.get_sponsorships(acc(ALICE)).is_empty());
+    let got = bal(&c, ALICE) - alice0;
+    assert!(got > r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000, "dividend + share of the final bankroll: {got}");
+    assert_supply(&c);
+}
+
+#[test]
+fn a_subsidised_deposit_is_refunded_to_its_payer_not_the_account() {
+    // review (HIGH): register via the relayer -> unregister -> the 0.02 NEAR must go back to the relayer
+    let mut c = setup();
+    ctx(RELAY, 300, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("bob.test")), None);
+    assert_eq!(c.get_player(acc("bob.test")).unwrap().deposit_payer, Some(acc(RELAY)));
+    ctx("bob.test", 301, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).expect("a refund");
+    assert_eq!(refund.receiver_id, acc(RELAY), "refund goes to the payer");
+    // a self-paid registration refunds the account itself
+    ctx("carol.test", 302, STORAGE_DEPOSIT);
+    c.storage_deposit(None, None);
+    assert_eq!(c.get_player(acc("carol.test")).unwrap().deposit_payer, None);
+    ctx("carol.test", 303, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
+    assert_eq!(refund.receiver_id, acc("carol.test"));
+}
+
+#[test]
+fn a_migrated_v1_non_guest_refunds_the_relayer() {
+    // review: V1 records don't know who paid -> fail closed to the relayer
+    let mut c = setup();
+    let old = PlayerV1 { guest: false, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), ..Default::default() };
+    c.players.insert(acc("old.test"), VPlayer::V1(old));
+    c.ensure_registered(&acc("old.test"));
+    assert_eq!(c.get_player(acc("old.test")).unwrap().deposit_payer, Some(acc(RELAY)));
+    ctx("old.test", 300, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
+    assert_eq!(refund.receiver_id, acc(RELAY));
 }

@@ -14,3 +14,8 @@ export function inputLogHash(inputs: MatchRecord["inputs"]): string {
 export function settleMessage(matchId: string, logHash: string): Uint8Array {
   return sha256(utf8(`bountyroyale:settle:${matchId}:${logHash}`));
 }
+
+/** What a signed-in real account signs (raw ed25519 with its new function-call key) to get its storage prepaid. */
+export function registerMessage(accountId: string): Uint8Array {
+  return sha256(utf8(`bountyroyale:register:${accountId}`));
+}

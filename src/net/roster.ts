@@ -26,6 +26,9 @@ export type ChainMatch = {
   start_block?: string;
   pot?: string;
   player_paid?: string;
+  /** fighter idx 0's upgrades from the player's level (contract state V2); absent on old matches */
+  player_upgrades?: ChainUpgrades;
+  player_level?: number;
 };
 
 const PERSONALITIES: readonly Personality[] = ["aggressive", "camper", "sniper", "looter", "coward", "balanced"];
@@ -41,8 +44,10 @@ export function matchConfigFromChain(m: ChainMatch, you: YouOptions = {}): Match
     name: you.name ?? "You",
     personality: "balanced",
     human: true,
-    // player progression is T3; until then the human always plays with base stats
-    upgrades: { weaponTier: 0, armor: 0, skin: you.skin ?? 0 },
+    // the level's upgrades come from the chain (progression); old matches: base stats + chosen skin
+    upgrades: m.player_upgrades
+      ? { weaponTier: m.player_upgrades.weaponTier, armor: m.player_upgrades.armor, skin: m.player_upgrades.skin }
+      : { weaponTier: 0, armor: 0, skin: you.skin ?? 0 },
     bounty: false,
   };
   const bots: FighterSpec[] = [...m.roster]

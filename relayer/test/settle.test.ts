@@ -131,3 +131,32 @@ test("judge: replay mismatch carries a machine-readable code", () => {
   assert.equal(v.ok, false);
   assert.equal((v as { code?: string }).code, "replay_mismatch");
 });
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { Subsidies } from "../src/subsidies.ts";
+
+test("register -> unregister -> register: the relayer subsidises an account once, ever (persisted)", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "br-sub-")), "subsidised.json");
+  const a = new Subsidies(file, 100);
+  assert.deepEqual(a.take("eve.testnet"), { ok: true });
+  // ... eve calls storage_unregister: the contract refunds the deposit to the RELAYER (payer), then
+  // eve asks again, even after a relayer restart:
+  assert.deepEqual(a.take("eve.testnet"), { ok: false, reason: "already_subsidised" });
+  const b = new Subsidies(file, 100);
+  assert.deepEqual(b.take("eve.testnet"), { ok: false, reason: "already_subsidised" });
+  // a failed deposit gives the reservation back
+  assert.deepEqual(b.take("dan.testnet"), { ok: true });
+  b.release("dan.testnet");
+  assert.deepEqual(b.take("dan.testnet"), { ok: true });
+});
+
+test("registration subsidies have an hourly budget", () => {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "br-sub-")), "s.json");
+  const s = new Subsidies(file, 2);
+  assert.equal(s.take("a.t", 0).ok, true);
+  assert.equal(s.take("b.t", 1).ok, true);
+  assert.deepEqual(s.take("c.t", 2), { ok: false, reason: "budget" });
+  assert.equal(s.take("c.t", 3_600_001).ok, true);
+});

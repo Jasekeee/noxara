@@ -5,7 +5,7 @@ use near_workspaces::{network::Sandbox, Account, Contract, Worker};
 use serde_json::{json, Value};
 
 const WASM: &str = "target/near/royale.wasm";
-use royale::{BOUNTY_BPS, ENTRY_FEE as E, ONE, POT_TOP_UP as T, RESERVE, STARTER, WEAPON_PRICES};
+use royale::{entry_fee_for, BOUNTY_BPS, ENTRY_FEE as E, ONE, POT_TOP_UP as T, RESERVE, STARTER, WEAPON_PRICES};
 
 struct World {
     w: Worker<Sandbox>,
@@ -118,7 +118,7 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
     assert_eq!(s["guest"], true);
     assert_eq!(s["roster"].as_array().unwrap().len(), 9);
     assert_eq!(s["roster"][0]["upgrades"]["weaponTier"], 0);
-    assert_eq!(ft(c, c.id().as_str()).await?, 9 * E, "9 entries escrowed");
+    assert_eq!(ft(c, c.id().as_str()).await?, 9 * entry_fee_for(STARTER), "9 entries escrowed");
     let id = s["match_id"].clone();
 
     // only the server may settle
@@ -131,7 +131,7 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
     println!("settle_match (guest won): {gas_settle} Tgas");
     assert_eq!(r["prize_to"], house.as_str(), "a guest's pot goes to the house");
     assert_eq!(ft(c, g.id().as_str()).await?, 0, "guests earn zero");
-    assert_eq!(ft(c, house.as_str()).await?, house0 + (9 * E + T) * 98 / 100 - T, "the house paid the top-up and got the pot");
+    assert_eq!(ft(c, house.as_str()).await?, house0 + (9 * entry_fee_for(STARTER) + T) * 98 / 100 - T, "the house paid the top-up and got the pot");
     let p: Value = c.view("get_player").args_json(json!({"account_id": g.id()})).await?.json()?;
     assert_eq!(p["wins"], 1);
     assert_eq!(p["pending"], Value::Null);
@@ -174,18 +174,21 @@ async fn bounty_retirement_and_rookies() -> anyhow::Result<()> {
     let bounty = before * BOUNTY_BPS / 10_000;
     assert_eq!(r["bounty_amount"], bounty.to_string());
     assert_eq!(ft(c, &carrier).await?, before - bounty);
-    let k = STARTER - E + bounty;
+    let k = STARTER - entry_fee_for(STARTER) + bounty;
     let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
     assert_eq!(ft(c, &killer).await?, k, "the killer may spend its windfall on a weapon right away");
 
     // Moss (idx 5) wins everything; the others lose 10 per match until they're broke
     let mut gas_max = 0;
     let pip = s["roster"][2]["account"].as_str().unwrap().to_string();
-    for _ in 1..(STARTER / E) {
+    for _ in 1..40 {
         let (s, _) = start(&g, c).await?;
         let (r, gas) = settle(&wd.server, c, &s["match_id"], 5, None).await?;
         r.map_err(anyhow::Error::msg)?;
         gas_max = gas_max.max(gas);
+        if fighters(c).await?[2]["account"] != pip.as_str() {
+            break;
+        }
     }
     println!("settle_match with retirements + rookies: up to {gas_max} Tgas");
     let fs = fighters(c).await?;
@@ -290,5 +293,124 @@ async fn full_free_pool_never_blocks_a_paying_player() -> anyhow::Result<()> {
     let (r, _) = settle(&wd.server, c, &json!("1"), 3, None).await?;
     r.map_err(anyhow::Error::msg)?;
     start(&g3, c).await?;
+    Ok(())
+}
+
+async fn registered_real(wd: &World, name: &str, grant: u128) -> anyhow::Result<Account> {
+    let a = wd.w.root_account()?.create_subaccount(name).initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    a.call(wd.c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    wd.owner.call(wd.c.id(), "house_grant").args_json(json!({"account_id": a.id(), "amount": grant.to_string()})).transact().await?.into_result()?;
+    Ok(a)
+}
+
+#[tokio::test]
+async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    let g = guest(&wd, "g-5p0n").await?;
+    let alice = registered_real(&wd, "alice", 100 * ONE).await?;
+    let bob = registered_real(&wd, "bob", 100 * ONE).await?;
+    let fs = fighters(c).await?;
+    let winner = fs[1]["account"].as_str().unwrap().to_string(); // idx 2 wins every match
+    let loser = fs[4]["account"].as_str().unwrap().to_string(); // idx 5 never wins
+    for (who, bot) in [(&alice, &winner), (&bob, &loser)] {
+        let r = who.call(c.id(), "sponsor").args_json(json!({"bot": bot, "amount": (25 * ONE).to_string()})).gas(Gas::from_tgas(50)).transact().await?;
+        println!("sponsor: {} Tgas", r.total_gas_burnt.as_tgas());
+        r.into_result()?;
+    }
+    // a guest can't
+    let r = g.call(c.id(), "sponsor").args_json(json!({"bot": winner, "amount": (10 * ONE).to_string()})).transact().await?;
+    assert!(r.into_result().is_err());
+    let market: Vec<Value> = c.view("get_market").await?.json()?;
+    assert_eq!(market[1]["sponsors"], 1);
+    // play until the loser retires broke
+    let mut n = 0;
+    loop {
+        let (s, _) = start(&g, c).await?;
+        settle(&wd.server, c, &s["match_id"], 2, None).await?.0.map_err(anyhow::Error::msg)?;
+        n += 1;
+        if fighters(c).await?[4]["account"] != loser.as_str() || n > 40 {
+            break;
+        }
+    }
+    println!("loser retired after {n} matches");
+    // alice: dividends from every win, then withdraws after the cooldown
+    let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    let earned: u128 = sp[0]["earned"].as_str().unwrap().parse()?;
+    assert!(earned > 0, "dividends paid");
+    assert_eq!(sp[0]["cooldown_left"], 0);
+    let r = alice.call(c.id(), "unsponsor").args_json(json!({"bot": winner})).gas(Gas::from_tgas(50)).transact().await?;
+    let back: String = r.into_result()?.json()?;
+    let alice_end = ft(c, alice.id().as_str()).await?;
+    println!("alice staked 25, earned {}, got back {} -> {} total", earned / ONE, back.parse::<u128>()? / ONE, alice_end / ONE);
+    assert!(alice_end > 100 * ONE, "backing a winner paid off");
+    // bob: the bot retired broke -> the pool closed, the stake is (mostly) gone
+    let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": bob.id()})).await?.json()?;
+    assert!(sp.is_empty());
+    let bob_end = ft(c, bob.id().as_str()).await?;
+    assert!(bob_end < 100 * ONE, "bob lost his stake: {}", bob_end / ONE);
+    let hist: Vec<Value> = c.view("get_history").args_json(json!({"account_id": loser})).await?.json()?;
+    assert_eq!(hist[0]["kind"], "retired");
+    // progression: the guest earned XP every match
+    let p: Value = c.view("get_progress").args_json(json!({"account_id": g.id()})).await?.json()?;
+    assert!(p["xp"].as_u64().unwrap() > 0 && p["level"].as_u64().unwrap() >= 2, "{p}");
+    let (s, _) = start(&g, c).await?;
+    assert_eq!(s["player_level"], p["level"]);
+    assert_eq!(s["player_upgrades"], p["upgrades"]);
+    let top: Vec<Value> = c.view("get_top").args_json(json!({"kind": "bots", "by": "wins"})).await?.json()?;
+    assert_eq!(top[0]["account"], winner.as_str());
+    Ok(())
+}
+
+#[tokio::test]
+async fn migrates_from_the_v1_contract() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    let root = w.root_account()?;
+    let mk = |n: &'static str| {
+        let root = root.clone();
+        async move { root.create_subaccount(n).initial_balance(NearToken::from_near(10)).transact().await.unwrap().into_result().unwrap() }
+    };
+    let (owner, server, relay, ca) = (mk("owner").await, mk("server").await, mk("relay").await, mk("royale").await);
+    let c = ca.deploy(&std::fs::read("tests/fixtures/royale_v1_eedaf34.wasm")?).await?.into_result()?;
+    c.call("new").args_json(json!({"owner": owner.id(), "server": server.id(), "guest_parent": relay.id()})).gas(Gas::from_tgas(100)).transact().await?.into_result()?;
+    let g = relay.create_subaccount("g-0ld").initial_balance(NearToken::from_millinear(500)).transact().await?.into_result()?;
+    relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    // a settled and a pending V1 match
+    let r: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
+    settle(&server, &c, &r["match_id"], 3, None).await?.0.map_err(anyhow::Error::msg)?;
+    let pending: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
+    let supply: String = c.view("ft_total_supply").await?.json()?;
+    // upgrade: new code + migrate
+    let r = ca.batch(c.id()).deploy(&std::fs::read(WASM)?).call(near_workspaces::operations::Function::new("migrate").gas(Gas::from_tgas(100))).transact().await?;
+    println!("deploy + migrate V1 -> V2: {} Tgas", r.total_gas_burnt.as_tgas());
+    r.into_result()?;
+    let cfg: Value = c.view("get_config").await?.json()?;
+    assert_eq!(cfg["version"], 2);
+    let supply2: String = c.view("ft_total_supply").await?.json()?;
+    assert_eq!(supply, supply2);
+    // the V1 pending match settles under V2 (player upgrades default to base)
+    let m: Value = c.view("get_match").args_json(json!({"match_id": pending["match_id"]})).await?.json()?;
+    assert_eq!(m["player_level"], 1);
+    settle(&server, &c, &pending["match_id"], 0, None).await?.0.map_err(anyhow::Error::msg)?;
+    let fs: Vec<Value> = c.view("get_fighters").await?.json()?;
+    assert_eq!(fs.len(), 9);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_relayer_paid_deposit_goes_back_to_the_relayer() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    let eve = wd.w.root_account()?.create_subaccount("eve").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let relay0 = wd.relay.view_account().await?.balance;
+    wd.relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": eve.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let eve0 = eve.view_account().await?.balance;
+    eve.call(c.id(), "storage_unregister").args_json(json!({"force": true})).deposit(NearToken::from_yoctonear(1)).transact().await?.into_result()?;
+    let eve1 = eve.view_account().await?.balance;
+    let relay1 = wd.relay.view_account().await?.balance;
+    assert!(eve1 < eve0, "eve gains nothing (pays only gas)");
+    // the relayer got its 0.02 back: net cost ≈ gas only
+    let spent = relay0.as_yoctonear() - relay1.as_yoctonear();
+    assert!(spent < NearToken::from_millinear(5).as_yoctonear(), "relayer spent {spent} yocto");
     Ok(())
 }

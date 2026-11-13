@@ -18,6 +18,8 @@ import { Chain } from "./chain.ts";
 import { signatureOk, settleSignatureOk, KeyOwners } from "./verify.ts";
 import { checkDelegate, isGuestAccount, RateLimiter, Budget, GUEST_PREFIX, type RelayPolicy } from "./policy.ts";
 import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
+import { registerMessage } from "./protocol.ts";
+import { Subsidies } from "./subsidies.ts";
 import type { ChainMatch } from "./roster.ts";
 import type { MatchRecord } from "../../src/sim/types.ts";
 
@@ -35,7 +37,7 @@ const serverId = process.env.SERVER_ACCOUNT_ID;
 const serverKey = process.env.SERVER_PRIVATE_KEY;
 const rpcUrl = env("NEAR_RPC", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 // methods anyone may have relayed / that a guest's function-call key may call
-const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match").split(",");
+const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match,sponsor,unsponsor").split(",");
 const GUEST_METHODS = env("GUEST_METHODS", "start_match,sweep_match").split(",");
 const TGAS = 1_000_000_000_000n;
 const policy: RelayPolicy = {
@@ -44,7 +46,7 @@ const policy: RelayPolicy = {
   allowedMethods: GAME_METHODS,
   maxGasPerAction: 100n * TGAS,
   maxActions: 1,
-  methodGas: { start_match: 100n * TGAS, sweep_match: 30n * TGAS },
+  methodGas: { start_match: 100n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS },
 };
 // Gas budgets (attached gas, an upper bound on what we pay): per sender and for everyone, per hour.
 const senderGas = new Budget(BigInt(env("GAS_PER_SENDER_PER_HOUR_TGAS", "3000")) * TGAS, 3_600_000);
@@ -64,6 +66,9 @@ const guestPerIp = new RateLimiter(Number(env("GUEST_PER_IP_PER_HOUR", "10")), 3
 const guestGlobal = new RateLimiter(Number(env("GUEST_GLOBAL_PER_HOUR", "200")), 3_600_000);
 const relayPerSender = new RateLimiter(Number(env("RELAY_PER_SENDER_PER_MIN", "20")), 60_000);
 const relayPerIp = new RateLimiter(Number(env("RELAY_PER_IP_PER_MIN", "60")), 60_000);
+const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10")), 3_600_000);
+// storage subsidies for signed-in real accounts: once per account ever, at most N per hour (N x 0.02 NEAR)
+const subsidies = new Subsidies(path.join(DATA_DIR, "../subsidised.json"), Number(env("REGISTER_GLOBAL_PER_HOUR", "30")));
 const settlePerIp = new RateLimiter(Number(env("SETTLE_PER_IP_PER_MIN", "20")), 60_000);
 const settling = new Set<string>();
 
@@ -197,6 +202,37 @@ const server = http.createServer(async (req, res) => {
       }
       if (r.failure) return send(res, 409, { tx: r.tx, error: r.failure, ms: Math.round(performance.now() - t0) }, origin);
       return send(res, 200, { tx: r.tx, value: r.value, guest: isGuestAccount(d.senderId, relayerId), ms: Math.round(performance.now() - t0) }, origin);
+    }
+    if (req.method === "POST" && req.url === "/api/register") {
+      // a real NEAR account that signed in (its wallet added our function-call key): the relayer
+      // prepays its NEP-145 storage once, after checking the key really belongs to the account
+      if (!registerPerIp.take(ipOf(req))) return send(res, 429, { error: "slow down", code: "rate_limited" }, origin);
+      const body = await readJson(req);
+      const accountId = String(body.accountId ?? "");
+      const publicKey = String(body.publicKey ?? "");
+      if (!/^[a-z0-9._-]{2,64}$/.test(accountId) || isGuestAccount(accountId, relayerId)) return send(res, 400, { error: "bad account", code: "bad_request" }, origin);
+      if (!settleSignatureOk(registerMessage(accountId), publicKey, String(body.signature ?? ""))) return send(res, 401, { error: "bad signature", code: "bad_signature" }, origin);
+      if (!(await owners.owns(accountId, publicKey))) return send(res, 401, { error: "this key is not on the account yet", code: "unknown_key" }, origin);
+      const sb = await chain.view<unknown>("storage_balance_of", { account_id: accountId });
+      if (sb) return send(res, 200, { accountId, registered: true, tx: null }, origin);
+      const sub = subsidies.take(accountId);
+      if (!sub.ok) {
+        return sub.reason === "already_subsidised"
+          ? send(res, 403, { error: "this account already used its free registration: register with your wallet (storage_deposit, 0.02 NEAR)", code: "already_subsidised" }, origin)
+          : send(res, 503, { error: "too many new accounts right now, try again later", code: "budget" }, origin);
+      }
+      let s;
+      try {
+        s = await chain.storageDeposit(accountId, GUEST_STORAGE);
+      } catch (e) {
+        subsidies.release(accountId);
+        throw e;
+      }
+      if (s.failure) {
+        subsidies.release(accountId);
+        return send(res, 500, { error: `storage: ${s.failure}`, code: "chain_refused" }, origin);
+      }
+      return send(res, 200, { accountId, registered: true, tx: s.tx, ms: Math.round(performance.now() - t0) }, origin);
     }
     if (req.method === "POST" && req.url === "/api/settle") {
       if (!serverId) return send(res, 503, { error: "settlement is not configured on this server" }, origin);

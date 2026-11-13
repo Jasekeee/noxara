@@ -7,7 +7,7 @@
 //! `storage_deposit({account_id: <guest>})` right after creating the guest account. The contract
 //! itself only pays for bounded data: the 9 slots, the last `RECENT_MATCHES` settled matches, the
 //! leaderboard and one record per retired bot.
-use crate::{Contract, ContractExt, PlayerV1, STORAGE_DEPOSIT};
+use crate::{Contract, ContractExt, PlayerV2, STORAGE_DEPOSIT};
 use near_contract_standards::fungible_token::core::FungibleTokenCore;
 use near_contract_standards::fungible_token::events::FtBurn;
 use near_contract_standards::fungible_token::metadata::{FungibleTokenMetadata, FungibleTokenMetadataProvider, FT_METADATA_SPEC};
@@ -72,7 +72,9 @@ impl StorageManagement for Contract {
         }
         require!(amount >= STORAGE_DEPOSIT, format!("attach at least {} yoctoNEAR", STORAGE_DEPOSIT.as_yoctonear()));
         let guest = self.is_guest(&account);
-        self.save_player(&account, PlayerV1 { guest, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), ..Default::default() });
+        // a deposit paid by someone else (the relayer) is refunded to THEM on unregister, never to the account
+        let deposit_payer = (payer != account).then(|| payer.clone());
+        self.save_player(&account, PlayerV2 { guest, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), deposit_payer, ..Default::default() });
         self.ensure_registered(&account);
         let refund = amount.saturating_sub(STORAGE_DEPOSIT);
         if !refund.is_zero() {
@@ -91,7 +93,7 @@ impl StorageManagement for Contract {
         paid_balance()
     }
 
-    /// Leave: refunds the storage deposit. Needs no pending match; a non-zero $BOUNTY balance is
+    /// Leave: refunds the storage deposit to whoever paid it (the relayer for subsidised accounts). Needs no pending match; a non-zero $BOUNTY balance is
     /// burned only with `force: true`.
     #[payable]
     fn storage_unregister(&mut self, force: Option<bool>) -> bool {
@@ -99,12 +101,16 @@ impl StorageManagement for Contract {
         let id = env::predecessor_account_id();
         let Some(p) = self.load_player(&id) else { return false };
         require!(p.pending.is_none(), "finish or abandon your match first");
+        require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first");
         let bal = self.balance(&id);
         require!(bal == 0 || force.unwrap_or(false), "non-zero $BOUNTY balance: pass force=true to burn it");
         self.burn(&id, bal, "unregistered");
         self.players.remove(&id);
         self.token.accounts.remove(&id);
-        let _ = Promise::new(id).transfer(NearToken::from_yoctonear(p.storage_paid.0));
+        self.xp.remove(&id);
+        self.history.remove(&id);
+        let refund_to = p.deposit_payer.clone().unwrap_or(id);
+        let _ = Promise::new(refund_to).transfer(NearToken::from_yoctonear(p.storage_paid.0));
         true
     }
 
