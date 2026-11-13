@@ -381,6 +381,7 @@ async function startMatch() {
   starting = true;
   endOpen = false;
   iClaimedBounty = false;
+  if (!fighters.length && SEED_PARAM === null) await withTimeout(refreshLobby(), 4000);
   if (fighters.length) {
     saveSnap(fighters);
     prevSnap = loadSnap();
