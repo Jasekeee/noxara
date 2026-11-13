@@ -79,6 +79,11 @@ pub const MAX_PENDING_FREE: u32 = 24;
 pub const MAX_PENDING_PAID: u32 = 1_000;
 /// Most the owner can hand out from the house treasury per `house_grant` call.
 pub const MAX_GRANT: u128 = 100 * ONE;
+/// Owner decision: a real NEAR account's first $BOUNTY is a one-time welcome stake from the house.
+pub const WELCOME_STAKE: u128 = 30 * ONE;
+/// Abuse brake: at most this many welcome stakes per UTC day.
+pub const WELCOME_DAILY_CAP: u32 = 50;
+const WELCOME_DAY_KEY: &[u8] = b"welcome_day";
 pub const RECENT_MATCHES: usize = 50;
 pub const RETIRED_SHOWN: usize = 30;
 pub const LEADERBOARD_SIZE: usize = 50;
@@ -123,6 +128,8 @@ enum Key {
     Sponsoring,
     History,
     Xp,
+    // no state field: opened on demand, so adding it needed no state migration
+    Welcomed,
 }
 
 #[near(serializers = [borsh, json])]
@@ -578,6 +585,10 @@ impl Contract {
             p = self.load_player(&id).unwrap();
         }
         let guest = self.is_guest(&id);
+        // a real account that registered while the house was low / the day was full gets its welcome now
+        if !guest {
+            self.welcome(&id);
+        }
         let player_level = progression::level_for_xp(self.xp.get(&id).copied().unwrap_or(0) as i64);
         // free and paid matches have separate pools: free players can never crowd out paying ones
         let will_pay = !guest && self.balance(&id) >= ENTRY_FEE;
@@ -1005,6 +1016,11 @@ impl Contract {
         }
     }
 
+    /// Did this account already receive its one-time welcome stake?
+    pub fn got_welcome(&self, account_id: AccountId) -> bool {
+        self.is_welcomed(&account_id)
+    }
+
     pub fn is_guest_account(&self, account_id: AccountId) -> bool {
         self.is_guest(&account_id)
     }
@@ -1295,6 +1311,40 @@ impl Contract {
         event("fighter_born", &near_sdk::serde_json::json!({ "account": account, "name": name, "personality": personality, "slot": slot, "generation": f.generation, "replaces": prev.account, "grant": U128(grant) }));
         self.push_history(&account, match_id, "rookie", grant, &prev.name);
         f
+    }
+
+    /// The one-time welcome stake (real accounts only): paid by the house while it stays above its
+    /// floor, at most WELCOME_DAILY_CAP per UTC day, recorded forever (survives unregister).
+    /// Returns what was paid (0 if not eligible now).
+    pub(crate) fn welcome(&mut self, account: &AccountId) -> u128 {
+        if self.is_guest(account) || self.fighters.get(account).is_some() || account == &self.house || account == &env::current_account_id() {
+            return 0;
+        }
+        let mut welcomed = near_sdk::store::LookupSet::<AccountId>::new(Key::Welcomed);
+        if welcomed.contains(account) {
+            return 0;
+        }
+        let house = self.house.clone();
+        if self.balance(&house) < HOUSE_FLOOR + WELCOME_STAKE {
+            return 0;
+        }
+        let day = env::block_timestamp_ms() / 86_400_000;
+        let (d, n) = env::storage_read(WELCOME_DAY_KEY)
+            .map(|v| (u64::from_le_bytes(v[0..8].try_into().unwrap()), u32::from_le_bytes(v[8..12].try_into().unwrap())))
+            .unwrap_or((day, 0));
+        let n = if d == day { n } else { 0 };
+        if n >= WELCOME_DAILY_CAP {
+            return 0;
+        }
+        env::storage_write(WELCOME_DAY_KEY, &[&day.to_le_bytes()[..], &(n + 1).to_le_bytes()].concat());
+        welcomed.insert(account.clone());
+        self.move_tokens(&house, account, WELCOME_STAKE, "welcome stake");
+        event("welcome", &near_sdk::serde_json::json!({ "account": account, "amount": U128(WELCOME_STAKE), "today": n + 1 }));
+        WELCOME_STAKE
+    }
+
+    pub(crate) fn is_welcomed(&self, account: &AccountId) -> bool {
+        near_sdk::store::LookupSet::<AccountId>::new(Key::Welcomed).contains(account)
     }
 
     /// Legacy fix (migration to V2): active fighters with the same display name get unused names.

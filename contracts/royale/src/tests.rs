@@ -38,6 +38,10 @@ fn setup() -> Contract {
         ctx(RELAY, 101, STORAGE_DEPOSIT);
         c.storage_deposit(Some(acc(who)), None);
     }
+    // most tests want Alice at 0 $BOUNTY: hand her welcome stake back (the welcome tests use fresh accounts)
+    assert_eq!(c.balance(&acc(ALICE)), WELCOME_STAKE, "a real account's registration brings the welcome stake");
+    let house = c.house.clone();
+    c.move_tokens(&acc(ALICE), &house, WELCOME_STAKE, "test");
     c
 }
 
@@ -887,7 +891,7 @@ fn a_subsidised_deposit_is_refunded_to_its_payer_not_the_account() {
     c.storage_deposit(Some(acc("bob.test")), None);
     assert_eq!(c.get_player(acc("bob.test")).unwrap().deposit_payer, Some(acc(RELAY)));
     ctx("bob.test", 301, NearToken::from_yoctonear(1));
-    assert!(c.storage_unregister(None));
+    assert!(c.storage_unregister(Some(true)), "burns the welcome stake");
     let receipts = near_sdk::test_utils::get_created_receipts();
     let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).expect("a refund");
     assert_eq!(refund.receiver_id, acc(RELAY), "refund goes to the payer");
@@ -896,7 +900,7 @@ fn a_subsidised_deposit_is_refunded_to_its_payer_not_the_account() {
     c.storage_deposit(None, None);
     assert_eq!(c.get_player(acc("carol.test")).unwrap().deposit_payer, None);
     ctx("carol.test", 303, NearToken::from_yoctonear(1));
-    assert!(c.storage_unregister(None));
+    assert!(c.storage_unregister(Some(true)));
     let receipts = near_sdk::test_utils::get_created_receipts();
     let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
     assert_eq!(refund.receiver_id, acc("carol.test"));
@@ -915,4 +919,79 @@ fn a_migrated_v1_non_guest_refunds_the_relayer() {
     let receipts = near_sdk::test_utils::get_created_receipts();
     let refund = receipts.iter().rev().find(|r| r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { .. }))).unwrap();
     assert_eq!(refund.receiver_id, acc(RELAY));
+}
+
+// ---------------------------------------------------------------- welcome stake (owner decision)
+
+fn register_by_relay(c: &mut Contract, who: &str, day: u64) {
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(RELAY)).signer_account_id(acc(RELAY)).block_height(500).attached_deposit(STORAGE_DEPOSIT).block_timestamp(day * 86_400_000_000_000 + 1);
+    testing_env!(b.build());
+    c.storage_deposit(Some(acc(who)), None);
+}
+
+#[test]
+fn welcome_stake_once_per_real_account_never_guests() {
+    let mut c = setup();
+    let house0 = c.balance(&c.house);
+    register_by_relay(&mut c, "dave.testnet", 1);
+    assert_eq!(bal(&c, "dave.testnet"), WELCOME_STAKE);
+    assert!(c.got_welcome(acc("dave.testnet")));
+    assert_eq!(c.balance(&c.house), house0 - WELCOME_STAKE, "paid by the house, nothing minted");
+    // guests: never
+    register_by_relay(&mut c, "g-77.relay.test", 1);
+    assert_eq!(bal(&c, "g-77.relay.test"), 0);
+    assert!(!c.got_welcome(acc("g-77.relay.test")));
+    let s = start(&mut c, "g-77.relay.test", 600);
+    assert_eq!(s.player_paid.0, 0);
+    assert_eq!(bal(&c, "g-77.relay.test"), 0, "not at start_match either");
+    // a second claim: starting matches doesn't pay it again
+    start(&mut c, "dave.testnet", 610);
+    assert_eq!(bal(&c, "dave.testnet"), WELCOME_STAKE - ENTRY_FEE, "only the entry moved");
+    assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
+}
+
+#[test]
+fn welcome_stake_survives_unregister_and_is_not_reclaimable() {
+    let mut c = setup();
+    register_by_relay(&mut c, "erin.testnet", 1);
+    assert_eq!(bal(&c, "erin.testnet"), WELCOME_STAKE);
+    // move it away, leave, come back
+    let house = c.house.clone();
+    c.move_tokens(&acc("erin.testnet"), &house, WELCOME_STAKE, "test");
+    ctx("erin.testnet", 700, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(None));
+    register_by_relay(&mut c, "erin.testnet", 2);
+    assert_eq!(bal(&c, "erin.testnet"), 0, "unregister -> register: no second welcome");
+    assert!(c.got_welcome(acc("erin.testnet")));
+    start(&mut c, "erin.testnet", 710);
+    assert_eq!(bal(&c, "erin.testnet"), 0);
+}
+
+#[test]
+fn welcome_respects_the_house_floor_and_the_daily_cap() {
+    let mut c = setup();
+    // house at its floor: registration pays nothing and records nothing
+    let house = c.house.clone();
+    let spare = c.balance(&house) - HOUSE_FLOOR;
+    c.move_tokens(&house, &acc(GUEST), spare, "test");
+    register_by_relay(&mut c, "fay.testnet", 1);
+    assert_eq!(bal(&c, "fay.testnet"), 0);
+    assert!(!c.got_welcome(acc("fay.testnet")));
+    // the house recovers -> the welcome is paid lazily at her next start_match
+    c.move_tokens(&acc(GUEST), &house, spare, "test");
+    let s = start(&mut c, "fay.testnet", 800);
+    assert!(c.got_welcome(acc("fay.testnet")));
+    assert_eq!(s.player_paid.0, ENTRY_FEE, "and she can pay her first entry with it");
+    // the daily cap: fay was #1 of day 0 (default timestamp); fill day 1 (house topped up for the test)
+    c.mint(&house, 3_000 * ONE, "test");
+    for i in 0..WELCOME_DAILY_CAP {
+        register_by_relay(&mut c, &format!("r{i}.testnet"), 1);
+    }
+    register_by_relay(&mut c, "late.testnet", 1);
+    assert_eq!(bal(&c, "late.testnet"), 0, "cap reached for the day");
+    assert!(!c.got_welcome(acc("late.testnet")));
+    register_by_relay(&mut c, "next.testnet", 2);
+    assert_eq!(bal(&c, "next.testnet"), WELCOME_STAKE, "a new day");
+    assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
 }

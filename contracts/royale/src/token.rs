@@ -76,6 +76,10 @@ impl StorageManagement for Contract {
         let deposit_payer = (payer != account).then(|| payer.clone());
         self.save_player(&account, PlayerV2 { guest, storage_paid: U128(STORAGE_DEPOSIT.as_yoctonear()), deposit_payer, ..Default::default() });
         self.ensure_registered(&account);
+        // a real account's first registration brings its one-time welcome stake (never guests)
+        if !guest {
+            self.welcome(&account);
+        }
         let refund = amount.saturating_sub(STORAGE_DEPOSIT);
         if !refund.is_zero() {
             let _ = Promise::new(payer).transfer(refund);

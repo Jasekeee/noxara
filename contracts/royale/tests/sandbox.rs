@@ -224,6 +224,13 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     let r = alice.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
     assert!(format!("{:?}", r.into_result().unwrap_err()).contains("register first"));
     alice.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    // owner decision: a real account's registration brings a one-time welcome stake from the house
+    let welcome: u128 = 30 * ONE;
+    assert_eq!(ft(c, alice.id().as_str()).await?, welcome);
+    let got: bool = c.view("got_welcome").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    assert!(got);
+    // spend it on the house (a gift) to test the no-$BOUNTY path
+    alice.call(c.id(), "ft_transfer").args_json(json!({"receiver_id": house, "amount": welcome.to_string()})).deposit(NearToken::from_yoctonear(1)).transact().await?.into_result()?;
 
     // review fix #3: no $BOUNTY -> plays free but can't win: the pot goes to the house
     let (s, _) = start(&alice, c).await?;
@@ -343,12 +350,12 @@ async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result
     let back: String = r.into_result()?.json()?;
     let alice_end = ft(c, alice.id().as_str()).await?;
     println!("alice staked 25, earned {}, got back {} -> {} total", earned / ONE, back.parse::<u128>()? / ONE, alice_end / ONE);
-    assert!(alice_end > 100 * ONE, "backing a winner paid off");
+    assert!(alice_end > 130 * ONE, "backing a winner paid off (100 granted + 30 welcome)");
     // bob: the bot retired broke -> the pool closed, the stake is (mostly) gone
     let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": bob.id()})).await?.json()?;
     assert!(sp.is_empty());
     let bob_end = ft(c, bob.id().as_str()).await?;
-    assert!(bob_end < 100 * ONE, "bob lost his stake: {}", bob_end / ONE);
+    assert!(bob_end < 130 * ONE, "bob lost his stake: {}", bob_end / ONE);
     let hist: Vec<Value> = c.view("get_history").args_json(json!({"account_id": loser})).await?.json()?;
     assert_eq!(hist[0]["kind"], "retired");
     // progression: the guest earned XP every match
