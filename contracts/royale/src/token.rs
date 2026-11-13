@@ -1,4 +1,4 @@
-//! $BOUNTY: NEP-141 + NEP-145 + NEP-148, held in the game contract so every mint, burn, entry,
+//! $NOX (formerly $BOUNTY): NEP-141 + NEP-145 + NEP-148, held in the game contract so every mint, burn, entry,
 //! prize and bounty settles atomically with the game rule that caused it.
 //!
 //! Storage (NEP-145): a player must be registered before `start_match`. Registration costs a fixed
@@ -16,8 +16,8 @@ use near_contract_standards::storage_management::{StorageBalance, StorageBalance
 use near_sdk::json_types::U128;
 use near_sdk::{assert_one_yocto, env, log, near, require, AccountId, NearToken, Promise, PromiseOrValue};
 
-/// A gold coin with a crosshair.
-const ICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23b8751f'/%3E%3Ccircle cx='16' cy='16' r='12.5' fill='%23f2b53c'/%3E%3Ccircle cx='16' cy='16' r='7' fill='none' stroke='%23241a2e' stroke-width='2.5'/%3E%3Cpath d='M16 4v7M16 21v7M4 16h7M21 16h7' stroke='%23241a2e' stroke-width='2.5'/%3E%3C/svg%3E";
+/// A dark coin with a gold ring and an "N" (NOXARA).
+const ICON: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23e3b341'/%3E%3Ccircle cx='16' cy='16' r='12.5' fill='%231b1028'/%3E%3Cpath d='M11 22V10l10 12V10' fill='none' stroke='%23e3b341' stroke-width='2.6' stroke-linejoin='round'/%3E%3C/svg%3E";
 
 #[near]
 impl FungibleTokenCore for Contract {
@@ -108,7 +108,7 @@ impl StorageManagement for Contract {
         require!(p.pending.is_none(), "finish or abandon your match first");
         require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first");
         let bal = self.balance(&id);
-        require!(bal == 0 || force.unwrap_or(false), "non-zero $BOUNTY balance: pass force=true to burn it");
+        require!(bal == 0 || force.unwrap_or(false), "non-zero $NOX balance: pass force=true to burn it");
         self.burn(&id, bal, "unregistered");
         self.players.remove(&id);
         self.token.accounts.remove(&id);
@@ -147,8 +147,8 @@ impl FungibleTokenMetadataProvider for Contract {
     fn ft_metadata(&self) -> FungibleTokenMetadata {
         FungibleTokenMetadata {
             spec: FT_METADATA_SPEC.to_string(),
-            name: "Bounty".to_string(),
-            symbol: "BOUNTY".to_string(),
+            name: "Nox".to_string(),
+            symbol: "NOX".to_string(),
             icon: Some(ICON.to_string()),
             reference: None,
             reference_hash: None,

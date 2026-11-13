@@ -121,8 +121,8 @@ impl Contract {
         let who = env::predecessor_account_id();
         require!(!self.is_guest(&who), "guests can't sponsor: sign in with a NEAR account");
         require!(self.load_player(&who).is_some(), "register first: storage_deposit");
-        require!(amount.0 >= MIN_STAKE, "stake at least 10 $BOUNTY");
-        require!(self.balance(&who) >= amount.0, "not enough $BOUNTY");
+        require!(amount.0 >= MIN_STAKE, "stake at least 10 $NOX");
+        require!(self.balance(&who) >= amount.0, "not enough $NOX");
         let f = self.load_fighter(&bot).filter(|f| f.active).unwrap_or_else(|| env::panic_str("not an active fighter"));
         // no buying in while the bot's money sits in unsettled matches (their outcome may already be known)
         require!(f.escrowed.0 == 0, "this bot is in a match right now: try again when it's over");

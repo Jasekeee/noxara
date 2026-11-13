@@ -279,7 +279,8 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
         .await?
         .into_result()?;
     let meta: Value = c.view("ft_metadata").await?.json()?;
-    assert_eq!(meta["symbol"], "BOUNTY");
+    assert_eq!(meta["symbol"], "NOX");
+    assert_eq!(meta["name"], "Nox");
     Ok(())
 }
 
@@ -426,5 +427,65 @@ async fn a_relayer_paid_deposit_goes_back_to_the_relayer() -> anyhow::Result<()>
     // the relayer got its 0.02 back: net cost ≈ gas only
     let spent = relay0.as_yoctonear() - relay1.as_yoctonear();
     assert!(spent < NearToken::from_millinear(5).as_yoctonear(), "relayer spent {spent} yocto");
+    Ok(())
+}
+
+/// The mainnet topology: the contract on the root account itself, the relayer is also the match
+/// server, the owner is a separate account. Play one match, drop the root's full-access key, then
+/// the owner's time-locked teardown deletes the root and returns its NEAR.
+#[tokio::test]
+async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
+    let w = near_workspaces::sandbox().await?;
+    let top = w.root_account()?;
+    let root = top.create_subaccount("noxara").initial_balance(NearToken::from_near(10)).transact().await?.into_result()?;
+    let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let c = root.deploy(&std::fs::read(WASM)?).await?.into_result()?;
+    // locked in the future first
+    c.call("new")
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_after_ms": "1"}))
+        .gas(Gas::from_tgas(150))
+        .transact()
+        .await?
+        .into_result()?;
+    let fs: Vec<Value> = c.view("get_fighters").await?.json()?;
+    assert_eq!(fs[0]["account"], format!("brindle.{}", root.id()), "bots are sub-accounts of the root");
+    // a guest match, settled by the relay account acting as the match server
+    let g = relay.create_subaccount("g-0001").initial_balance(NearToken::from_millinear(500)).transact().await?.into_result()?;
+    relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let (s, _) = start(&g, &c).await?;
+    settle(&relay, &c, &s["match_id"], 3, None).await?.0.map_err(anyhow::Error::msg)?;
+    // remove every full-access key of the root: only the contract's own rules remain
+    let keys = w.view_access_keys(root.id()).await?;
+
+    for k in keys {
+        let r = root.batch(root.id()).delete_key(k.public_key).transact().await;
+        println!("delete key: {:?}", r.as_ref().map(|x| x.is_success()).map_err(|e| e.to_string()));
+    }
+    assert_eq!(w.view_access_keys(root.id()).await?.len(), 0);
+    // a stranger can't, the owner can (lock already passed: teardown_after_ms = 1)
+    let r = g.call(c.id(), "teardown").args_json(json!({"beneficiary": g.id()})).transact().await?;
+    assert!(r.into_result().is_err());
+    let root_bal = w.view_account(root.id()).await?.balance;
+    let owner0 = owner.view_account().await?.balance;
+    let r = owner.call(c.id(), "teardown").args_json(json!({"beneficiary": owner.id()})).gas(Gas::from_tgas(50)).transact().await?;
+    println!("teardown: {} Tgas, failures {:?}", r.total_gas_burnt.as_tgas(), r.receipt_failures().len());
+    r.into_result()?;
+    assert!(w.view_account(root.id()).await.is_err(), "the root account is gone");
+    let owner1 = owner.view_account().await?.balance;
+    let back = owner1.as_yoctonear() as f64 / 1e24 - owner0.as_yoctonear() as f64 / 1e24;
+    println!("root held {:.4} NEAR, the owner got back {back:.4} NEAR", root_bal.as_yoctonear() as f64 / 1e24);
+    assert!(back > root_bal.as_yoctonear() as f64 / 1e24 - 0.01);
+    Ok(())
+}
+
+#[tokio::test]
+async fn teardown_refused_before_the_lock() -> anyhow::Result<()> {
+    let wd = world().await?; // default lock: 2026-11-25 00:00 UTC
+    let r = wd.owner.call(wd.c.id(), "teardown").args_json(json!({"beneficiary": wd.owner.id()})).transact().await?;
+    let e = format!("{:?}", r.into_result().unwrap_err());
+    assert!(e.contains("locked until 2026-11-25"), "{e}");
+    let t: String = wd.c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1795564800000");
     Ok(())
 }

@@ -33,7 +33,7 @@ fn ctx(pred: &str, height: u64, deposit: NearToken) {
 
 fn setup() -> Contract {
     ctx(ME, 100, NearToken::from_yoctonear(0));
-    let mut c = Contract::new(acc("owner.test"), acc(SERVER), acc(RELAY));
+    let mut c = Contract::new(acc("owner.test"), acc(SERVER), acc(RELAY), None);
     for who in [GUEST, ALICE] {
         ctx(RELAY, 101, STORAGE_DEPOSIT);
         c.storage_deposit(Some(acc(who)), None);
@@ -1051,4 +1051,22 @@ fn unregister_then_register_brings_no_new_credit_and_keeps_the_record_paid() {
     register_as(&mut c, "erin.testnet", "erin.testnet", 2);
     assert_eq!(c.welcome_credit(&acc("erin.testnet")), 0);
     assert!(c.got_welcome(acc("erin.testnet")));
+}
+
+#[test]
+fn teardown_is_owner_only_and_time_locked() {
+    let mut c = setup();
+    assert_eq!(c.get_teardown_after().0, TEARDOWN_AFTER_MS);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp((TEARDOWN_AFTER_MS - 1) * 1_000_000);
+    testing_env!(b.build());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(acc("owner.test")); })).is_err(), "locked");
+    b.block_timestamp(TEARDOWN_AFTER_MS * 1_000_000).predecessor_account_id(acc(ALICE));
+    testing_env!(b.build());
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(acc(ALICE)); })).is_err(), "owner only");
+    b.predecessor_account_id(acc("owner.test"));
+    testing_env!(b.build());
+    let _ = c.teardown(acc("owner.test"));
+    let r = near_sdk::test_utils::get_created_receipts();
+    assert!(r.iter().any(|x| x.receiver_id == acc(ME) && x.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::DeleteAccount { .. }))));
 }

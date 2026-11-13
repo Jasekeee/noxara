@@ -88,6 +88,9 @@ pub const WELCOME_RECORD_NEAR: NearToken = NearToken::from_millinear(1);
 /// Abuse brake: at most this many welcome credits per UTC day.
 pub const WELCOME_DAILY_CAP: u32 = 50;
 const WELCOME_DAY_KEY: &[u8] = b"welcome_day";
+/// The owner may delete the whole contract account (deposits back) only after this: 2026-11-25 00:00 UTC.
+pub const TEARDOWN_AFTER_MS: u64 = 1_795_564_800_000;
+const TEARDOWN_KEY: &[u8] = b"teardown_after";
 pub const RECENT_MATCHES: usize = 50;
 pub const RETIRED_SHOWN: usize = 30;
 pub const LEADERBOARD_SIZE: usize = 50;
@@ -516,7 +519,11 @@ impl Contract {
     /// Creates the house and the genesis nine as sub-accounts WITHOUT access keys (only this
     /// contract's rules move their $BOUNTY) and mints their starter wallets.
     #[init]
-    pub fn new(owner: AccountId, server: AccountId, guest_parent: AccountId) -> Self {
+    /// `owner` must be an account the owner controls OTHER than this contract's account if its
+    /// full-access keys are going to be removed (it is the only one who can `teardown`).
+    /// `teardown_after_ms` defaults to TEARDOWN_AFTER_MS (tests pass an earlier time).
+    pub fn new(owner: AccountId, server: AccountId, guest_parent: AccountId, teardown_after_ms: Option<U64>) -> Self {
+        env::storage_write(TEARDOWN_KEY, &teardown_after_ms.map(|t| t.0).unwrap_or(TEARDOWN_AFTER_MS).to_le_bytes());
         let me = env::current_account_id();
         let house: AccountId = format!("house.{me}").parse().unwrap();
         let mut c = Self {
@@ -882,7 +889,7 @@ impl Contract {
     pub fn house_grant(&mut self, account_id: AccountId, amount: U128) {
         require!(env::predecessor_account_id() == self.owner, "owner only");
         require!(amount.0 > 0 && amount.0 <= MAX_GRANT, "grant out of range");
-        require!(!self.is_guest(&account_id), "guests can't hold $BOUNTY");
+        require!(!self.is_guest(&account_id), "guests can't hold $NOX");
         require!(self.load_player(&account_id).is_some(), "not a registered player");
         let house = self.house.clone();
         self.move_tokens(&house, &account_id, amount.0, "house grant");
@@ -896,6 +903,29 @@ impl Contract {
         require!(env::predecessor_account_id() == self.owner, "owner only");
         require!(max_free <= MAX_PENDING_FREE * 4, "too large");
         self.max_free = max_free;
+    }
+
+    /// Owner: hand ownership to another account (e.g. before removing this account's full-access keys).
+    pub fn set_owner(&mut self, owner: AccountId) {
+        require!(env::predecessor_account_id() == self.owner, "owner only");
+        event("owner_changed", &near_sdk::serde_json::json!({ "from": self.owner, "to": owner }));
+        self.owner = owner;
+    }
+
+    /// Owner, after the time lock: delete this contract's own account and send its whole NEAR balance
+    /// (storage deposits included) to `beneficiary`. Works without any full-access key on the account.
+    /// Bot / house / rookie sub-accounts are keyless and can't be deleted: their ~0.001 NEAR each stays.
+    pub fn teardown(&mut self, beneficiary: AccountId) -> Promise {
+        require!(env::predecessor_account_id() == self.owner, "owner only");
+        let after = env::storage_read(TEARDOWN_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(TEARDOWN_AFTER_MS);
+        require!(env::block_timestamp_ms() >= after, "teardown is locked until 2026-11-25 00:00 UTC");
+        require!(beneficiary != env::current_account_id(), "pick another beneficiary");
+        event("teardown", &near_sdk::serde_json::json!({ "beneficiary": beneficiary, "at_ms": U64(env::block_timestamp_ms()) }));
+        Promise::new(env::current_account_id()).delete_account(beneficiary)
+    }
+
+    pub fn get_teardown_after(&self) -> U64 {
+        U64(env::storage_read(TEARDOWN_KEY).map(|v| u64::from_le_bytes(v[0..8].try_into().unwrap())).unwrap_or(TEARDOWN_AFTER_MS))
     }
 
     pub fn set_server(&mut self, server: AccountId) {
@@ -1042,7 +1072,7 @@ impl Contract {
     pub fn claim_welcome(&mut self) -> U128 {
         let id = env::predecessor_account_id();
         require!(self.load_player(&id).is_some(), "register first: storage_deposit");
-        require!(!self.is_guest(&id), "guests play for free and earn no $BOUNTY: sign in with a NEAR account");
+        require!(!self.is_guest(&id), "guests play for free and earn no $NOX: sign in with a NEAR account");
         require!(!self.is_welcomed(&id), "you already got your welcome credit");
         require!(self.grant_welcome(&id), "today's welcome credits are gone: try again tomorrow");
         U128(WELCOME_STAKE)

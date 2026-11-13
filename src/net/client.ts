@@ -30,7 +30,7 @@ const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
 const START_GAS = 100n * 10n ** 12n;
 
-/** yocto-$BOUNTY string -> display number with 2 decimals. */
+/** yocto-$NOX string -> display number with 2 decimals. */
 export const toBounty = (y: string | bigint | undefined | null): number => (y === undefined || y === null ? 0 : Number(BigInt(y) / YOCTO_PER_CENT) / 100);
 
 type Saved = { accountId: string; key: StoredKey; contract: string };
@@ -78,18 +78,18 @@ function save(key: string, v: unknown) {
   }
 }
 
-/** "12.5" $BOUNTY -> yocto string (2 decimals are enough for the UI). */
+/** "12.5" $NOX -> yocto string (2 decimals are enough for the UI). */
 const toYocto = (amount: number) => ((BigInt(Math.round(amount * 100)) * ONE) / 100n).toString();
 
 /** Contract panics -> sentences a player understands. */
 function friendly(msg: string): string {
   const m = msg.toLowerCase();
-  if (m.includes("not enough $bounty")) return "You don't have enough $BOUNTY for that.";
+  if (m.includes("not enough $nox") || m.includes("not enough $bounty")) return "You don't have enough $NOX for that.";
   if (m.includes("must play 5 matches")) return "Your stake is locked until this bot plays 5 more matches.";
   if (m.includes("guests can't")) return "Sign in with a NEAR account to sponsor bots.";
   if (m.includes("not an active fighter") || m.includes("broke")) return "This bot has retired.";
   if (m.includes("30%")) return "Sponsors can own at most 30% of a bot: try a smaller stake.";
-  if (m.includes("at least 10")) return "The minimum stake is 10 $BOUNTY.";
+  if (m.includes("at least 10")) return "The minimum stake is 10 $NOX.";
   if (m.includes("at most 3 bots")) return "You can back at most 3 bots at once.";
   if (m.includes("all the sponsors")) return "This bot already has as many sponsors as it can take.";
   if (m.includes("don't sponsor")) return "You don't sponsor this bot.";
@@ -510,7 +510,7 @@ class Client implements GameClientT3 {
     await this.connector?.disconnect().catch(() => {});
   }
 
-  /** Welcome credit left (pays match entries only; not $BOUNTY). Proposed for GameClientT3. */
+  /** Welcome credit left (pays match entries only; not $NOX). Proposed for GameClientT3. */
   async welcomeCredit(): Promise<number> {
     if (this._mode !== "chain" || !this.realSaved) return 0;
     const v = await viewCall<string>(this.rpcUrl, this.contract, "get_welcome_credit", { account_id: this.realSaved.accountId }).catch(() => "0");
@@ -566,7 +566,7 @@ class Client implements GameClientT3 {
   async sponsor(bot: string, amount: number): Promise<{ tx: string | null }> {
     if (!this.realSaved) throw new Error("Sign in with a NEAR account to sponsor bots.");
     if (this._mode !== "chain") throw new Error("The NEAR network is unreachable right now: try again later.");
-    if (!(amount > 0)) throw new Error("Choose how much $BOUNTY to stake.");
+    if (!(amount > 0)) throw new Error("Choose how much $NOX to stake.");
     try {
       const r = await this.relay<unknown>("sponsor", { bot, amount: toYocto(amount) }, true, 50n * 10n ** 12n);
       return { tx: r.tx };
@@ -634,7 +634,7 @@ export function histEvent(e: ChainHist): FighterEvent {
   switch (e.kind) {
     case "win": {
       const [, kills] = e.detail.split(":");
-      return { match, at, kind: "win", text: `Won match${m} and took ${amt} $BOUNTY${kills && kills !== "0" ? ` (${kills} kills)` : ""}` };
+      return { match, at, kind: "win", text: `Won match${m} and took ${amt} $NOX${kills && kills !== "0" ? ` (${kills} kills)` : ""}` };
     }
     case "death": {
       const [place, kills] = e.detail.split(":");
@@ -643,20 +643,20 @@ export function histEvent(e: ChainHist): FighterEvent {
     }
     case "bounty":
       return e.detail === "lost"
-        ? { match, at, kind: "bounty", text: `Was hunted down in match${m} and lost a ${amt} $BOUNTY bounty` }
-        : { match, at, kind: "bounty", text: `Claimed a ${amt} $BOUNTY bounty in match${m}` };
+        ? { match, at, kind: "bounty", text: `Was hunted down in match${m} and lost a ${amt} $NOX bounty` }
+        : { match, at, kind: "bounty", text: `Claimed a ${amt} $NOX bounty in match${m}` };
     case "upgrade":
-      return { match, at, kind: "upgrade", text: `Bought ${e.detail.replace("weapon", "weapon tier")} for ${amt} $BOUNTY` };
+      return { match, at, kind: "upgrade", text: `Bought ${e.detail.replace("weapon", "weapon tier")} for ${amt} $NOX` };
     case "retired":
-      return { match, at, kind: "retired", text: `Went broke and retired${amt !== "0" ? ` with ${amt} $BOUNTY left` : ""}` };
+      return { match, at, kind: "retired", text: `Went broke and retired${amt !== "0" ? ` with ${amt} $NOX left` : ""}` };
     case "rookie":
-      return { match, at, kind: "rookie", text: `Arrived on the island with ${amt} $BOUNTY from the House${e.detail ? `, replacing ${e.detail}` : ""}` };
+      return { match, at, kind: "rookie", text: `Arrived on the island with ${amt} $NOX from the House${e.detail ? `, replacing ${e.detail}` : ""}` };
     case "sponsored":
-      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} backed this bot with ${amt} $BOUNTY` };
+      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} backed this bot with ${amt} $NOX` };
     case "unsponsored":
-      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} withdrew ${amt} $BOUNTY` };
+      return { match, at, kind: "sponsored", text: `${shortName(e.detail)} withdrew ${amt} $NOX` };
     case "dividend":
-      return { match, at, kind: "sponsored", text: `Paid ${amt} $BOUNTY to its sponsors` };
+      return { match, at, kind: "sponsored", text: `Paid ${amt} $NOX to its sponsors` };
     default:
       return { match, at, kind: "death", text: `${e.kind} ${amt}` };
   }
