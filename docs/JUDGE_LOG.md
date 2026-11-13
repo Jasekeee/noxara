@@ -24,3 +24,16 @@ Strong: instant start, bush/HIDDEN mechanic, named bots + crown, native-feeling 
 5. Clarity → unique names (C migration), ROOKIE badge only for the first few matches + lobby change feed "+/-" (A), mobile portrait zoom-out (A).
 Bugs: results flip from "Pot → You" to "House" for guests (A: pending state, guests never shown as pot receiver); duplicate wallet link (A); broke bot (0 $BOUNTY) played one more match (C); lobby background names ≠ roster (A); README stale (lead).
 Note: the judge saw matches auto-start twice without input — likely another controller sharing the MCP browser; not reproduced idle for 70 s.
+
+## Cold judge #3 — 2026-11-13 ~22:40 UTC (after economy v2, daily rewards, aim assist, menu, challenge/daily)
+| Tech | Orig | NEAR | Demo | Pack | Fit | Main | Total |
+|---|---|---|---|---|---|---|---|
+| 8 | 7 | 9 | 7 | 8 | 8 | 6 | **53/70** (was 46) |
+
+Top weaknesses → action:
+1. Supply card said "minted after: 250" vs "nothing minted" → explained (v1 minted 250 before the v2 upgrade on testnet), verify now checks 0 minted since v2 — fixed (05b3128).
+2. Newcomers die helpless; own fighter hard to read → player highlight, first-match coaching cues (helper, ovn-judge). Bot difficulty for first matches would need a sim change → left as a recommendation.
+3. Exit → 409 → silent offline with a stale roster; menu says PAUSED while running → retry + clear toast + cached roster; MENU title (helper).
+4. Money doesn't reconcile across screens (pot, bounty + House bonus); explorer shows the old "BOUNTY" label → end-screen breakdown (helper); explorer note in CHAIN.md (fixed).
+5. Market invisible to guests; same IPO for veterans; raw story log → "if you owned 10%" preview + story summary (helper); IPO wording fixed.
+Strengths: chain claims real and checkable (next-block seed, replay, settle, keyless bots, NEP-366); presentation; track fit.
