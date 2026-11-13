@@ -5,6 +5,7 @@
 //! All v2 state lives in its own storage keys (opened on demand), so upgrading a live contract needs no state
 //! migration: a bot or holder that has no v2 record yet gets one the first time it is touched.
 use crate::{event, Contract, ContractExt, Key, BOTS, HOUSE_FLOOR, HOUSE_GENESIS, ONE, STARTER};
+use near_contract_standards::fungible_token::events::FtBurn;
 use near_sdk::borsh::{self, BorshDeserialize};
 use near_sdk::json_types::{U128, U64};
 use near_sdk::store::LookupMap as StoreMap;
@@ -44,6 +45,9 @@ pub const SEASONS_KEPT: usize = 8;
 pub const MAX_HOLDINGS: usize = 3;
 pub const MAX_LISTINGS_PER_SELLER: usize = 2;
 pub const MAX_LISTINGS: usize = 200;
+pub const MAX_LISTINGS_PER_BOT: usize = 20;
+/// listings expire (anyone can prune expired ones, and those of bankrupt bots)
+pub const LISTING_TTL_MS: u64 = 172_800_000;
 /// a share price may not exceed this (keeps u128 math far from overflow; 1,000 NOX per share)
 pub const MAX_SHARE_PRICE: u128 = 1_000 * ONE;
 const ECON_KEY: &[u8] = b"econ_v2";
@@ -117,6 +121,7 @@ pub struct ListingView {
     pub bot: AccountId,
     pub shares: u32,
     pub price_per_share: U128,
+    pub expires_ms: U64,
 }
 
 #[near(serializers = [borsh, json])]
@@ -243,6 +248,26 @@ fn cosmetics_map() -> StoreMap<AccountId, Vec<u8>> {
     StoreMap::new(Key::Cosmetics)
 }
 
+thread_local! {
+    /// economy burns and House transfers of the current call, emitted as ONE log line each by
+    /// `flush_econ_logs` (the 16 KiB log budget per receipt)
+    static BURNS: std::cell::RefCell<Vec<(AccountId, u128)>> = const { std::cell::RefCell::new(Vec::new()) };
+    static XFERS: std::cell::RefCell<Vec<(AccountId, AccountId, u128)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn note_xfer(from: &AccountId, to: &AccountId, amount: u128) {
+    if amount == 0 {
+        return;
+    }
+    XFERS.with(|x| {
+        let mut x = x.borrow_mut();
+        match x.iter_mut().find(|(a, b, _)| a == from && b == to) {
+            Some(e) => e.2 += amount,
+            None => x.push((from.clone(), to.clone(), amount)),
+        }
+    });
+}
+
 fn mt_event(event: &str, data: near_sdk::serde_json::Value) {
     env::log_str(&format!("EVENT_JSON:{}", near_sdk::serde_json::json!({ "standard": "nep245", "version": "1.0.0", "event": event, "data": [data] })));
 }
@@ -289,11 +314,34 @@ impl Contract {
         if amount == 0 {
             return;
         }
+        let _ = memo;
         let real = amount * brake(self.token.total_supply) / 10_000;
-        self.burn(from, real, memo);
+        if real > 0 {
+            self.token.internal_withdraw(from, real);
+            self.total_burned += real;
+            BURNS.with(|b| {
+                let mut b = b.borrow_mut();
+                match b.iter_mut().find(|(a, _)| a == from) {
+                    Some(e) => e.1 += real,
+                    None => b.push((from.clone(), real)),
+                }
+            });
+        }
         e.season_burned += real;
         let house = self.house.clone();
         self.move_quiet(from, &house, amount - real);
+        note_xfer(from, &house, amount - real);
+    }
+
+    /// Emit this call's economy burns and House transfers: one FtBurn line, one FtTransfer line.
+    pub(crate) fn flush_econ_logs(&self) {
+        let burns = BURNS.with(|b| std::mem::take(&mut *b.borrow_mut()));
+        if !burns.is_empty() {
+            let ev: Vec<FtBurn> = burns.iter().map(|(a, v)| FtBurn { owner_id: a, amount: U128(*v), memo: Some("economy") }).collect();
+            FtBurn::emit_many(&ev);
+        }
+        let xfers = XFERS.with(|x| std::mem::take(&mut *x.borrow_mut()));
+        crate::emit_transfers(&xfers, "economy");
     }
 
     pub(crate) fn add_income(&mut self, bot: &AccountId, amount: u128) {
@@ -336,6 +384,7 @@ impl Contract {
                 let d = self.dividends_account();
                 self.ensure_registered(&d);
                 self.move_quiet(bot, &d, total);
+                note_xfer(bot, &d, total);
                 b.acc = U128(b.acc.0 + per_share);
                 b.dividends_paid = U128(b.dividends_paid.0 + total);
                 b.costs = U128(b.costs.0 + total);
@@ -348,6 +397,7 @@ impl Contract {
             let to_house = u * UPKEEP_HOUSE_BPS / 10_000;
             let house = self.house.clone();
             self.move_quiet(bot, &house, to_house);
+            note_xfer(bot, &house, to_house);
             self.econ_burn(bot, u - to_house, "upkeep", e);
             self.add_cost(bot, u);
         }
@@ -387,13 +437,15 @@ impl Contract {
 
     /// Store a holding, keeping holders counts and the holder's bot list (bounded) right.
     fn put_holding(&mut self, holder: &AccountId, bot: &AccountId, before_shares: u32, h: Holding) {
-        let mut b = self.bot_econ(bot);
-        if before_shares == 0 && h.shares > 0 {
-            b.holders += 1;
-        } else if before_shares > 0 && h.shares == 0 {
-            b.holders = b.holders.saturating_sub(1);
+        if (before_shares == 0) != (h.shares == 0) {
+            let mut b = self.bot_econ(bot);
+            if h.shares > 0 {
+                b.holders += 1;
+            } else {
+                b.holders = b.holders.saturating_sub(1);
+            }
+            self.save_bot_econ(bot, b);
         }
-        self.save_bot_econ(bot, b);
         let mut hm = holding_map();
         let mut of = holdings_of_map();
         let mut mine = of.get(holder).cloned().unwrap_or_default();
@@ -459,6 +511,10 @@ impl Contract {
     /// Pay out the dividends a holding has earned.
     pub fn claim_dividends(&mut self, bot: AccountId) -> U128 {
         let me = env::predecessor_account_id();
+        require!(self.load_fighter_pub(&bot).is_some(), "not a fighter");
+        if holding_map().get(&(me.clone(), bot.clone())).is_none() {
+            return U128(0); // nothing held: write nothing
+        }
         let b = self.bot_econ(&bot);
         let mut h = self.settle_holding(&me, &bot, &b);
         let before = holding_map().get(&(me.clone(), bot.clone())).map(|x| x.shares).unwrap_or(0);
@@ -474,9 +530,13 @@ impl Contract {
     }
 
     /// Offer `shares` of a bot at a fixed price (NOX per share). The shares stay yours (and keep earning)
-    /// but are locked until sold or cancelled.
+    /// but are locked until sold, cancelled or expired (48 h). Needs a full wallet signature (1 yocto): a
+    /// leaked in-game key must not be able to list your shares cheaply for an accomplice.
+    #[payable]
     pub fn list_shares(&mut self, bot: AccountId, shares: u32, price_per_share: U128) -> U64 {
+        near_sdk::assert_one_yocto();
         let me = env::predecessor_account_id();
+        self.prune_listings(Some(3));
         self.require_shareholder(&me);
         let b = self.active_bot(&bot);
         require!(price_per_share.0 > 0 && price_per_share.0 <= MAX_SHARE_PRICE, "price out of range");
@@ -484,6 +544,8 @@ impl Contract {
         require!(shares > 0 && h.shares - h.locked >= shares, "not enough unlocked shares");
         let mut e = self.econ();
         require!(e.listings.len() < MAX_LISTINGS, "the market is full: try again later");
+        let lm0 = listing_map();
+        require!(e.listings.iter().filter(|i| lm0.get(i).is_some_and(|l| l.bot == bot)).count() < MAX_LISTINGS_PER_BOT, "this bot already has 20 open listings");
         let mut of = listings_of_map();
         let mut mine = of.get(&me).cloned().unwrap_or_default();
         require!(mine.len() < MAX_LISTINGS_PER_SELLER, "at most 2 open listings per player");
@@ -495,13 +557,31 @@ impl Contract {
         of.insert(me.clone(), mine);
         of.flush();
         let mut lm = listing_map();
-        lm.insert(id, ListingView { id: U64(id), seller: me.clone(), bot: bot.clone(), shares, price_per_share });
+        lm.insert(id, ListingView { id: U64(id), seller: me.clone(), bot: bot.clone(), shares, price_per_share, expires_ms: U64(env::block_timestamp_ms() + LISTING_TTL_MS) });
         lm.flush();
         let before = h.shares;
         h.locked += shares;
         self.put_holding(&me, &bot, before, h);
         event("listed", &near_sdk::serde_json::json!({ "id": U64(id), "seller": me, "bot": bot, "shares": shares, "price_per_share": price_per_share }));
         U64(id)
+    }
+
+    /// Anyone may remove expired listings and those of bankrupt/retired bots (bounded: `max`, default 20).
+    pub fn prune_listings(&mut self, max: Option<u32>) -> u32 {
+        let now = env::block_timestamp_ms();
+        let lm = listing_map();
+        let dead: Vec<ListingView> = self
+            .econ()
+            .listings
+            .iter()
+            .filter_map(|i| lm.get(i).cloned())
+            .filter(|l| now >= l.expires_ms.0 || self.bot_econ(&l.bot).bankrupt || self.load_fighter_pub(&l.bot).is_none_or(|f| !f.active))
+            .take(max.unwrap_or(20).min(50) as usize)
+            .collect();
+        for l in &dead {
+            self.drop_listing(l);
+        }
+        dead.len() as u32
     }
 
     pub fn cancel_listing(&mut self, id: U64) {
@@ -512,10 +592,15 @@ impl Contract {
     }
 
     /// Buy a whole listing. 2% of the price is burned (deflation brake applies); the seller gets the rest.
+    /// Needs a full wallet signature (1 yocto): a leaked in-game key must not be able to spend your NOX on
+    /// an accomplice's overpriced listing.
+    #[payable]
     pub fn buy_listing(&mut self, id: U64) {
+        near_sdk::assert_one_yocto();
         let me = env::predecessor_account_id();
         self.require_shareholder(&me);
         let l = listing_map().get(&id.0).cloned().unwrap_or_else(|| env::panic_str("no such listing"));
+        require!(env::block_timestamp_ms() < l.expires_ms.0, "this listing has expired");
         require!(l.seller != me, "that's your own listing");
         let mut b = self.active_bot(&l.bot);
         let cost = l.shares as u128 * l.price_per_share.0;
@@ -525,6 +610,7 @@ impl Contract {
         self.move_tokens(&me, &l.seller, cost - tax, "share sale");
         self.econ_burn(&me, tax, "share trade tax", &mut e);
         self.save_econ(&e);
+        self.flush_econ_logs();
         self.drop_listing(&l);
         // move the shares
         let hs = self.settle_holding(&l.seller, &l.bot, &b);
@@ -588,6 +674,7 @@ impl Contract {
         let mut e = self.econ();
         self.econ_burn(&me, price, "cosmetic", &mut e);
         self.save_econ(&e);
+        self.flush_econ_logs();
         owned.push(id);
         let mut cm = cosmetics_map();
         cm.insert(me.clone(), owned);

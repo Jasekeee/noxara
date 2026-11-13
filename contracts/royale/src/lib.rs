@@ -961,6 +961,7 @@ impl Contract {
         self.run_economy(&entropy, match_id.0, &mut e);
         self.push_snapshot(&mut e, match_id.0);
         self.save_econ(&e);
+        self.flush_econ_logs();
 
         let result = MatchResult {
             placements,
