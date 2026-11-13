@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#7fd3e6" />
+    <meta name="description" content="Bounty Royale — a 3-minute, 10-fighter island battle royale. Play instantly in your browser." />
+    <title>Bounty Royale</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="view" aria-label="Game view"></canvas>
+
+      <!-- world-anchored UI (name tags, damage numbers) -->
+      <div id="tags" aria-hidden="true"></div>
+      <div id="floaters" aria-hidden="true"></div>
+
+      <div id="vignette" aria-hidden="true"></div>
+      <div id="flash" aria-hidden="true"></div>
+
+      <!-- HUD -->
+      <div id="hud" class="hidden">
+        <div class="hud-tl">
+          <div class="chip" id="alive-chip" title="Fighters alive">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="4.2" /><path d="M3.5 21c.8-4.6 4.2-7.4 8.5-7.4s7.7 2.8 8.5 7.4z" /></svg>
+            <b id="alive">10</b><span>alive</span>
+          </div>
+          <div class="chip" id="kills-chip" title="Your eliminations">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3l7 7-2 2-7-7zM20 3l-7 7 2 2 7-7zM6.5 13.5l4 4-2.5 2.5-1.5-1.5-2 2-1.5-1.5 2-2L3.5 15.5zM17.5 13.5l-4 4 2.5 2.5 1.5-1.5 2 2 1.5-1.5-2-2 1.5-1.5z" /></svg>
+            <b id="kills">0</b><span>kills</span>
+          </div>
+        </div>
+        <div class="hud-tc">
+          <div id="storm-chip" class="storm-chip">
+            <span class="storm-dot"></span><span id="storm-text">STORM 1</span><b id="match-time">3:00</b>
+          </div>
+          <div id="storm-warn" class="storm-warn hidden">OUTSIDE THE SAFE ZONE</div>
+        </div>
+        <div class="hud-tr">
+          <ol id="feed" aria-live="polite"></ol>
+        </div>
+        <canvas id="minimap" width="150" height="150" aria-label="Minimap"></canvas>
+        <div class="hud-bc">
+          <div class="weapon-card">
+            <img id="weapon-icon" alt="" width="96" height="48" />
+            <div class="weapon-meta">
+              <div id="weapon-name">POPPER</div>
+              <div id="ammo" class="ammo"></div>
+            </div>
+          </div>
+          <div class="hp">
+            <div class="hp-bar"><div id="hp-fill"></div><div id="hp-ghost"></div></div>
+            <b id="hp-text">100</b>
+          </div>
+        </div>
+        <div id="hint" class="hint hidden"></div>
+        <div id="popup" class="popup"></div>
+        <div id="banner" class="banner"></div>
+        <button id="mute" class="icon-btn" aria-label="Mute sound (M)" title="Mute (M)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke-width="2" stroke-linecap="round" /></svg>
+        </button>
+        <div id="hitmarker" aria-hidden="true"></div>
+      </div>
+
+      <!-- touch controls -->
+      <div id="touch" class="hidden" aria-hidden="true">
+        <div class="stick" id="stick-l"><div class="knob"></div></div>
+        <div class="stick aim" id="stick-r"><div class="knob"></div></div>
+      </div>
+
+      <!-- title -->
+      <section id="title" class="screen" aria-labelledby="logo">
+        <div class="title-inner">
+          <h1 id="logo" class="logo"><span class="l1">BOUNTY</span><span class="l2">ROYALE</span></h1>
+          <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the bounty.</p>
+          <button id="play" class="btn-primary" disabled>LOADING…</button>
+          <div class="loadbar" aria-hidden="true"><div id="loadfill"></div></div>
+          <p class="hint-line"><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim · <kbd>click</kbd> shoot · hide in bushes</p>
+        </div>
+      </section>
+
+      <!-- death / end -->
+      <section id="end" class="screen hidden" aria-labelledby="end-title" role="dialog">
+        <div class="end-inner">
+          <div id="end-place" class="end-place">#4</div>
+          <h2 id="end-title" class="end-title">ELIMINATED</h2>
+          <p id="end-sub" class="end-sub">of 10</p>
+          <div class="end-stats">
+            <div><b id="end-kills">0</b><span>kills</span></div>
+            <div><b id="end-dmg">0</b><span>damage</span></div>
+            <div><b id="end-time">0:00</b><span>survived</span></div>
+          </div>
+          <div class="end-btns">
+            <button id="again" class="btn-primary">PLAY AGAIN</button>
+            <button id="spectate" class="btn-ghost">SPECTATE</button>
+          </div>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
