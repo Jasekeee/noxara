@@ -10,6 +10,7 @@ const ONE: u128 = 1_000_000_000_000_000_000;
 struct World {
     w: Worker<Sandbox>,
     c: Contract,
+    owner: Account,
     server: Account,
     relay: Account,
 }
@@ -32,7 +33,7 @@ async fn world() -> anyhow::Result<World> {
         .await?;
     println!("new(): {} Tgas", r.total_gas_burnt.as_tgas());
     r.into_result()?;
-    Ok(World { w, c, server, relay })
+    Ok(World { w, c, owner, server, relay })
 }
 
 /// A guest the way the relayer makes one: `g-*.<relay>` + storage prepaid by the relayer.
@@ -211,24 +212,45 @@ async fn bounty_retirement_and_rookies() -> anyhow::Result<()> {
 async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     let wd = world().await?;
     let c = &wd.c;
+    let house = format!("house.{}", c.id());
     let alice = wd.w.root_account()?.create_subaccount("alice").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
     // not registered yet
     let r = alice.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
     assert!(format!("{:?}", r.into_result().unwrap_err()).contains("register first"));
     alice.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
-    // first match: no $BOUNTY yet -> plays free, wins, earns
+
+    // review fix #3: no $BOUNTY -> plays free but can't win: the pot goes to the house
     let (s, _) = start(&alice, c).await?;
     assert_eq!(s["player_paid"], "0");
     let (r, _) = settle(&wd.server, c, &s["match_id"], 0, None).await?;
     let r = r.map_err(anyhow::Error::msg)?;
-    let prize: u128 = r["prize"].as_str().unwrap().parse()?;
-    assert_eq!(ft(c, alice.id().as_str()).await?, prize);
-    // second match: pays the entry
+    assert_eq!(r["prize_to"], house.as_str());
+    assert_eq!(ft(c, alice.id().as_str()).await?, 0);
+
+    // the on-ramp: the owner grants from the house treasury (no minting)
+    wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": alice.id(), "amount": (30 * ONE).to_string()})).transact().await?.into_result()?;
     let (s, _) = start(&alice, c).await?;
     assert_eq!(s["player_paid"], (10 * ONE).to_string());
-    assert_eq!(ft(c, alice.id().as_str()).await?, prize - 10 * ONE);
+    let (r, _) = settle(&wd.server, c, &s["match_id"], 0, None).await?;
+    let r = r.map_err(anyhow::Error::msg)?;
+    let prize: u128 = r["prize"].as_str().unwrap().parse()?;
+    assert_eq!(r["prize_to"], alice.id().as_str());
+    assert_eq!(ft(c, alice.id().as_str()).await?, 20 * ONE + prize);
+
+    // review fix #1: abandoning a seeded match forfeits the entry (bots are refunded)
+    let (s1, _) = start(&alice, c).await?;
+    let before_house = ft(c, &house).await?;
+    let (s2, _) = start(&alice, c).await?;
+    assert_ne!(s1["match_id"], s2["match_id"]);
+    assert_eq!(ft(c, alice.id().as_str()).await?, prize, "two entries gone: one forfeited, one in escrow");
+    assert_eq!(ft(c, &house).await?, before_house + 10 * ONE);
+    let gone: Value = c.view("get_match").args_json(json!({"match_id": s1["match_id"]})).await?.json()?;
+    assert_eq!(gone, Value::Null);
+    let p: Value = c.view("get_player").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    assert_eq!(p["deaths"], 1, "the abandoned match counts as a loss");
+
     // and can tip a bot with a plain NEP-141 transfer
-    let bot = s["roster"][0]["account"].as_str().unwrap().to_string();
+    let bot = s2["roster"][0]["account"].as_str().unwrap().to_string();
     alice
         .call(c.id(), "ft_transfer")
         .args_json(json!({"receiver_id": bot, "amount": ONE.to_string()}))

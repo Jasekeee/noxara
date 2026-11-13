@@ -218,12 +218,22 @@ fn real_player_pays_entry_and_wins_the_pot() {
 }
 
 #[test]
-fn real_player_without_tokens_plays_free_and_still_earns() {
+fn real_player_who_paid_nothing_wins_nothing() {
+    // review fix #3: no entry paid -> prize-ineligible exactly like a guest
     let mut c = setup();
+    let house0 = c.balance(&c.house);
     let s = start(&mut c, ALICE, 200);
     assert_eq!(s.player_paid.0, 0);
     let r = settle(&mut c, s.match_id, 0, None, 210);
-    assert_eq!(bal(&c, ALICE), r.prize.0);
+    assert_eq!(r.prize_to, c.house);
+    assert_eq!(bal(&c, ALICE), 0);
+    assert_eq!(c.get_player(acc(ALICE)).unwrap().earnings.0, 0);
+    assert_eq!(c.balance(&c.house), house0 + r.prize.0 + r.house_cut.0);
+    // and a bounty kill by a non-payer also feeds the house
+    let s = start(&mut c, ALICE, 220);
+    let r = settle(&mut c, s.match_id, 5, Some(0), 230);
+    assert_eq!(r.bounty_to.as_ref(), Some(&c.house));
+    assert_eq!(bal(&c, ALICE), 0);
     assert_supply(&c);
 }
 
@@ -320,26 +330,122 @@ fn broke_bots_retire_and_rookies_take_the_slot() {
 }
 
 #[test]
-fn abandoning_refunds_and_sweep_after_expiry() {
+fn abandon_after_seed_forfeits_the_players_entry() {
+    // review fix #1: no free option on a seed you didn't like
     let mut c = setup();
     let house = c.house.clone();
     c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
+    let house0 = c.balance(&c.house);
     let s1 = start(&mut c, ALICE, 200);
     assert_eq!(bal(&c, ALICE), 40 * ONE);
-    // starting again abandons the first match: everything refunded first
-    let s2 = start(&mut c, ALICE, 210);
+    let s2 = start(&mut c, ALICE, 210); // abandons s1 after its seed was fixed
     assert!(c.get_match(s1.match_id).is_none());
+    assert_eq!(bal(&c, ALICE), 30 * ONE, "first entry forfeited, second paid");
+    assert_eq!(c.balance(&c.house), house0 + ENTRY_FEE);
+    assert_eq!(bal(&c, ME), 10 * ENTRY_FEE, "only s2 in escrow: bots were refunded for s1");
+    let p = c.get_player(acc(ALICE)).unwrap();
+    assert_eq!((p.matches, p.deaths, p.pending), (1, 1, Some(s2.match_id)), "the abandoned match counts as a loss");
+    assert!(c.get_fighters().iter().all(|f| f.fighter.escrowed.0 == ENTRY_FEE));
+    assert_supply(&c);
+}
+
+#[test]
+fn abandon_before_the_seed_is_fixed_refunds_everything() {
+    let mut c = setup();
+    let house = c.house.clone();
+    c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
+    ctx(ALICE, 200, NearToken::from_yoctonear(0));
+    let _ = c.start_match(); // resolve_start never ran (e.g. the callback failed)
     assert_eq!(bal(&c, ALICE), 40 * ONE);
-    assert_eq!(bal(&c, ME), 10 * ENTRY_FEE);
-    // too early to sweep
+    start(&mut c, ALICE, 210);
+    assert_eq!(bal(&c, ALICE), 40 * ONE, "the unseeded entry came back");
+    assert_eq!(c.get_player(acc(ALICE)).unwrap().matches, 0);
+    assert_supply(&c);
+}
+
+#[test]
+fn expired_matches_are_swept_by_anyone() {
+    let mut c = setup();
+    let house = c.house.clone();
+    c.move_tokens(&house, &acc(ALICE), 50 * ONE, "test");
+    let house0 = c.balance(&c.house);
+    let s = start(&mut c, ALICE, 200);
     ctx("anyone.test", 220, NearToken::from_yoctonear(0));
-    assert!(!c.sweep_match(s2.match_id));
-    ctx("anyone.test", 211 + EXPIRY_BLOCKS + 1, NearToken::from_yoctonear(0));
-    assert!(c.sweep_match(s2.match_id));
-    assert_eq!(bal(&c, ALICE), 50 * ONE);
+    assert!(!c.sweep_match(s.match_id), "too early");
+    ctx("anyone.test", 200 + EXPIRY_BLOCKS + 1, NearToken::from_yoctonear(0));
+    assert!(c.sweep_match(s.match_id));
+    assert_eq!(bal(&c, ALICE), 40 * ONE, "seeded: the player's entry is forfeited");
+    assert_eq!(c.balance(&c.house), house0 + ENTRY_FEE);
     assert_eq!(bal(&c, ME), 0);
-    assert!(c.get_fighters().iter().all(|f| f.balance.0 == STARTER));
+    assert!(c.get_fighters().iter().all(|f| f.balance.0 == STARTER && f.fighter.escrowed.0 == 0));
     assert_eq!(c.get_player(acc(ALICE)).unwrap().pending, None);
+    assert!(c.pending.is_empty());
+    assert_supply(&c);
+}
+
+#[test]
+fn pending_matches_are_capped_and_lazily_swept() {
+    // review fix #2: unbounded pending matches can't drain the bots
+    let mut c = setup();
+    for i in 0..MAX_PENDING {
+        let who = format!("g-{i:04}.relay.test");
+        ctx(RELAY, 150, STORAGE_DEPOSIT);
+        c.storage_deposit(Some(acc(&who)), None);
+        start(&mut c, &who, 200);
+    }
+    assert_eq!(c.pending.len(), MAX_PENDING);
+    ctx(RELAY, 150, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("g-late.relay.test")), None);
+    ctx("g-late.relay.test", 300, NearToken::from_yoctonear(0));
+    let full = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = c.start_match();
+    }));
+    assert!(full.is_err(), "the island is full");
+    // once the oldest expire, the next start sweeps them itself
+    let s = start(&mut c, "g-late.relay.test", 200 + EXPIRY_BLOCKS + 1);
+    assert!(s.seed > 0);
+    assert_eq!(c.pending.len(), MAX_PENDING - 1, "two expired swept, one added");
+    assert_supply(&c);
+}
+
+#[test]
+fn bots_short_only_because_of_escrow_are_not_retired() {
+    // review fix #2: escrowed entries are not "broke"
+    let mut c = setup();
+    let pip = c.slots[2].clone();
+    let house = c.house.clone();
+    // Pip has played and is down to 15
+    c.move_tokens(&pip, &house, 85 * ONE, "test");
+    let mut f = c.load_fighter(&pip).unwrap();
+    f.record.matches = 3;
+    c.save_fighter(f);
+    let s1 = start(&mut c, GUEST, 200); // Pip pays 10, keeps 5, 10 in escrow
+    assert_eq!(s1.roster[2].paid.0, ENTRY_FEE);
+    let s2 = start(&mut c, ALICE, 205); // 5 < entry, but 10 in escrow: still plays (pays 5)
+    assert_eq!(c.slots[2], pip, "not retired");
+    assert_eq!(s2.roster[2].paid.0, 5 * ONE);
+    assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, 15 * ONE);
+    // s1 settles (Pip loses): escrow released, balance 0, but s2 still holds 5 -> stays
+    settle(&mut c, s1.match_id, 4, None, 210);
+    assert_eq!(c.slots[2], pip);
+    // s2 settles: nothing left anywhere -> retires
+    settle(&mut c, s2.match_id, 4, None, 220);
+    assert_ne!(c.slots[2], pip);
+    assert_eq!(c.load_fighter(&pip).unwrap().escrowed.0, 0);
+    assert_supply(&c);
+}
+
+#[test]
+fn house_grant_is_owner_only_capped_and_never_to_guests() {
+    let mut c = setup();
+    ctx("owner.test", 200, NearToken::from_yoctonear(0));
+    c.house_grant(acc(ALICE), U128(50 * ONE));
+    assert_eq!(bal(&c, ALICE), 50 * ONE);
+    for (who, to, amt) in [("owner.test", GUEST, ONE), ("owner.test", ALICE, MAX_GRANT + 1), (ALICE, ALICE, ONE), ("owner.test", "bob.test", ONE)] {
+        ctx(who, 201, NearToken::from_yoctonear(0));
+        let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.house_grant(acc(to), U128(amt))));
+        assert!(r.is_err(), "{who} -> {to} {amt}");
+    }
     assert_supply(&c);
 }
 
