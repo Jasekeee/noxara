@@ -23,7 +23,7 @@
 // the first 10 s (onboarding). Bots lob grenades with aimDist = predicted target distance.
 import type { FighterState, Input, Match, Personality } from "./types";
 import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
-import { BULLET_R, FIGHTER_R, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
+import { BULLET_R, FIGHTER_R, SPAWN_PROTECT, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
 import { segHit } from "./geom";
 
 interface Params {
@@ -651,7 +651,7 @@ export function botInput(match: Match, idx: number): Input {
     const clear = me.weapon === "grenade" || lineClear(match, me.x, me.y, T.x, T.y);
     const allowed = (willFight && !mode.startsWith("flee")) || ((mode.startsWith("flee") || mode.startsWith("hide")) && (hurtRecently || dT < 4 * FP));
     fire = allowed && aimed && clear && dT <= Math.min(maxR, ambushR) && t - b.targetSince >= P.react && t >= me.readyTick;
-    if (me.ammo === 0) fire = false;
+    if (me.ammo === 0 || t < SPAWN_PROTECT) fire = false; // no point shooting protected fighters
     // Human-like bursts: a few shots, then a short pause to re-aim / move.
     if (fire && t < b.burstPause) fire = false;
     if (fire && --b.burstLeft <= 0) {

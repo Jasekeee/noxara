@@ -37,8 +37,8 @@ export function generateWorld(seed: number): GeneratedWorld {
   const rot = rng.below(4096);
   const spawns: { x: number; y: number }[] = [];
   for (let i = 0; i < FIGHTERS; i++) {
-    const a = rot + Math.trunc((i * 4096) / FIGHTERS) + rng.range(-60, 60);
-    const rr = SPAWN_RING + rng.range(-1500, 1500);
+    const a = rot + Math.trunc((i * 4096) / FIGHTERS) + rng.range(-30, 30);
+    const rr = SPAWN_RING + rng.range(-1000, 1000);
     spawns.push({ x: Math.trunc((icos(a) * rr) / 1024), y: Math.trunc((isin(a) * rr) / 1024) });
   }
 
