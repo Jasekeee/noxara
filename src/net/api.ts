@@ -100,7 +100,12 @@ export interface GameClient {
   startMatch(): Promise<StartResult>;
   /** Hand the finished match to the server, which re-verifies and settles it on chain. */
   settle(matchId: string, record: MatchRecord): Promise<SettleResult>;
-  // ---- T3 ----
+  explorerTx(hash: string): string;
+  explorerAccount(account: string): string;
+}
+
+/** T3 additions. Agent C implements them on the same client object; UI checks `"signIn" in client`. */
+export interface GameClientT3 extends GameClient {
   /** Sign in with a NEAR wallet (real account: can earn $BOUNTY, sponsor, keeps progress). One wallet popup, then gasless again. */
   signIn(): Promise<string>;
   signOut(): Promise<void>;
@@ -113,8 +118,6 @@ export interface GameClient {
   unsponsor(bot: string): Promise<{ tx: string | null; returned: number }>;
   leaderboard(kind: "bots" | "players"): Promise<LeaderRow[]>;
   history(account: string): Promise<FighterEvent[]>;
-  explorerTx(hash: string): string;
-  explorerAccount(account: string): string;
 }
 
 /** Implemented by Agent C in src/net/client.ts. */
