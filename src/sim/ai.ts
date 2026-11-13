@@ -9,6 +9,13 @@
 // priority/utility (storm > heal/flee > fight > chest > camp > roam), (3) steers around obstacles by
 // sampling 16 directions, (4) aims with lead + skill jitter and fires when aimed, in range and with a
 // clear line. Personalities change thresholds, ranges, aim skill and goals.
+// Fairness: enemies count only if canSee() (bushes), within vision (10–15 u) and noticed (view cone
+// ±88°, heard shooting, or alerted by damage). Bots fire in bursts, lead imperfectly, dodge some
+// bullets/grenades, disengage when losing and regen in bushes, and shoot back while retreating.
+// Personalities: aggressive (early fights, chases, short range, better aim), camper (holds a bush
+// near the next safe zone, ambushes), sniper (hunts a sniper, long preferred range, wide vision),
+// looter (opens chests until ~55 s, avoids early fights), coward (avoids fights unless cornered,
+// moves into the next circle early, hides), balanced.
 import type { FighterState, Input, Match, Personality } from "./types";
 import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
 import { BULLET_R, FIGHTER_R, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
@@ -35,8 +42,8 @@ interface Params {
   lootUntil: number;
 }
 
-/** vision ranges (u): short / normal / sniper */
-const V1 = 10, V2 = 11, V3 = 14;
+/** vision ranges (u): short / normal (the sniper personality uses 15 u; +3 u while holding a sniper) */
+const V1 = 10, V2 = 11;
 export const PERSONALITY: Record<Personality, Params> = {
   aggressive: { engage: 140, pref: 45, lowHp: 30, jitter: 100, react: 6, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
   camper: { engage: 100, pref: 70, lowHp: 40, jitter: 125, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
@@ -539,7 +546,7 @@ export function botInput(match: Match, idx: number): Input {
       break;
     }
   }
-  if (t < b.dodgeUntil && !stormUrgent && goalA !== -2) {
+  if (t < b.dodgeUntil && !stormUrgent) {
     goalA = b.dodgeA;
     mode += "+dodge";
   }
