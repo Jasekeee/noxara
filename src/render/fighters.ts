@@ -9,6 +9,19 @@ import { reloadProgress } from "../ui/hud";
 
 export const CHAR_SCALE = 2.8;
 
+// cool fresnel rim (dusk lighting): one shared uniform + one shared program for every fighter material, no extra lights
+const RIM = { value: new THREE.Color(PAL.rim).multiplyScalar(0.38) };
+const rimCompile = (sh: THREE.WebGLProgramParametersWithUniforms) => {
+  sh.uniforms.uRim = RIM;
+  sh.fragmentShader = sh.fragmentShader
+    .replace("#include <common>", "#include <common>\nuniform vec3 uRim;")
+    .replace(
+      "#include <emissivemap_fragment>",
+      "#include <emissivemap_fragment>\n  totalEmissiveRadiance += uRim * pow(1.0 - saturate(dot(normalize(vViewPosition), normal)), 3.5);",
+    );
+};
+const rimKey = () => "fighter-rim";
+
 interface ClipSet {
   idle: THREE.AnimationClip;
   walk: THREE.AnimationClip;
@@ -115,6 +128,8 @@ export class FighterView {
         const mat = (m.material as THREE.MeshStandardMaterial).clone();
         mat.emissive = new THREE.Color(0xffffff);
         mat.emissiveIntensity = 0;
+        mat.onBeforeCompile = rimCompile;
+        mat.customProgramCacheKey = rimKey;
         m.material = mat;
         this.mats.push(mat);
         m.castShadow = true;

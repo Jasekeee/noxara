@@ -98,9 +98,9 @@ scene.background = new THREE.Color(PAL.sky);
 scene.fog = new THREE.Fog(PAL.fog, 48, 115);
 
 const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 0.5, 300);
-const hemi = new THREE.HemisphereLight(PAL.hemiSky, PAL.hemiGround, 1.25);
+const hemi = new THREE.HemisphereLight(PAL.hemiSky, PAL.hemiGround, 1.05);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight(PAL.sun, 2.1);
+const sun = new THREE.DirectionalLight(PAL.sun, 2.15);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 const sc = sun.shadow.camera;
@@ -1034,7 +1034,7 @@ function frame(now: number) {
   const fog = scene.fog as THREE.Fog;
   fog.near = Math.max(48, dist + 14);
   fog.far = fog.near + 70;
-  sun.position.set(camTarget.x + 12, 30, camTarget.z + 8);
+  sun.position.set(camTarget.x + 22, 17, camTarget.z + 12); // low dusk key light, long shadows
   sun.target.position.set(camTarget.x, 0, camTarget.z);
 
   water.uniforms.uTime.value = time;

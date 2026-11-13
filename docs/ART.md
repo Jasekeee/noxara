@@ -12,7 +12,10 @@ into our own palette. No Brawl Stars / Fortnite assets, wording or look-alike ch
 ## Palette (`src/render/palette.ts` is the source of truth)
 | Role | Hex | Notes |
 |---|---|---|
-| Sky / fog | `#8fd8ea` | background + linear fog 48–115 u |
+| Sky / fog (dusk) | `#2c2f6e` / `#3a3878` | background + linear fog 48–115 u (day look before 2026-11-14 was `#8fd8ea`) |
+| Dusk lights | hemi sky `#8088e0` / ground `#3e3456` @1.05, sun `#ffa463` @2.15 | one shadow-casting directional only, low key (offset +22, 17, +12 from the camera target) |
+| Fighter rim | `#9fd8ff` × 0.38, fresnel pow 3.5 | `onBeforeCompile` on fighter materials, one shared program; no extra lights |
+| Storm wall foot | `#ff9a3c` | warm glow band at the base of the violet wall |
 | Water deep → shallow → foam | `#1a6fb0` → `#34c6d3` → `#eafcff` | shader: depth by distance from shore, animated foam bands |
 | Sand / wet sand | `#f4d79c` / `#d6b07a` | beach cone, vertex coloured |
 | Grass mid / dark / light | `#5fae45` / `#4a963a` / `#7cc152` | flat-shaded jittered triangle grid, 1 colour per face |

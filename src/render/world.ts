@@ -242,6 +242,7 @@ export class World {
       uC: { value: new THREE.Vector2() },
       uColor: { value: new THREE.Color(PAL.storm) },
       uHot: { value: new THREE.Color(PAL.stormHot) },
+      uEdge: { value: new THREE.Color(PAL.stormEdge) },
     };
     const wallGeo = new THREE.CylinderGeometry(1, 1, 7, 128, 1, true);
     wallGeo.translate(0, 3.0, 0);
@@ -254,7 +255,7 @@ export class World {
         varying vec2 vUv; varying vec3 vP;
         void main() { vUv = uv; vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: /* glsl */ `
-        uniform float uTime; uniform vec3 uColor; uniform vec3 uHot;
+        uniform float uTime; uniform vec3 uColor; uniform vec3 uHot; uniform vec3 uEdge;
         varying vec2 vUv; varying vec3 vP;
         void main() {
           float a = atan(vP.z, vP.x);
@@ -263,7 +264,7 @@ export class World {
           float h = vUv.y;
           float alpha = (1.0 - h) * 0.55 + streak * 0.12 * (1.0 - h) + smoothstep(0.0, 0.05, 0.05 - h) * 0.6;
           vec3 c = mix(uColor, uHot, streak * swirl * (1.0 - h));
-          c += smoothstep(0.08, 0.0, h) * 0.6;
+          c += uEdge * (smoothstep(0.14, 0.0, h) * 0.9 + smoothstep(0.35, 0.0, h) * 0.25);
           gl_FragColor = vec4(c, clamp(alpha, 0.0, 0.85));
           #include <colorspace_fragment>
         }`,
