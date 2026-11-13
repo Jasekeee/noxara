@@ -31,9 +31,6 @@
       "Edit(~/Developer/br-wt/**)"
     ],
     "ask": [
-      "Bash(*network-config mainnet*)",
-      "Bash(*--network mainnet*)",
-      "Bash(*BR_MAINNET_YES*)",
       "Bash(gh repo edit *--visibility*)",
       "Bash(gh repo create *--public*)",
       "Bash(vercel *)",
@@ -67,10 +64,6 @@
       "Bash(rm * $HOME*)",
       "Bash(git push * +*)",
       "Bash(git push * :*)",
-      "Bash(*--network=mainnet*)",
-      "Bash(*NEAR_ENV=mainnet*)",
-      "Bash(*networkId mainnet*)",
-      "Bash(*--networkId=mainnet*)",
       "Bash(npm publish*)",
       "Bash(pnpm publish*)",
       "Bash(pnpm dlx vercel*)",
@@ -81,6 +74,13 @@
       "Bash(npx @railway/cli*)"
     ],
     "deny": [
+      "Bash(*network-config mainnet*)",
+      "Bash(*--network mainnet*)",
+      "Bash(*BR_MAINNET_YES*)",
+      "Bash(*--network=mainnet*)",
+      "Bash(*NEAR_ENV=mainnet*)",
+      "Bash(*networkId mainnet*)",
+      "Bash(*--networkId=mainnet*)",
       "Read(~/.near-credentials/mainnet/**)",
       "Read(~/.near-credentials/mainnet)",
       "Bash(*near-credentials/mainnet*)",
