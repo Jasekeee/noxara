@@ -87,7 +87,7 @@ const plan = {
     contract_total: onRoot ? contractNeed : fund,
     relayer_account: relayFund,
     server_account: onRoot ? 0 : serverFund,
-    per_guest: "~0.017 (0.0015 account funding + 0.01514 storage) + gas, capped by RELAYER_BUDGET_NEAR (default 1)",
+    per_guest: "~0.02 (0.003 account funding + 0.01514 storage + gas; measured 0.027 per guest incl. its first relayed start), capped by RELAYER_BUDGET_NEAR (default 1)",
     per_match_gas: "~0.0015 start (relayer) + ~0.001 settle",
     gas_upper_bound_deploy: 0.05,
     total_from_root: +((onRoot ? contractNeed : fund) + relayFund + (onRoot ? 0 : serverFund) + 0.05).toFixed(3),
