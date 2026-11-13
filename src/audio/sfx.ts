@@ -197,6 +197,11 @@ class Sfx {
     if (!this.ok("def", 1)) return;
     [392, 370, 349, 262].forEach((f, i) => this.tone("triangle", f, f * 0.98, i === 3 ? 0.8 : 0.22, 0.15, i * 0.2));
   }
+  levelUp() {
+    if (!this.ok("lvl", 0.5)) return;
+    [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone("square", f, f * 1.01, 0.12, 0.12, i * 0.07));
+    this.tone("triangle", 1568, 2093, 0.5, 0.1, 0.38);
+  }
   reload() {
     if (!this.ok("reload", 0.3)) return;
     this.tone("square", 300, 260, 0.04, 0.07);

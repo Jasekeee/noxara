@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { FighterState, WeaponKind } from "../sim/types";
-import { CHARS, WEAPON_MODEL, gltf, model } from "./assets";
+import { WEAPON_MODEL, charFor, gltf, model } from "./assets";
 import { FIGHTER_COLORS, PAL } from "./palette";
 import { WEAPONS } from "../sim/rules";
 import { reloadProgress } from "../ui/hud";
@@ -101,8 +101,8 @@ export class FighterView {
   private wasHidden = false;
   private holdQ = new THREE.Quaternion();
 
-  constructor(readonly idx: number, f: FighterState, tagsEl: HTMLElement) {
-    const charName = CHARS[idx % CHARS.length];
+  constructor(readonly idx: number, f: FighterState, tagsEl: HTMLElement, skin = 0) {
+    const charName = charFor(idx, skin);
     const src = gltf(`chars/${charName}`).scene;
     this.body = SkeletonUtils.clone(src);
     this.body.scale.setScalar(CHAR_SCALE);

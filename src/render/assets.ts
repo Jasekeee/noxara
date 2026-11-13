@@ -19,6 +19,21 @@ export const CHARS = [
   "character-male-e",
 ];
 
+/** Human-only skins unlocked by level (palette ids 10..14, see src/sim/progression.ts). */
+export const HUMAN_SKINS: Record<number, string> = {
+  10: "character-female-c",
+  11: "character-male-d",
+  12: "character-female-f",
+  13: "character-male-g",
+  14: "character-soldier",
+};
+export const HUMAN_SKIN_IDS = [0, 10, 11, 12, 13, 14];
+/** character model for a fighter idx + skin id */
+export function charFor(idx: number, skin: number): string {
+  if (idx === 0 && HUMAN_SKINS[skin]) return HUMAN_SKINS[skin];
+  return CHARS[idx % CHARS.length];
+}
+
 export const WEAPON_MODEL: Record<WeaponKind, string> = {
   popper: "blasters/blaster-b",
   blaster: "blasters/blaster-d",
@@ -67,7 +82,7 @@ const RECOLOR: Record<string, number> = {
 
 export async function loadAll(onProgress: (p: number) => void): Promise<void> {
   const loader = new GLTFLoader();
-  const names = [...CHARS.map((c) => `chars/${c}`), ...Object.values(WEAPON_MODEL), ...NATURE, ...PROPS];
+  const names = [...CHARS.map((c) => `chars/${c}`), ...Object.values(HUMAN_SKINS).map((c) => `chars/${c}`), ...Object.values(WEAPON_MODEL), ...NATURE, ...PROPS];
   let done = 0;
   await Promise.all(
     names.map(async (n) => {
