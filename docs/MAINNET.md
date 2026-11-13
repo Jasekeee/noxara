@@ -11,7 +11,8 @@ the owner's literal reply **"yes, deploy"**.
 | All HIGH/MEDIUM fixed, each with a regression test (incl. the audit's PoC exploits) | pending |
 | Second fresh audit says GO | pending |
 | Full mainnet topology rehearsed on testnet (deploy → match → settle → teardown → balance returned) | pending |
-| Release wasm rebuilt from the audited commit (+ checksum recorded here) | pending |
+| Independent audit #3 | done 2026-11-13 ~20:00 UTC: GO once the stale default wasm is rebuilt (done) + MEDIUM sponsor-cut scaling (fixed, test `audit3_a_small_stake_earns_a_proportional_cut`); LOWs can follow as an upgrade |
+| Release wasm rebuilt from the audited commit (branch `release/v1`) | `contracts/royale/target/near/royale.wasm`, 394,518 bytes, sha256 `a6377e2ea4124985a6fe006dd53bb167dc98e2b227b3f00f603f1128f39063ca`; `scripts/deploy.ts`/`upgrade.ts` refuse a wasm older than the sources |
 
 **Deadline rule:** if mainnet is not live and stable by 2026-11-14 15:00 UTC, the testnet version is submitted. **Keys:** the contract's full-access key is NOT removed (fixes during judging, teardown after 2026-11-25); the README lists every admin method.
 
