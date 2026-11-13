@@ -66,6 +66,9 @@ interface Brain {
   wanderY: number;
   wanderUntil: number;
   bush: number;
+  shotFromX: number;
+  shotFromY: number;
+  shotFromT: number;
   /** % chance to react to an incoming bullet */
   dodge: number;
   dodgeUntil: number;
@@ -133,6 +136,9 @@ function mind(match: Match): Mind {
           wanderY: 0,
           wanderUntil: 0,
           bush: -1,
+          shotFromX: 0,
+          shotFromY: 0,
+          shotFromT: -999,
           dodge: DODGE[f.personality] + rng.range(-8, 8),
           dodgeUntil: -1,
           dodgeA: 0,
@@ -301,6 +307,12 @@ export function botInput(match: Match, idx: number): Input {
   // Disengage when losing (not aggressive bots, not in the endgame) or low; keep it up for a while.
   const losing = T !== null && me.personality !== "aggressive" && s.alive > 3 && me.hp < 60 && T.hp > me.hp + 20;
   if ((me.hp < P.lowHp || losing) && threats > 0 && s.alive > 2) b.fleeUntil = t + 50;
+  // Shot by someone we can't see (long range / hidden): break line of fire, head for cover.
+  if (T === null && t - me.lastHurtTick <= 10 && t - b.shotFromT <= 30 && s.alive > 2 && b.fleeUntil < t) {
+    b.fleeUntil = t + 40;
+    b.fleeX = b.shotFromX;
+    b.fleeY = b.shotFromY;
+  }
   if (me.hp >= Math.min(95, P.lowHp + 35) && threats === 0) b.fleeUntil = 0;
   const fleeing = t < b.fleeUntil && s.alive > 2;
   const insideTarget = (x: number, y: number, pad: number) =>
@@ -516,6 +528,9 @@ export function botInput(match: Match, idx: number): Input {
         break;
       }
       if (segHit(p.x, p.y, p.vx * 8, p.vy * 8, me.x, me.y, FIGHTER_R + 500) < 0) continue;
+      b.shotFromX = p.x - p.vx * 12;
+      b.shotFromY = p.y - p.vy * 12;
+      b.shotFromT = t;
       if (!b.rng.chance(b.dodge)) break;
       // move perpendicular to the bullet, away from its line
       const side = (me.x - p.x) * p.vy - (me.y - p.y) * p.vx > 0 ? -1 : 1;
