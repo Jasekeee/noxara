@@ -32,13 +32,14 @@ function playLive(cfg: MatchConfig, human: (tick: number) => Input) {
   const m = createMatch(cfg);
   const rec = new Recorder();
   const hashes: string[] = [];
+  let bountyKiller: number | null = null;
   while (!m.state.over) {
     const inp = human(m.state.tick);
     rec.push(m.state.tick, 0, inp);
-    m.step(new Map([[0, inp]]));
+    for (const e of m.step(new Map([[0, inp]]))) if (e.t === "bounty") bountyKiller = e.by;
     if (m.state.tick % 300 === 0) hashes.push(m.hash());
   }
-  return { m, rec, hashes };
+  return { m, rec, hashes, bountyKiller };
 }
 
 function runBots(seed: number): { m: Match; events: SimEvent[] } {
@@ -70,10 +71,47 @@ describe("determinism", () => {
       expect(rep.hash).toBe(live.m.hash());
       expect(rep.winner).toBe(live.m.state.winner);
       expect(rep.placements).toEqual(live.m.state.fighters.map((f) => f.placement));
+      expect(rep.kills).toEqual(live.m.state.fighters.map((f) => f.kills));
+      expect(rep.bountyKiller).toBe(live.bountyKiller);
       // the recorder only stores changes
       expect(live.rec.inputs.length).toBeLessThan(live.m.state.tick);
     }
   });
+
+  it("a recorded human grenade throw with aimDist replays identically (packed aim column)", () => {
+    // The human plays autoplay until it loots a grenade, then throws grenades with explicit aimDist.
+    let checked = 0;
+    for (let seed = 1; seed <= 200 && checked < 2; seed++) {
+      const cfg = { seed, fighters: t1Roster() };
+      const m = createMatch(cfg);
+      const rec = new Recorder();
+      const me = m.state.fighters[0];
+      let throws = 0, explodes = 0, k = 0;
+      while (!m.state.over) {
+        const t = m.state.tick;
+        let inp = botInput(m, 0);
+        if (me.alive && me.weapon === "grenade") {
+          k++;
+          inp = { mx: inp.mx, my: inp.my, aim: (k * 211) % 4096, fire: k % 7 === 0, aimDist: 1200 + ((k * 977) % 9000) };
+        }
+        rec.push(t, 0, inp);
+        for (const e of m.step(new Map([[0, inp]]))) {
+          if (e.t === "shot" && e.who === 0 && e.weapon === "grenade") throws++;
+          if (e.t === "explode" && e.by === 0) explodes++;
+        }
+      }
+      if (throws === 0) continue;
+      checked++;
+      expect(explodes).toBeGreaterThan(0);
+      expect(rec.inputs.some((r) => r[4] >= 4096)).toBe(true); // aimDist went through the packed column
+      const rep = replayRecord(cfg, rec.inputs);
+      expect(rep.hash).toBe(m.hash());
+      expect(rep.winner).toBe(m.state.winner);
+      expect(rep.placements).toEqual(m.state.fighters.map((f) => f.placement));
+      expect(rep.kills).toEqual(m.state.fighters.map((f) => f.kills));
+    }
+    expect(checked).toBe(2);
+  }, 60_000);
 
   it("autoplay (botInput for the human) is recordable and replayable", () => {
     const cfg = { seed: 777, fighters: t1Roster() };
