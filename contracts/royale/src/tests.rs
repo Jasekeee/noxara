@@ -670,6 +670,35 @@ fn a_sponsor_profits_from_a_winning_bot() {
 }
 
 #[test]
+fn audit3_a_small_stake_earns_a_proportional_cut() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let camper = c.slots[1].clone(); // idx 2
+    sponsor(&mut c, ALICE, &camper, 10 * ONE, 150); // MIN_STAKE: ~9% of a 110 bankroll
+    let pool = c.sponsors.get(&camper).cloned().unwrap();
+    let s: u128 = pool.entries.iter().map(|e| e.shares.0).sum();
+    let mut h = 200;
+    for _ in 0..12 {
+        let before = c.get_sponsorships(acc(ALICE))[0].earned.0;
+        let st = start(&mut c, GUEST, h);
+        let r = settle(&mut c, st.match_id, 2, None, h + 5);
+        h += 10;
+        if r.winner != Some(2) { continue; }
+        let got = c.get_sponsorships(acc(ALICE))[0].earned.0 - before;
+        assert_eq!(r.prize_to, camper);
+        let prize = r.prize.0; // the dividend base is at most the prize (free matches: entries share only)
+        let full = prize * crate::market::SPONSOR_CUT_BPS / 10_000;
+        let t = c.sponsors.get(&camper).unwrap().total_shares.0;
+        let fair = full * s * 10_000 / (t * crate::market::SPONSOR_MAX_BPS);
+        assert!(got <= fair + 1, "cut scales with ownership: got {got}, fair {fair}, full {full}");
+        assert!(got < full, "a minority stake never collects the whole 10%");
+        assert_supply(&c);
+        return;
+    }
+    panic!("the camper never won in 12 matches");
+}
+
+#[test]
 fn a_sponsor_loses_when_the_bot_retires_broke() {
     let mut c = setup();
     grant(&mut c, ALICE, 100 * ONE);
@@ -1335,13 +1364,19 @@ fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
     let earned = c.get_sponsorships(acc(ALICE))[0].earned.0;
     let pot = s.pot.0 + POT_TOP_UP;
     let entries_part = (r.prize.0 / 1_000_000_000_000) * s.pot.0 / pot * 1_000_000_000_000;
-    assert_eq!(earned, entries_part * crate::market::SPONSOR_CUT_BPS / 10_000);
+    // audit #3: the cut also scales with how much of the pool the sponsors own (full 10% only at 30%)
+    let scale = |full: u128, c: &Contract| {
+        let pool = c.sponsors.get(&bot).cloned().unwrap();
+        let sh: u128 = pool.entries.iter().map(|e| e.shares.0).sum();
+        full.min(full * sh * 10_000 / (pool.total_shares.0 * crate::market::SPONSOR_MAX_BPS))
+    };
+    assert_eq!(earned, scale(entries_part * crate::market::SPONSOR_CUT_BPS / 10_000, &c));
     assert!(earned < r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
     // in a PAID match sponsors share the whole prize
     let s = start(&mut c, ALICE, 220);
     let r = settle(&mut c, s.match_id, 2, None, 230);
     let earned2 = c.get_sponsorships(acc(ALICE))[0].earned.0 - earned;
-    assert_eq!(earned2, r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
+    assert_eq!(earned2, scale(r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000, &c));
 }
 
 

@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { checkWasm } from "./wasm-guard.ts";
 
 const arg = (k: string, d?: string) => {
   const i = process.argv.indexOf(`--${k}`);
@@ -51,6 +52,7 @@ const server = onRoot ? relay : `server.${root}`; // mainnet: the relayer is als
 const BOTS = ["brindle", "quillon", "vesper", "magpie", "tallow", "dorrit", "zinnia", "okapi", "fenwick"];
 const npcs = ["house", ...BOTS].map((b) => `${b}.${contract}`);
 
+checkWasm(wasmPath);
 const wasm = fs.readFileSync(wasmPath);
 const STORAGE_PER_BYTE = 1e-5; // NEAR per byte (10^19 yocto)
 const NPC_NEAR = 0.001; // lib.rs NPC_NEAR: each keyless sub-account (not refundable: it can't be deleted)

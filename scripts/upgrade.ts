@@ -7,6 +7,7 @@ import { Near, InMemoryKeyStore } from "near-kit";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { checkWasm } from "./wasm-guard.ts";
 
 const arg = (k: string, d?: string) => {
   const i = process.argv.indexOf(`--${k}`);
@@ -17,7 +18,9 @@ const arg = (k: string, d?: string) => {
 const network = arg("network", "testnet") as "testnet" | "mainnet";
 const root = arg("root");
 const contract = `${arg("name", "royale")}.${root}`;
-const wasm = fs.readFileSync(arg("wasm", path.join(import.meta.dirname, "../contracts/royale/target/near/royale.wasm")));
+const wasmPath = arg("wasm", path.join(import.meta.dirname, "../contracts/royale/target/near/royale.wasm"));
+checkWasm(wasmPath);
+const wasm = fs.readFileSync(wasmPath);
 const rpcUrl = arg("rpc", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 console.log(JSON.stringify({ network, contract, wasm_bytes: wasm.length, steps: ["deploy royale.wasm to the contract account", "call migrate() (private, init(ignore_state))"] }, null, 2));
 if (process.argv.includes("--dry-run")) process.exit(0);

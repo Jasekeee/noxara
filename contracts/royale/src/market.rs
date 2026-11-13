@@ -358,7 +358,12 @@ impl Contract {
         if s == 0 || amount == 0 {
             return 0;
         }
-        let total = (amount * SPONSOR_CUT_BPS / 10_000).min(self.balance(bot));
+        // the full 10% cut goes to sponsors only when they own the maximum 30% of the pool; a smaller
+        // stake earns a proportionally smaller cut (audit #3: a 10-NOX stake must not collect all 10%)
+        let full = amount * SPONSOR_CUT_BPS / 10_000;
+        let t = pool.total_shares.0.max(1);
+        let scaled = full * s * 10_000 / (t * SPONSOR_MAX_BPS);
+        let total = full.min(scaled).min(self.balance(bot));
         let mut paid = 0u128;
         let mut payouts = vec![];
         for e in pool.entries.iter_mut() {
