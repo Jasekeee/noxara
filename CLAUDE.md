@@ -45,3 +45,8 @@ Up to 4 agents, each in its own git worktree/branch, strict file ownership (see 
 
 ## Quality gates
 0 console errors · Playwright "guest opens → plays a full match" passes · Lighthouse accessibility ≥95 (performance ≥80 for 3D) · all tests green · first match understandable with zero text walls (teach by playing) · 60 FPS on a mid laptop.
+
+## Owner decisions (2026-11-13 ~17:50 UTC)
+- First $BOUNTY for real players: **welcome stake** — once per real NEAR account, small fixed amount, play-money only; guests get 0.
+- Multi-wallet sign-in: `@hot-labs/near-connect` pinned **exactly 0.12.0**.
+- Mainnet: **yes, but not now** — nothing on mainnet until the owner's explicit "yes". Root account: `bountyroyale.near` (free as of 2026-11-13, read-only check). Hosting: **Vercel** (frontend) + **Railway** (match server + relayer). The owner imports mainnet keys personally.
