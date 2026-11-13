@@ -22,3 +22,4 @@ Guardrails: no mainnet, no public repo, no hosting deploys, no posts. Approval-n
 | 22:22 | Daily rewards UI (check-in + quests) on the DAILY page; screenshots daily-{desktop,mobile}.jpg | done |
 | 22:35 | CI secret scan failed on a test-only HMAC literal in the helper's relayer test → allowlisted that exact pattern (default rules kept) | fixed |
 | 22:46 | Cold judge #3 = 53/70 (log in JUDGE_LOG.md); lead fixes for #1 (v1 legacy mint explained, verify checks 0 minted since v2 → 11/11 PASS) and docs; Sonnet helper fixing UI items 2–5 on ovn-judge | in progress |
+| ~23:10 | ovn-judge merged (player highlight + coaching cues, MENU title, chain retry + honest offline fallback with cached roster, pot/bounty breakdown, 10% dividend preview, story summary, 390px HUD, touch hints). Live chain match ✓, e2e 11/11 (fps 56.7), verify 11/11 | done |
