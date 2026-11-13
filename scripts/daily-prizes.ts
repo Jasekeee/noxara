@@ -24,7 +24,9 @@ if (!fs.existsSync(file)) {
 }
 const d = JSON.parse(fs.readFileSync(file, "utf8")) as { entries: Record<string, Entry> };
 const all = Object.values(d.entries).sort((a, b) => a.placement - b.placement || b.kills - a.kills || b.ticksSurvived - a.ticksSurvived || a.at - b.at);
-const eligible = all.filter((e) => e.kind === "real" && e.account);
+const endMs = Date.parse(`${day}T00:00:00Z`) + 86_400_000;
+// entries stamped at or after the end of the day can only come from tampering: ignored
+const eligible = all.filter((e) => e.kind === "real" && e.account && e.at < endMs);
 console.log(`Daily ${day}: ${all.length} entries, ${eligible.length} verified real accounts (guests/unverified excluded)`);
 console.log("DRY RUN: nothing is sent.\n");
 eligible.slice(0, 3).forEach((e, i) => {

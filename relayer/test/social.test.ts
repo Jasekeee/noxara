@@ -325,3 +325,46 @@ test("http: routes, CORS, og page and the daily board work end to end", async ()
     srv.close();
   }
 });
+
+// ------------------------------------------------------------------ daily: races and closed days
+test("daily: two concurrent submissions with ONE token -> exactly one accepted (even with a slow owner lookup)", async () => {
+  clock = T0;
+  const key = signer();
+  const s = mk({ verifyOwner: async () => { await new Promise((r) => setTimeout(r, 50)); return true; } });
+  const rec = play(dayCfg(), "bot");
+  const ticks = analyze(dayCfg(), rec.inputs).ticksTotal;
+  const day = utcDay(clock);
+  const t = todayToken(s);
+  clock += ticks * 50;
+  const who = { account: "alice.testnet", publicKey: key.pk, signature: key.sign(dailyMessage(day, inputLogHash(rec.inputs))) };
+  const [a, b] = await Promise.all([1, 2].map((i) => s.daily.submit({ record: rec, token: t, simVersion: SIM_VERSION, ...who }, `7.7.7.${i}`)));
+  assert.deepEqual([a.code, b.code].sort(), [200, 409]);
+  assert.equal(((a.code === 409 ? a : b).json as { code: string }).code, "token_used");
+  assert.equal((s.daily.leaderboard(null).json as { total: number }).total, 1);
+});
+
+test("daily: reading old leaderboards never evicts today's file or loses a used token", async () => {
+  clock = T0;
+  const s = mk();
+  const rec = play(dayCfg(), "idle");
+  const ticks = analyze(dayCfg(), rec.inputs).ticksTotal;
+  const t = todayToken(s);
+  clock += ticks * 50;
+  assert.equal((await s.daily.submit(guestBody(rec, t, "iiii9999"), "8.1.1.1")).code, 200);
+  for (let i = 1; i <= 12; i++) s.daily.leaderboard(`2026-10-${String(i).padStart(2, "0")}`);
+  assert.equal((s.daily.leaderboard(null).json as { total: number }).total, 1);
+  assert.equal(((await s.daily.submit(guestBody(rec, t, "iiii9999"), "8.1.1.1")).json as { code: string }).code, "token_used");
+});
+
+test("daily: a submission after the end of the token's day is rejected (no grace)", async () => {
+  clock = Date.parse("2026-11-14T23:50:00Z");
+  const s = mk({ realtimeFactor: 0 });
+  const rec = play(dayCfg(), "idle");
+  const t = todayToken(s);
+  clock = Date.parse("2026-11-15T00:00:01Z");
+  const r = await s.daily.submit(guestBody(rec, t, "jjjj0000"), "8.2.2.2");
+  assert.equal(r.code, 409);
+  assert.equal((r.json as { code: string }).code, "day_closed");
+  assert.equal((s.daily.leaderboard("2026-11-14").json as { total: number }).total, 0);
+  clock = T0;
+});

@@ -79,7 +79,8 @@ export class Daily {
     let d = this.cache.get(day);
     if (!d) {
       d = readJson<DayFile>(this.file(day)) ?? { day, seed: dailySeed(day), entries: {}, usedTokens: [] };
-      if (this.cache.size > 8) this.cache.clear();
+      // evict only old days: today's file (the one being written) is never dropped from the cache
+      if (this.cache.size > 8) for (const k of this.cache.keys()) if (k !== utcDay(this.now())) this.cache.delete(k);
       this.cache.set(day, d);
     }
     return d;
@@ -105,14 +106,18 @@ export class Daily {
     const tok = this.o.tokens.check(tokenStr, day);
     if (!tok) return err(401, "bad or missing daily token: open DAILY again", "bad_token");
     if (now - tok.issuedAt > DAILY_TOKEN_MAX_AGE_MS || tok.issuedAt > now + 60_000) return err(409, "this attempt expired: start it again from DAILY", "token_expired");
+    // a closed day is final: no grace after midnight UTC, and the token must have been issued on that day
+    if (now >= dayEnd(day) || utcDay(tok.issuedAt) !== day) return err(409, "this daily is closed", "day_closed");
     const record = body.record as MatchRecord | undefined;
     if (!record || !Array.isArray(record.inputs) || typeof record.hash !== "string") return err(400, "missing record", "bad_request");
     const bad = checkInputs(record.inputs);
     if (bad) return err(400, bad, "bad_record");
     const d = this.day(day);
     if (d.usedTokens.includes(tok.nonce)) return err(409, "this attempt was already submitted: start a new one from DAILY", "token_used");
+    // spend the token and persist it BEFORE any await (owner lookup), so a concurrent second submit sees it
     d.usedTokens.push(tok.nonce);
     if (d.usedTokens.length > 20_000) d.usedTokens.splice(0, 5_000);
+    this.save(d);
 
     let a: Analysis;
     try {
@@ -172,12 +177,17 @@ export class Daily {
       name = `Guest ${guestId.slice(0, 4)}`;
     }
     const entry: Entry = { key, name, kind, account: realAccount, earns: kind === "real" ? null : 0, placement: a.placement, kills: a.kills, ticksSurvived: a.ticksSurvived, bountyKilled: a.bountyKilled, at: now };
-    const prev = d.entries[key];
+    // re-read after the awaits and merge into the live DayFile (never write a stale copy back)
+    const live = this.day(day);
+    for (const n of d.usedTokens) if (!live.usedTokens.includes(n)) live.usedTokens.push(n);
+    if (now >= dayEnd(day) || this.now() >= dayEnd(day)) return err(409, "this daily is closed", "day_closed");
+    const prev = live.entries[key];
     const improved = !prev || compareScores(entry, prev) < 0;
-    if (improved) d.entries[key] = entry;
-    this.save(d);
-    const best = d.entries[key];
-    return { code: 200, json: { ok: true, day, kind, name: best.name, earns: best.earns, improved, run: { placement: a.placement, kills: a.kills, ticksSurvived: a.ticksSurvived, bountyKilled: a.bountyKilled }, best: { placement: best.placement, kills: best.kills, ticksSurvived: best.ticksSurvived }, rank: this.rows(d).findIndex((e) => e.key === key) + 1, ...(reason ? { reason } : {}) } };
+    if (improved) live.entries[key] = entry;
+    this.save(live);
+    const best = live.entries[key];
+    const dd = live;
+    return { code: 200, json: { ok: true, day, kind, name: best.name, earns: best.earns, improved, run: { placement: a.placement, kills: a.kills, ticksSurvived: a.ticksSurvived, bountyKilled: a.bountyKilled }, best: { placement: best.placement, kills: best.kills, ticksSurvived: best.ticksSurvived }, rank: this.rows(dd).findIndex((e) => e.key === key) + 1, ...(reason ? { reason } : {}) } };
   }
 
   private save(d: DayFile) {
