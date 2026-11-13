@@ -39,10 +39,10 @@ interface Params {
 const V1 = 10, V2 = 11, V3 = 14;
 export const PERSONALITY: Record<Personality, Params> = {
   aggressive: { engage: 140, pref: 45, lowHp: 30, jitter: 100, react: 6, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
-  camper: { engage: 100, pref: 70, lowHp: 40, jitter: 115, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
+  camper: { engage: 100, pref: 70, lowHp: 40, jitter: 125, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
   sniper: { engage: 105, pref: 80, lowHp: 40, jitter: 100, react: 12, vision: 15 * FP, passive: false, camp: false, lootUntil: 0 },
-  looter: { engage: 100, pref: 70, lowHp: 45, jitter: 135, react: 10, vision: V1 * FP, passive: false, camp: false, lootUntil: 1500 },
-  coward: { engage: 90, pref: 90, lowHp: 60, jitter: 150, react: 12, vision: V1 * FP, passive: true, camp: true, lootUntil: 0 },
+  looter: { engage: 100, pref: 70, lowHp: 45, jitter: 110, react: 8, vision: V1 * FP, passive: false, camp: false, lootUntil: 1100 },
+  coward: { engage: 90, pref: 90, lowHp: 55, jitter: 120, react: 9, vision: V1 * FP, passive: true, camp: true, lootUntil: 0 },
   balanced: { engage: 100, pref: 70, lowHp: 40, jitter: 125, react: 9, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
 };
 
@@ -258,7 +258,7 @@ export function botInput(match: Match, idx: number): Input {
       threats++;
     }
     // Weak + close targets first (third-party), keep the current one unless clearly worse.
-    let score = d + f.hp * 40 - (f.idx === b.target ? 3 * FP : 0);
+    let score = d + f.hp * 40 - (f.idx === b.target ? 3 * FP : 0) - (f.bounty ? 2 * FP : 0);
     if (!lineClear(match, me.x, me.y, f.x, f.y) && me.weapon !== "grenade") score += 6 * FP;
     if (score < tgtScore) {
       tgtScore = score;
@@ -358,6 +358,7 @@ export function botInput(match: Match, idx: number): Input {
     if (bestBush >= 0) {
       const bu = match.map.bushes[bestBush];
       a = dist2(me.x, me.y, bu.x, bu.y) > sq(800) ? angleTo(bu.x, bu.y) : -1;
+      if (a < 0) mode = "hide";
     } else {
       // bias toward the safe centre so fleeing doesn't run into the storm
       const toC = angleTo(st.tx, st.ty);
@@ -573,7 +574,7 @@ export function botInput(match: Match, idx: number): Input {
     if (me.weapon === "grenade" && dT < 3 * FP) maxR = 0;
     const ambushR = P.camp && me.inBush ? Math.trunc((w.range * 85) / 100) : maxR;
     const clear = me.weapon === "grenade" || lineClear(match, me.x, me.y, T.x, T.y);
-    const allowed = willFight && (mode !== "flee" || dT < 4 * FP);
+    const allowed = (willFight && !mode.startsWith("flee")) || ((mode.startsWith("flee") || mode.startsWith("hide")) && (hurtRecently || dT < 4 * FP));
     fire = allowed && aimed && clear && dT <= Math.min(maxR, ambushR) && t - b.targetSince >= P.react && t >= me.readyTick;
     if (me.ammo === 0) fire = false;
     // Human-like bursts: a few shots, then a short pause to re-aim / move.
