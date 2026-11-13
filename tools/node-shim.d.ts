@@ -2,6 +2,7 @@
 // ["vite/client"]). Only what our scripts use. If the lead adds @types/node, delete this file.
 declare const process: {
   argv: string[];
+  execPath: string;
   env: Record<string, string | undefined>;
   exitCode: number | undefined;
   exit(code?: number): never;
@@ -55,6 +56,6 @@ declare module "node:child_process" {
   export function spawnSync(
     cmd: string,
     args: string[],
-    opts?: { stdio?: "inherit" | "pipe"; encoding?: "utf8"; env?: Record<string, string | undefined> },
+    opts?: { stdio?: "inherit" | "pipe"; encoding?: "utf8"; env?: Record<string, string | undefined>; cwd?: string; maxBuffer?: number; timeout?: number },
   ): { status: number | null; stdout: string; stderr: string; error?: Error };
 }

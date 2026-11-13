@@ -51,14 +51,35 @@ const browser = await chromium.launch({
   args: ["--ignore-gpu-blocklist", "--enable-gpu-rasterization", "--use-angle=metal"],
 });
 const errors: string[] = [];
+// The relayer (:8788) only allows CORS from its dev ports. When capturing from another port (BR_URL),
+// proxy relayer calls and add the header, so the lobby shows the live wallets instead of "offline".
+const RELAYER = process.env.BR_RELAYER ?? "http://127.0.0.1:8788";
+const ORIGIN = new URL(BASE).origin;
+async function corsProxy(ctx: import("@playwright/test").BrowserContext) {
+  await ctx.route(`${RELAYER}/**`, async (route) => {
+    const cors = {
+      "access-control-allow-origin": ORIGIN,
+      "access-control-allow-headers": "content-type",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+    };
+    if (route.request().method() === "OPTIONS") return route.fulfill({ status: 204, headers: cors });
+    try {
+      const res = await route.fetch();
+      await route.fulfill({ response: res, headers: { ...res.headers(), ...cors } });
+    } catch {
+      await route.abort();
+    }
+  });
+}
 const play = `/?e2e&autoplay&seed=${SEED}&bots=1`;
 
 // ---- desktop title (no video)
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, baseURL: BASE });
+  await corsProxy(ctx);
   const page = await ctx.newPage();
   await page.goto("/?e2e");
-  await page.waitForTimeout(2_500);
+  await page.waitForTimeout(6_000); // assets + live roster from the chain
   await shot(page, "desktop-title.png");
   await ctx.close();
 }
@@ -71,6 +92,7 @@ const play = `/?e2e&autoplay&seed=${SEED}&bots=1`;
     baseURL: BASE,
     recordVideo: { dir: TMP, size: { width: 1440, height: 900 } },
   });
+  await corsProxy(ctx);
   const page = await ctx.newPage();
   page.on("console", (m) => m.type() === "error" && errors.push(`desktop console: ${m.text()}`));
   page.on("pageerror", (e) => errors.push(`desktop pageerror: ${e.message}`));
@@ -102,10 +124,11 @@ const play = `/?e2e&autoplay&seed=${SEED}&bots=1`;
 // ---- mobile 390x844 (Pixel 7 touch profile)
 {
   const ctx = await browser.newContext({ ...devices["Pixel 7"], viewport: { width: 390, height: 844 }, baseURL: BASE });
+  await corsProxy(ctx);
   const page = await ctx.newPage();
   page.on("pageerror", (e) => errors.push(`mobile pageerror: ${e.message}`));
   await page.goto("/?e2e");
-  await page.waitForTimeout(2_500);
+  await page.waitForTimeout(6_000);
   await shot(page, "mobile-title.png");
   await page.goto(play);
   await waitPlaying(page);

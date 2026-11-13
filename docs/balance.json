@@ -1,67 +1,67 @@
 {
-  "generatedAt": "2026-11-13T15:01:23.804Z",
-  "matches": 300,
+  "generatedAt": "2026-11-13T16:54:13.033Z",
+  "matches": 1000,
   "seeds": [
     1,
-    300
+    1000
   ],
   "p0": "balanced",
-  "finished": 300,
-  "avgMatchSeconds": 129.67883333333333,
-  "stormDeathsPct": 8,
+  "finished": 1000,
+  "avgMatchSeconds": 134.2206,
+  "stormDeathsPct": 7.222222222222222,
   "endedByClockPct": 0,
   "noWinner": 0,
   "crashed": 0,
   "deterministic": true,
-  "matchesPerSecond": 24.265685230242777,
+  "matchesPerSecond": 25.753772686256912,
   "perPersonality": [
     {
       "personality": "balanced",
       "fighters": 3,
-      "wins": 82,
-      "winShare": 27.333333333333332,
-      "winRatePerFighter": 9.11111111111111,
-      "avgKills": 0.7622222222222222
+      "wins": 303,
+      "winShare": 30.3,
+      "winRatePerFighter": 10.1,
+      "avgKills": 0.779
     },
     {
       "personality": "aggressive",
       "fighters": 2,
-      "wins": 49,
-      "winShare": 16.333333333333332,
-      "winRatePerFighter": 8.166666666666666,
-      "avgKills": 1.0433333333333332
+      "wins": 155,
+      "winShare": 15.5,
+      "winRatePerFighter": 7.75,
+      "avgKills": 1.053
     },
     {
       "personality": "camper",
       "fighters": 2,
-      "wins": 92,
-      "winShare": 30.666666666666668,
-      "winRatePerFighter": 15.333333333333334,
-      "avgKills": 0.9766666666666667
+      "wins": 202,
+      "winShare": 20.2,
+      "winRatePerFighter": 10.1,
+      "avgKills": 0.7725
     },
     {
       "personality": "sniper",
       "fighters": 1,
-      "wins": 20,
-      "winShare": 6.666666666666667,
-      "winRatePerFighter": 6.666666666666667,
-      "avgKills": 0.7533333333333333
+      "wins": 79,
+      "winShare": 7.9,
+      "winRatePerFighter": 7.9,
+      "avgKills": 0.837
     },
     {
       "personality": "looter",
       "fighters": 1,
-      "wins": 30,
-      "winShare": 10,
-      "winRatePerFighter": 10,
-      "avgKills": 0.8333333333333334
+      "wins": 110,
+      "winShare": 11,
+      "winRatePerFighter": 11,
+      "avgKills": 0.798
     },
     {
       "personality": "coward",
       "fighters": 1,
-      "wins": 27,
-      "winShare": 9,
-      "winRatePerFighter": 9,
-      "avgKills": 0.36666666666666664
+      "wins": 151,
+      "winShare": 15.1,
+      "winRatePerFighter": 15.1,
+      "avgKills": 0.727
     }
   ],
   "fails": []
