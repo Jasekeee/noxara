@@ -35,8 +35,8 @@ import {
   type Projectile,
   type SimEvent,
   type WeaponKind,
-} from "./types.ts";
-import { Rng, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed.ts";
+} from "./types";
+import { Rng, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
 import {
   BULLET_R,
   BUSH_REVEAL_DIST,
@@ -60,12 +60,12 @@ import {
   armored,
   scaledDamage,
   type StormX,
-} from "./rules.ts";
-import { generateWorld } from "./mapgen.ts";
-import { segHit } from "./geom.ts";
-import { botInput } from "./ai.ts";
+} from "./rules";
+import { generateWorld } from "./mapgen";
+import { segHit } from "./geom";
+import { botInput } from "./ai";
 
-export { WEAPONS, STORM_PHASES, type StormX, type WeaponStats } from "./rules.ts";
+export { WEAPONS, STORM_PHASES, type StormX, type WeaponStats } from "./rules";
 
 const IDLE: Input = { mx: 0, my: 0, aim: 0, fire: false };
 const sq = (v: number) => v * v;

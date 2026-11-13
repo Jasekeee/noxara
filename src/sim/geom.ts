@@ -1,5 +1,5 @@
 // Small integer geometry helpers shared by the sim and the bot AI.
-import { dist2 } from "./fixed.ts";
+import { dist2 } from "./fixed";
 
 /** Closest-approach parameter (0..1024) of segment (x0,y0)+(dx,dy) to circle (cx,cy,r), or -1 if it misses. */
 export function segHit(x0: number, y0: number, dx: number, dy: number, cx: number, cy: number, r: number): number {

@@ -9,10 +9,10 @@
 // priority/utility (storm > heal/flee > fight > chest > camp > roam), (3) steers around obstacles by
 // sampling 16 directions, (4) aims with lead + skill jitter and fires when aimed, in range and with a
 // clear line. Personalities change thresholds, ranges, aim skill and goals.
-import type { FighterState, Input, Match, Personality } from "./types.ts";
-import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed.ts";
-import { BULLET_R, FIGHTER_R, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules.ts";
-import { segHit } from "./geom.ts";
+import type { FighterState, Input, Match, Personality } from "./types";
+import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
+import { BULLET_R, FIGHTER_R, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
+import { segHit } from "./geom";
 
 interface Params {
   /** engage when target within weapon range × engage */

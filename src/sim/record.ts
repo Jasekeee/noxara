@@ -2,8 +2,8 @@
 // Convention: push(match.state.tick /* read BEFORE match.step() */, idx, input) for every human input
 // you pass to step(). Only changes are stored. Replay feeds each recorded input from its tick until the
 // next change for that idx, so the replayed match is bit-identical (same hash()).
-import { MATCH_TICKS, type Input, type MatchConfig, type MatchRecord } from "./types.ts";
-import { createMatch } from "./match.ts";
+import { MATCH_TICKS, type Input, type MatchConfig, type MatchRecord } from "./types";
+import { createMatch } from "./match";
 
 const norm = (v: number) => Math.trunc(v) || 0;
 

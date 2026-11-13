@@ -1,8 +1,8 @@
 // Game-rule constants for the deterministic simulation (owned by agent B / sim).
 // All distances are fixed point (FP = 1000 per world unit), times are ticks (20 per second).
 // Renderer/UI may import these read-only (e.g. weapon range for an aim line, magazine size for the HUD).
-import type { Storm, WeaponKind } from "./types.ts";
-import { FP } from "./fixed.ts";
+import type { Storm, WeaponKind } from "./types";
+import { FP } from "./fixed";
 
 export const ISLAND_R = 32 * FP;
 export const SPAWN_RING = 24 * FP;

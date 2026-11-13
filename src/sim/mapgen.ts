@@ -1,7 +1,7 @@
 // Seeded island generation: obstacles, bushes, chests, heals and spawns. Pure + deterministic.
-import { FIGHTERS, type Bush, type Chest, type Heal, type MapData, type Obstacle, type ObstacleKind, type WeaponKind } from "./types.ts";
-import { FP, Rng, dist2, icos, isin, mixSeed } from "./fixed.ts";
-import { CHEST_LOOT, FIGHTER_R, HEAL_AMOUNT, ISLAND_R, N_CHESTS, N_HEALS, N_OBSTACLES, SPAWN_RING } from "./rules.ts";
+import { FIGHTERS, type Bush, type Chest, type Heal, type MapData, type Obstacle, type ObstacleKind, type WeaponKind } from "./types";
+import { FP, Rng, dist2, icos, isin, mixSeed } from "./fixed";
+import { CHEST_LOOT, FIGHTER_R, HEAL_AMOUNT, ISLAND_R, N_CHESTS, N_HEALS, N_OBSTACLES, SPAWN_RING } from "./rules";
 
 export interface GeneratedWorld {
   map: MapData;

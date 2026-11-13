@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { FIGHTERS, MATCH_TICKS, type FighterSpec, type Input, type Match, type MatchConfig, type SimEvent } from "./types.ts";
-import { FP, Rng, dist2, iatan2, icos, isin } from "./fixed.ts";
-import { createMatch } from "./match.ts";
-import { Recorder, replayRecord } from "./record.ts";
-import { botOnlyRoster, t1Roster } from "./roster.ts";
-import { botInput } from "./ai.ts";
-import { FIGHTER_R, WEAPONS } from "./rules.ts";
+import { FIGHTERS, MATCH_TICKS, type FighterSpec, type Input, type Match, type MatchConfig, type SimEvent } from "./types";
+import { FP, Rng, dist2, iatan2, icos, isin } from "./fixed";
+import { createMatch } from "./match";
+import { Recorder, replayRecord } from "./record";
+import { botOnlyRoster, t1Roster } from "./roster";
+import { botInput } from "./ai";
+import { FIGHTER_R, WEAPONS } from "./rules";
 
 const NONE = new Map<number, Input>();
 
@@ -131,9 +131,10 @@ describe("bot-only matches", () => {
 
   it("perf: a full 10-bot match runs headless well under 1 s", () => {
     runBots(1); // warm-up (JIT)
-    const t0 = performance.now();
+    const clock = (globalThis as unknown as { process: { hrtime: { bigint(): bigint } } }).process.hrtime; // Node-only test timer
+    const t0 = clock.bigint();
     const { m } = runBots(31337);
-    const ms = performance.now() - t0;
+    const ms = Number(clock.bigint() - t0) / 1e6;
     console.log(`[perf] bot match seed 31337: ${m.state.tick} ticks in ${ms.toFixed(1)} ms`);
     expect(ms).toBeLessThan(1000);
   });

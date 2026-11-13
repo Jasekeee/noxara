@@ -1,7 +1,7 @@
 // T1 roster: idx 0 is the human, then 9 original AI fighters (aggressive ×2, camper ×2, balanced ×2,
 // sniper, looter, coward), skins 1..9. Names are original to BOUNTY ROYALE. `bounty` marks the richest
 // bot (T1: fixed pick).
-import type { FighterSpec, Personality } from "./types.ts";
+import type { FighterSpec, Personality } from "./types";
 
 const BOTS: [string, string, Personality][] = [
   ["bot.brindle", "Brindle", "aggressive"],
