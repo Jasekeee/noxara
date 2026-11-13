@@ -221,10 +221,10 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   const me = guest ? "" : await c.account().catch(() => "");
   body.appendChild(
     table(
-      guest ? ["Fighter", "Shares", "Price / share", "Total (+2% tax)", "Seller"] : ["Fighter", "Shares", "Price / share", "Total (+2% tax)", "Seller", "Actions"],
+      guest ? ["Fighter", "Shares", "Price / share", "Total (+2% tax)", "Seller", "Expires"] : ["Fighter", "Shares", "Price / share", "Total (+2% tax)", "Seller", "Expires", "Actions"],
       listings.map((l) => {
         const acts = h("div", "acts");
-        if (!guest) acts.appendChild(l.seller === me ? mkBtn("CANCEL", `Cancel your listing of ${l.name}`, () => act(x, () => c.cancelListing(l.id), "Listing cancelled"), "btn-chip small") : mkBtn("BUY", `Buy ${l.shares} ${l.name} shares`, () => act(x, () => c.buyListing(l.id), `Bought ${l.shares} ${l.name} shares`), "btn-chip small"));
+        if (!guest) acts.appendChild(l.seller === me ? mkBtn("CANCEL", `Cancel your listing of ${l.name}`, () => act(x, () => c.cancelListing(l.id), "Listing cancelled"), "btn-chip small") : mkBtn("BUY (WALLET)", `Buy ${l.shares} ${l.name} shares, confirmed in your wallet`, () => act(x, () => c.buyListing(l.id), `Bought ${l.shares} ${l.name} shares`, true), "btn-chip small"));
         return {
           cells: [
             { t: l.name, l: "Fighter", c: "nm" },
@@ -232,6 +232,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
             { t: `${fmt(l.pricePerShare)} NOX`, l: "Price" },
             { t: `${fmt(l.shares * l.pricePerShare * 1.02)} NOX`, l: "Total", c: "gold" },
             { t: l.seller === me ? "you" : l.seller.replace(/\.(testnet|near)$/, ""), l: "Seller" },
+            { t: l.expiresAt ? `in ${countdown(l.expiresAt)}` : "–", l: "Expires" },
             ...(guest ? [] : [{ n: acts, l: "Actions" }]),
           ],
         };
@@ -302,8 +303,9 @@ function table(head: string[], rows: Row[], empty: string, caption: string): HTM
   return wrap;
 }
 
-async function act(x: Ctx, fn: () => Promise<unknown>, ok: string) {
+async function act(x: Ctx, fn: () => Promise<unknown>, ok: string, wallet = false) {
   try {
+    if (wallet) x.d.toast("Confirm in your wallet…");
     await fn();
     x.d.sfx("coin");
     x.d.toast(ok);
@@ -367,19 +369,19 @@ function listModal(x: Ctx, r: ShareMarketRow, owned: number) {
     const upd = () => {
       const n = Math.max(1, Math.min(owned, Math.floor(Number(a.inp.value)) || 1));
       const p = Math.max(0.01, Number(b.inp.value) || 0.01);
-      out.textContent = `Buyer pays ${fmt(n * p * 1.02)} NOX (2% tax is burned). You get ${fmt(n * p)} NOX.`;
+      out.textContent = `Buyer pays ${fmt(n * p * 1.02)} NOX (2% tax is burned). You get ${fmt(n * p)} NOX. The listing lasts 48 h. You confirm in your wallet (1 yoctoNEAR, no fee to you): this protects your shares.`;
     };
     a.inp.addEventListener("input", upd);
     b.inp.addEventListener("input", upd);
     upd();
-    const ok = h("button", "btn-primary small", "LIST");
+    const ok = h("button", "btn-primary small", "LIST (CONFIRM IN WALLET)");
     const cancel = h("button", "btn-ghost", "Cancel");
     cancel.addEventListener("click", () => x.closeModal());
     ok.addEventListener("click", async () => {
       const n = Math.max(1, Math.min(owned, Math.floor(Number(a.inp.value)) || 1));
       const p = Math.max(0.01, Number(b.inp.value) || 0.01);
       x.closeModal();
-      await act(x, () => x.c.listShares(r.bot, n, p), `Listed ${n} ${r.name} shares`);
+      await act(x, () => x.c.listShares(r.bot, n, p), `Listed ${n} ${r.name} shares`, true);
     });
     card.append(t, a.wrap, b.wrap, out, h("div", "sp-btns", undefined, cancel, ok));
     a.inp.focus();

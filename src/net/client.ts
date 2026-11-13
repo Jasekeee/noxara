@@ -25,7 +25,8 @@ const STORE_REAL = "bountyroyale.account.v1";
 const STORE_PENDING = "bountyroyale.signin.v1";
 const STORE_XP = "bountyroyale.localxp.v1";
 /** methods the signed-in account's function-call key may call (the relayer allow-lists the same) */
-const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "list_shares", "cancel_listing", "buy_listing", "buy_cosmetic"];
+// NOT list_shares / buy_listing: those need a full wallet signature + 1 yoctoNEAR (a leaked game key must not move shares or NOX)
+const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "cancel_listing", "buy_cosmetic", "prune_listings"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
 const START_GAS = 150n * 10n ** 12n; // worst case: retirements + rookie accounts at start (audit #10)
@@ -96,6 +97,7 @@ function friendly(msg: string): string {
   if (m.includes("at most 3 bots")) return "You can back at most 3 bots at once.";
   if (m.includes("all the sponsors")) return "This bot already has as many sponsors as it can take.";
   if (m.includes("don't sponsor")) return "You don't sponsor this bot.";
+  if (m.includes("not allowed") || m.includes("method_not_allowed") || m.includes("allowed method") || m.includes("does not have permission") || m.includes("methodnotallowed")) return "Sign in again to enable shares (your game key predates the share market).";
   if (m.includes("ipo")) return "That IPO is sold out or closed.";
   if (m.includes("listing")) return "That listing is gone: someone else bought or cancelled it.";
   if (m.includes("register first")) return "Your account isn't registered with the game yet: sign in again.";
@@ -114,7 +116,7 @@ type ChainEconomy = {
 };
 type ChainShareRow = { bot: string; name: string; status: "active" | "retired"; sold: number; ipo_left: number; ipo_price: string; last_price: string | null; dividends_paid: string; holders: number; wallet: string; season_income: string; season_costs: string };
 type ChainHolding = { bot: string; shares: number; claimable: string };
-type ChainListing = { id: string | number; seller: string; bot: string; shares: number; price_per_share: string };
+type ChainListing = { expires_ms?: string | number; id: string | number; seller: string; bot: string; shares: number; price_per_share: string };
 type ChainSeasonRow = { bot: string; name: string; points: number; wins: number; kills: number; income: string; costs: string };
 const bps = (n: number | undefined) => (n ?? 0) / 10_000;
 const NEUTRAL_ECONOMY: EconomyInfo = { supply: 0, genesis: 0, minted: 0, burned: 0, house: 0, houseEma: 0, floor: 0, target: 0, m: 0, houseShare: 0, burnShare: 0, brake: 0, topUp: 0, season: 0, seasonEndsAt: 0, seasonBurned: 0, seasonRewards: 0, snapshots: [] };
@@ -746,7 +748,10 @@ class Client implements GameClientT3, GameClientEcon {
 
   async listings(bot?: string): Promise<Listing[]> {
     const [ls, names] = await Promise.all([this.econView<ChainListing[]>("get_listings", bot ? { bot } : {}, []), this.botNames()]);
-    return ls.map((l) => ({ id: String(l.id), seller: l.seller, bot: l.bot, name: names.get(l.bot) ?? shortName(l.bot), shares: l.shares, pricePerShare: toBounty(l.price_per_share) }));
+    const now = Date.now();
+    return ls
+      .map((l) => ({ id: String(l.id), seller: l.seller, bot: l.bot, name: names.get(l.bot) ?? shortName(l.bot), shares: l.shares, pricePerShare: toBounty(l.price_per_share), expiresAt: l.expires_ms ? Number(l.expires_ms) : undefined }))
+      .filter((l) => !l.expiresAt || l.expiresAt > now);
   }
 
   async seasonStandings(season?: number): Promise<SeasonRow[]> {
@@ -773,15 +778,38 @@ class Client implements GameClientT3, GameClientEcon {
     const r = await this.econCall<string>("claim_dividends", { bot });
     return { tx: r.tx, claimed: toBounty(r.value) };
   }
+  /** Calls that need the player's own signature + exactly 1 yoctoNEAR (the game key can't make them). */
+  private async walletCall(method: string, args: unknown): Promise<string | null> {
+    if (!this.realSaved) throw new Error("Sign in with a NEAR account: guests can't hold shares.");
+    if (this._mode !== "chain") throw new Error("The NEAR network is unreachable right now: try again later.");
+    try {
+      const { NearConnector } = await import("@hot-labs/near-connect");
+      this.connector ??= new NearConnector({ network: DEFAULTS.network, autoConnect: true });
+      const wallet = await this.connector.wallet();
+      const r = (await wallet.signAndSendTransaction({
+        receiverId: this.contract,
+        actions: [{ type: "FunctionCall", params: { methodName: method, args: args as Record<string, unknown>, gas: "60000000000000", deposit: "1" } }],
+      })) as unknown;
+      const tx = (r as { transaction?: { hash?: string }; transaction_outcome?: { id?: string } } | null) ?? null;
+      return tx?.transaction?.hash ?? tx?.transaction_outcome?.id ?? null;
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      if (/no wallet|not signed|connect|account/i.test(m)) throw new Error("Reconnect your wallet (sign out, then sign in) to confirm this one.");
+      throw new Error(friendly(m));
+    }
+  }
   async listShares(bot: string, shares: number, pricePerShare: number) {
-    const r = await this.econCall<string | number>("list_shares", { bot, shares, price_per_share: toYocto(pricePerShare) });
-    return { tx: r.tx, id: String(r.value) };
+    return { tx: await this.walletCall("list_shares", { bot, shares, price_per_share: toYocto(pricePerShare) }), id: "" };
+  }
+  /** Permissionless housekeeping: drops expired listings (relayed, gasless). */
+  async pruneListings(max?: number) {
+    return { tx: (await this.econCall("prune_listings", max ? { max } : {})).tx };
   }
   async cancelListing(id: string) {
     return { tx: (await this.econCall("cancel_listing", { id })).tx };
   }
   async buyListing(id: string) {
-    return { tx: (await this.econCall("buy_listing", { id })).tx };
+    return { tx: await this.walletCall("buy_listing", { id }) };
   }
   async buyCosmetic(id: number) {
     return { tx: (await this.econCall("buy_cosmetic", { id })).tx };

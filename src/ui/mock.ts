@@ -127,7 +127,7 @@ export function withMock(base: GameClient): GameClientT3 & GameClientEcon {
     },
     async listings(bot?: string): Promise<Listing[]> {
       const fs = await names();
-      const base: Listing[] = fs.slice(0, 2).map((f, i) => ({ id: String(i + 1), seller: i ? "marlo.testnet" : "quinn.testnet", bot: f.account, name: f.name, shares: 20 + i * 15, pricePerShare: 0.14 + i * 0.03 }));
+      const base: Listing[] = fs.slice(0, 2).map((f, i) => ({ id: String(i + 1), seller: i ? "marlo.testnet" : "quinn.testnet", bot: f.account, name: f.name, shares: 20 + i * 15, pricePerShare: 0.14 + i * 0.03, expiresAt: Date.now() + (30 + i * 9) * 3600e3 }));
       return [...base, ...listed].filter((l) => !bot || l.bot === bot);
     },
     async seasonStandings(): Promise<SeasonRow[]> {
@@ -150,7 +150,7 @@ export function withMock(base: GameClient): GameClientT3 & GameClientEcon {
       const id = String(nextListing++);
       owned.set(bot, Math.max(0, (owned.get(bot) ?? 0) - shares));
       const f = (await names()).find((x) => x.account === bot);
-      listed.push({ id, seller: signedIn, bot, name: f?.name ?? bot, shares, pricePerShare });
+      listed.push({ id, seller: signedIn, bot, name: f?.name ?? bot, shares, pricePerShare, expiresAt: Date.now() + 48 * 3600e3 });
       return { tx: null, id };
     },
     async cancelListing(id: string) {

@@ -187,6 +187,7 @@ export interface Listing {
   name: string;
   shares: number;
   pricePerShare: number;
+  expiresAt?: number; // unix ms (48 h TTL); expired listings are hidden
 }
 
 export interface SeasonRow {
