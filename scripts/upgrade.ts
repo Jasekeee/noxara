@@ -28,4 +28,10 @@ const before = await near.view(contract, "get_config", {});
 const o = await near.transaction(contract).deployContract(contract, wasm).functionCall(contract, "migrate", {}, { gas: "100 Tgas" }).send({ waitUntil: "FINAL" });
 console.log("upgraded + migrated:", o.transaction.hash);
 const after = (await near.view(contract, "get_config", {})) as Record<string, unknown>;
-console.log("supply before/after:", (before as Record<string, unknown>).total_supply, after.total_supply, "entry now", after.entry_fee);
+console.log("supply before/after:", (before as Record<string, unknown>).total_supply, after.total_supply, "version", after.version);
+const mf = process.argv.indexOf("--set-max-free");
+if (mf > 0) {
+  const near2 = new Near({ network, rpcUrl, keyStore: new InMemoryKeyStore({ [root]: key }) });
+  const t = await near2.transaction(root).functionCall(contract, "set_max_free", { max_free: Number(process.argv[mf + 1]) }, { gas: "10 Tgas" }).send({ waitUntil: "FINAL" });
+  console.log("set_max_free:", t.transaction.hash);
+}

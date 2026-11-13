@@ -679,6 +679,7 @@ impl Contract {
         let winner = placements.iter().position(|&p| p == 1).map(|i| i as u8);
         let me = env::current_account_id();
         self.release_escrow(&m);
+        let roster_accounts: Vec<AccountId> = m.roster.iter().map(|r| r.account.clone()).collect();
 
         // ---- the pot: escrowed entries + the minted top-up
         let house = self.house.clone();
@@ -794,6 +795,7 @@ impl Contract {
         self.unlist_pending(&m);
         self.save_match(m);
         self.matches_settled += 1;
+        self.finish_retired_pools(&roster_accounts, match_id.0);
         self.recent.push(match_id.0);
         if self.recent.len() > RECENT_MATCHES {
             let old = self.recent.remove(0);
@@ -1071,6 +1073,18 @@ impl Contract {
         }
     }
 
+    /// Retired bots whose last escrowed entry just came back (refund or settlement): close their
+    /// sponsorship pool now, with everything they will ever get back.
+    fn finish_retired_pools(&mut self, accounts: &[AccountId], match_id: u64) {
+        for a in accounts {
+            if let Some(f) = self.load_fighter(a) {
+                if !f.active && f.escrowed.0 == 0 && self.sponsors.get(a).is_some() {
+                    self.close_pool(a, match_id);
+                }
+            }
+        }
+    }
+
     /// End a match that will never be settled (abandoned or expired): bots get their entries
     /// back; the player's entry is refunded only if the seed was never fixed, otherwise it goes to
     /// the house and the match counts as a loss.
@@ -1099,6 +1113,8 @@ impl Contract {
         }
         self.unlist_pending(&m);
         self.matches.remove(&match_id);
+        let accts: Vec<AccountId> = m.roster.iter().map(|r| r.account.clone()).collect();
+        self.finish_retired_pools(&accts, match_id);
         event("match_closed", &near_sdk::serde_json::json!({ "match_id": U64(match_id), "reason": why, "seeded": seeded, "player_forfeited": if seeded { m.player_paid } else { U128(0) } }));
     }
 
@@ -1173,7 +1189,11 @@ impl Contract {
         f.retired_block = Some(env::block_height());
         event("retire", &near_sdk::serde_json::json!({ "account": f.account, "slot": slot, "reason": why, "record": f.record, "balance": U128(self.balance(&f.account)) }));
         let acct = f.account.clone();
-        self.close_pool(&acct, match_id);
+        // the pool closes once none of the bot's entries are left in escrow (pending matches may still
+        // refund or pay it): see finish_retired_pools
+        if f.escrowed.0 == 0 {
+            self.close_pool(&acct, match_id);
+        }
         let left = self.balance(&acct);
         self.push_history(&acct, match_id, "retired", left, why);
         let mut list = self.retired.get().clone().unwrap_or_default();

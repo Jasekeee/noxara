@@ -796,3 +796,85 @@ fn migrate_from_state_v1() {
     assert_eq!(m.token.total_supply, supply);
     assert!(m.get_market().iter().all(|e| e.sponsors == 0));
 }
+
+// ---------------------------------------------------------------- review fixes (sponsorship)
+
+#[test]
+fn unregister_needs_closed_sponsorships_and_cleans_xp() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 30 * ONE);
+    let bot = c.slots[0].clone();
+    sponsor(&mut c, ALICE, &bot, 10 * ONE, 150);
+    c.xp.insert(acc(ALICE), 500);
+    ctx(ALICE, 160, NearToken::from_yoctonear(1));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.storage_unregister(Some(true))));
+    assert!(r.is_err(), "open sponsorship blocks unregister");
+    // the bot plays its cooldown, alice withdraws, then leaves cleanly
+    let mut h = 200;
+    for _ in 0..5 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 3, None, h + 5);
+        h += 10;
+    }
+    ctx(ALICE, h, NearToken::from_yoctonear(0));
+    c.unsponsor(bot);
+    ctx(ALICE, h + 1, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    assert!(c.xp.get(&acc(ALICE)).is_none(), "xp removed");
+    assert!(c.sponsoring.get(&acc(ALICE)).is_none());
+    assert!(c.load_player(&acc(ALICE)).is_none());
+}
+
+#[test]
+fn no_sponsoring_or_withdrawing_while_the_bot_is_in_a_match() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[0].clone();
+    let s = start(&mut c, GUEST, 200); // every bot now has an entry in escrow
+    ctx(ALICE, 201, NearToken::from_yoctonear(0));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.sponsor(bot.clone(), U128(10 * ONE))));
+    assert!(r.is_err(), "no front-running a pending match");
+    settle(&mut c, s.match_id, 3, None, 210);
+    sponsor(&mut c, ALICE, &bot, 10 * ONE, 211); // fine once settled
+    let mut h = 220;
+    for _ in 0..5 {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, 3, None, h + 5);
+        h += 10;
+    }
+    start(&mut c, GUEST, h); // pending again
+    ctx(ALICE, h + 2, NearToken::from_yoctonear(0));
+    let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.unsponsor(bot.clone())));
+    assert!(r.is_err(), "no withdrawing while a match is pending");
+}
+
+#[test]
+fn a_pool_closes_only_after_the_retired_bots_escrow_comes_back() {
+    let mut c = setup();
+    ctx(RELAY, 101, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc("g-2222.relay.test")), None);
+    grant(&mut c, ALICE, 50 * ONE);
+    let bot = c.slots[2].clone(); // idx 3
+    sponsor(&mut c, ALICE, &bot, 20 * ONE, 150);
+    // drain the bot (test only) so that after one entry it can't pay the next
+    let house = c.house.clone();
+    let keep = ENTRY_FEE + ENTRY_FEE / 2;
+    let b = c.balance(&bot);
+    c.move_tokens(&bot, &house, b - keep, "test");
+    let mut f = c.load_fighter(&bot).unwrap();
+    f.record.matches = 3;
+    c.save_fighter(f);
+    let s1 = start(&mut c, GUEST, 200); // pays an entry: escrow > 0, wallet < entry
+    let _s2 = start(&mut c, "g-2222.relay.test", 201); // can't pay: retires, but its s1 entry is pending
+    assert_ne!(c.slots[2], bot, "retired at start");
+    assert!(c.sponsors.get(&bot).is_some(), "pool still open while s1 holds its entry");
+    let alice0 = bal(&c, ALICE);
+    // s1 settles and the retired bot WINS it: the prize, dividend and closing all reach the sponsor
+    let r = settle(&mut c, s1.match_id, 3, None, 210);
+    assert_eq!(r.prize_to, bot);
+    assert!(c.sponsors.get(&bot).is_none(), "closed after the escrow came back");
+    assert!(c.get_sponsorships(acc(ALICE)).is_empty());
+    let got = bal(&c, ALICE) - alice0;
+    assert!(got > r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000, "dividend + share of the final bankroll: {got}");
+    assert_supply(&c);
+}

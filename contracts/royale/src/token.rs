@@ -99,11 +99,14 @@ impl StorageManagement for Contract {
         let id = env::predecessor_account_id();
         let Some(p) = self.load_player(&id) else { return false };
         require!(p.pending.is_none(), "finish or abandon your match first");
+        require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first");
         let bal = self.balance(&id);
         require!(bal == 0 || force.unwrap_or(false), "non-zero $BOUNTY balance: pass force=true to burn it");
         self.burn(&id, bal, "unregistered");
         self.players.remove(&id);
         self.token.accounts.remove(&id);
+        self.xp.remove(&id);
+        self.history.remove(&id);
         let _ = Promise::new(id).transfer(NearToken::from_yoctonear(p.storage_paid.0));
         true
     }

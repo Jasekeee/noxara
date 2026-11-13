@@ -124,6 +124,8 @@ impl Contract {
         require!(amount.0 >= MIN_STAKE, "stake at least 10 $BOUNTY");
         require!(self.balance(&who) >= amount.0, "not enough $BOUNTY");
         let f = self.load_fighter(&bot).filter(|f| f.active).unwrap_or_else(|| env::panic_str("not an active fighter"));
+        // no buying in while the bot's money sits in unsettled matches (their outcome may already be known)
+        require!(f.escrowed.0 == 0, "this bot is in a match right now: try again when it's over");
         let bankroll = self.bankroll(&bot);
         require!(bankroll > 0, "this bot is broke");
         let mut pool = self.sponsors.get(&bot).cloned().unwrap_or_default();
@@ -165,6 +167,7 @@ impl Contract {
         let f = self.load_fighter(&bot).expect("fighter");
         let e = pool.entries[i].clone();
         require!(f.record.matches >= e.since_matches + SPONSOR_COOLDOWN, "this bot must play 5 matches after your stake before you can withdraw");
+        require!(f.escrowed.0 == 0, "this bot is in a match right now: try again when it's over");
         let value = e.shares.0 * self.bankroll(&bot) / pool.total_shares.0;
         let pay = value.min(self.balance(&bot));
         pool.total_shares = U128(pool.total_shares.0 - e.shares.0);
@@ -307,7 +310,8 @@ impl Contract {
         let mut payouts = vec![];
         for e in pool.entries.iter_mut() {
             let d = total * e.shares.0 / s;
-            if d == 0 {
+            // only to sponsors still registered (their storage is prepaid); otherwise it stays in the bankroll
+            if d == 0 || !self.token.accounts.contains_key(&e.sponsor) {
                 continue;
             }
             e.earned = U128(e.earned.0 + d);
@@ -325,10 +329,12 @@ impl Contract {
         paid
     }
 
-    /// A retiring bot's pool closes: sponsors split what's left by share; the rest of their stake is lost.
+    /// A retired bot's pool closes (once nothing of it is in escrow, so wallet == bankroll): sponsors
+    /// split what's left by share; the rest of their stake is lost.
     pub(crate) fn close_pool(&mut self, bot: &AccountId, match_id: u64) {
         let Some(pool) = self.sponsors.remove(bot) else { return };
-        let b = self.balance(bot);
+        let b = self.bankroll(bot);
+        require!(b == self.balance(bot), "pool closed with entries in escrow");
         let t = pool.total_shares.0.max(1);
         for e in pool.entries {
             let back = e.shares.0 * b / t;
