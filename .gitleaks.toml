@@ -1,0 +1,3 @@
+[allowlist]
+description = "known false positives"
+regexes = [ "bountyroyale\\.xp\\.v1" ]
