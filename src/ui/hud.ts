@@ -91,14 +91,17 @@ export class Hud {
     this.hintsDone = false;
   }
 
+  private hintTouch = false;
   showHints(touch: boolean) {
+    this.hintTouch = touch;
     this.hint.innerHTML = touch
       ? `<span data-k="move">Left thumb: <b>move</b></span><span data-k="aim">Right thumb: <b>aim + shoot</b></span><span data-k="fire">Open <b>crates</b> for better blasters</span>`
       : `<span data-k="move"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move</span><span data-k="aim"><kbd>Mouse</kbd> aim</span><span data-k="fire"><kbd>Click</kbd> shoot</span>`;
     this.hint.classList.remove("hidden", "fade");
   }
-  updateHints(used: { move: boolean; aim: boolean; fire: boolean }, elapsed: number) {
+  updateHints(used: { move: boolean; aim: boolean; fire: boolean }, elapsed: number, touch = false) {
     if (this.hintsDone) return;
+    if (touch && !this.hintTouch) this.showHints(true); // a touch arrived after the chips were drawn
     for (const s of this.hint.querySelectorAll<HTMLElement>("span")) {
       const k = s.dataset.k as keyof typeof used;
       s.classList.toggle("done", !!used[k]);

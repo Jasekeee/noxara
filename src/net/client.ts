@@ -8,7 +8,7 @@ import type { BotMarket, CreateGameClient, EconomyInfo, FighterEvent, FighterInf
 import { levelProgress, unlocksForLevel, upgradesForLevel, xpForMatch } from "../sim/progression";
 import { SIM_VERSION, type MatchConfig, type MatchRecord, type Personality } from "../sim/types";
 import { t1Roster } from "../sim/roster";
-import { matchConfigFromChain, type ChainMatch, type ChainRosterEntry } from "./roster";
+import { matchConfigFromChain, specsFromFighters, type ChainMatch, type ChainRosterEntry } from "./roster";
 import { ed25519Supported, finalBlockHash, generateKey, inputLogHash, rpc, sendTransaction, settleMessage, sha256, signDelegate, signTransaction, Signer, toBase64, viewCall, type StoredKey } from "./near";
 
 const env = ((import.meta as { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
@@ -338,7 +338,7 @@ class Client implements GameClientT3, GameClientEcon {
           viewCall<ChainFighter[]>(this.rpcUrl, this.contract, "get_retired").catch(() => [] as ChainFighter[]),
           this.config(),
         ]);
-        return [...active, ...retired].map((f) => ({
+        const out: FighterInfo[] = [...active, ...retired].map((f) => ({
           slot: f.slot,
           account: f.account,
           name: f.name,
@@ -351,10 +351,13 @@ class Client implements GameClientT3, GameClientEcon {
           generation: f.generation,
           status: f.status,
         }));
+        this.rememberRoster(out);
+        return out;
       } catch (e) {
         this.goOffline(e);
       }
     }
+    if (this.lastRoster()) return this.lastRoster()!;
     return t1Roster()
       .slice(1)
       .map((f, i) => ({
@@ -372,40 +375,82 @@ class Client implements GameClientT3, GameClientEcon {
       }));
   }
 
+  // last lobby seen on chain: offline practice reuses its names/personalities instead of the stale default roster
+  private rosterMem: FighterInfo[] | null = null;
+  private rememberRoster(list: FighterInfo[]) {
+    if (!specsFromFighters(list)) return;
+    this.rosterMem = list;
+    try {
+      localStorage.setItem("noxara.roster.v1", JSON.stringify(list));
+    } catch {
+      /* private mode */
+    }
+  }
+  private lastRoster(): FighterInfo[] | null {
+    if (this.rosterMem) return this.rosterMem;
+    try {
+      const raw = localStorage.getItem("noxara.roster.v1");
+      const v = raw ? (JSON.parse(raw) as FighterInfo[]) : null;
+      if (Array.isArray(v) && specsFromFighters(v)) return (this.rosterMem = v);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+
   // ------------------------------------------------------------ matches
 
   async startMatch(): Promise<StartResult> {
+    // a transient chain error (e.g. a 409 from /api/relay) must not leave every later PLAY silently offline: try the chain again
+    if (this._mode === "offline" && this._offlineReason === "chain_error") {
+      this._mode = "chain";
+      this._offlineReason = undefined;
+    }
     if (this._mode === "chain") {
-      try {
-        const { value: m, tx } = await this.relay<ChainMatch & { match_id: string; pot: string; player_paid: string }>("start_match", {});
-        if (!m || !m.seed) throw new Error("start_match returned no seed");
-        const cfg = matchConfigFromChain(m, { name: "You" });
-        this.rosters.set(m.match_id, m.roster);
-        const chainCfg = await this.config().catch(() => null);
-        let bountyValue = 0;
-        if (m.bounty_idx) {
-          const carrier = m.roster[m.bounty_idx - 1]?.account;
-          const bal = carrier ? await viewCall<string>(this.rpcUrl, this.contract, "ft_balance_of", { account_id: carrier }).catch(() => "0") : "0";
-          bountyValue = toBounty((BigInt(bal) * BigInt(chainCfg?.bounty_bps ?? 1500)) / 10_000n);
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await this.chainStart();
+        } catch (e) {
+          if (attempt === 0 && this._mode === "chain") {
+            await new Promise((r) => setTimeout(r, 1500)); // one quiet retry
+            continue;
+          }
+          this.goOffline(e);
+          break;
         }
-        return {
-          matchId: m.match_id,
-          cfg,
-          pot: toBounty(BigInt(m.pot ?? "0") + BigInt(chainCfg?.pot_top_up ?? "0")),
-          bountyIdx: m.bounty_idx ?? null,
-          bountyValue,
-          playerPaid: toBounty(m.player_paid),
-          tx,
-        };
-      } catch (e) {
-        this.goOffline(e);
       }
     }
     return this.localStart();
   }
 
+  private async chainStart(): Promise<StartResult> {
+    const { value: m, tx } = await this.relay<ChainMatch & { match_id: string; pot: string; player_paid: string }>("start_match", {});
+    if (!m || !m.seed) throw new Error("start_match returned no seed");
+    const cfg = matchConfigFromChain(m, { name: "You" });
+    this.rosters.set(m.match_id, m.roster);
+    const chainCfg = await this.config().catch(() => null);
+    let bountyValue = 0;
+    if (m.bounty_idx) {
+      const carrier = m.roster[m.bounty_idx - 1]?.account;
+      const bal = carrier ? await viewCall<string>(this.rpcUrl, this.contract, "ft_balance_of", { account_id: carrier }).catch(() => "0") : "0";
+      bountyValue = toBounty((BigInt(bal) * BigInt(chainCfg?.bounty_bps ?? 1500)) / 10_000n);
+    }
+    return {
+      matchId: m.match_id,
+      cfg,
+      pot: toBounty(BigInt(m.pot ?? "0") + BigInt(chainCfg?.pot_top_up ?? "0")),
+      entries: toBounty(m.pot ?? "0"),
+      bountyIdx: m.bounty_idx ?? null,
+      bountyValue,
+      playerPaid: toBounty(m.player_paid),
+      tx,
+    };
+  }
+
   private localStart(): StartResult {
     const cfg: MatchConfig = { seed: randomSeed(), fighters: t1Roster() };
+    const cached = specsFromFighters(this.lastRoster());
+    if (cached) cfg.fighters = [cfg.fighters[0], ...cached];
     cfg.fighters[0] = { ...cfg.fighters[0], upgrades: upgradesForLevel(levelProgress(localXp()).level) };
     const b = cfg.fighters.findIndex((f) => f.bounty);
     return { matchId: `local-${++this.localMatches}-${cfg.seed}`, cfg, pot: 0, bountyIdx: b >= 0 ? b : null, bountyValue: 0, playerPaid: 0, tx: null };

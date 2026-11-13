@@ -27,6 +27,17 @@ function link(text: string, href: string): HTMLAnchorElement {
   return a;
 }
 
+export const PLAY_MONEY_NOTE = "NOX is play-money: an in-game score you can spend on entries and upgrades. It has no real-world value, can't be bought or sold, and isn't listed anywhere.";
+
+/** "Entries X + House top-up Y = pot Z": the House tops the pot up, so the pot is more than what players paid in. */
+export function potBreakdown(start: StartResult): HTMLElement | null {
+  if (start.entries === undefined || !(start.pot > 0)) return null;
+  const top = Math.max(0, Math.round((start.pot - start.entries) * 100) / 100);
+  const li = h("li", "small pot-sum", `Entries ${fmt(start.entries)} + House top-up ${fmt(top)} = pot ${fmt(start.pot)} NOX`);
+  li.title = `The House (the game's treasury) adds a top-up to every pot, so the pot is bigger than the entry fees. ${PLAY_MONEY_NOTE}`;
+  return li;
+}
+
 export function renderLedger(el: HTMLElement, L: LedgerInput) {
   el.textContent = "";
   const w = L.winner;
@@ -44,7 +55,11 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   const rows = h("ul", "lg-rows");
   const row = (ic: string, text: string, amount?: number | null, cls = "") => {
     const li = h("li", cls, undefined, icon(ic), h("span", "", text));
-    if (amount !== undefined && amount !== null) li.appendChild(h("b", "amt", `${fmt(amount)} NOX`));
+    if (amount !== undefined && amount !== null) {
+      const b = h("b", "amt", `${fmt(amount)} NOX`);
+      b.title = PLAY_MONEY_NOTE;
+      li.appendChild(b);
+    }
     rows.appendChild(li);
   };
 
@@ -63,6 +78,8 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   if (s === "pending" || s === null) {
     // never guess the payee before the chain says so (guests' wins go to the house, for example)
     row(ICON.coin, s === "pending" ? "Pot — pending settlement…" : "Pot — not settled", L.start.pot, "pot");
+    const sum0 = potBreakdown(L.start);
+    if (sum0) rows.appendChild(sum0);
     if (L.start.bountyIdx !== null && L.start.bountyValue > 0) {
       const bi = L.start.bountyIdx;
       row(ICON.crown, L.placements[bi] === 1 ? `${L.names[bi]} kept the bounty` : `Bounty on ${L.names[bi]}`, L.start.bountyValue, "bounty");
@@ -73,7 +90,14 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   } else {
     const prize = s.payouts.find((p) => p.reason === "prize") ?? s.payouts.find((p) => p.reason === "house" && p.amount > 0);
     if (prize) row(ICON.coin, prize.reason === "house" ? (w === 0 && L.guest ? "Pot → the House (guests play for glory)" : `Pot → ${prize.name}`) : `Pot → ${prize.name}`, prize.amount, "pot");
-    for (const p of s.payouts.filter((x) => x.reason === "bounty")) row(ICON.crown, `Bounty claimed by ${p.name}`, p.amount, "bounty");
+    const sum1 = potBreakdown(L.start);
+    if (sum1) rows.appendChild(sum1);
+    for (const p of s.payouts.filter((x) => x.reason === "bounty")) {
+      // the toast shows the carrier's share; the House adds a bonus on top when the multiplier allows
+      const bonus = p.amount - (L.start.bountyValue || 0) > 0.005;
+      row(ICON.crown, bonus ? `Bounty claimed by ${p.name} — carrier's 15% + House bonus` : `Bounty claimed by ${p.name}`, p.amount, "bounty");
+      if (bonus) rows.appendChild(h("li", "small", `${fmt(L.start.bountyValue)} from the carrier's wallet + ${fmt(Math.round((p.amount - L.start.bountyValue) * 100) / 100)} House bonus`));
+    }
     if (!s.payouts.some((x) => x.reason === "bounty") && L.start.bountyIdx !== null) {
       const carrier = L.names[L.start.bountyIdx];
       row(ICON.crown, `${carrier} survived with the bounty`, null, "bounty");

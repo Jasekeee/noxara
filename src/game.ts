@@ -27,7 +27,9 @@ import { levelBadge, localXp, renderXp, setLocalXp } from "./ui/progress";
 import { levelProgress, upgradesForLevel, xpForMatch } from "./sim/progression";
 import type { MatchConfig } from "./sim/types";
 import { diffLines, loadSnap, lobbySkeleton, renderLobby, saveSnap, type Snap } from "./ui/lobby";
-import { renderLedger } from "./ui/ledger";
+import { renderLedger, PLAY_MONEY_NOTE } from "./ui/ledger";
+import { Coach } from "./ui/coach";
+import { specsFromFighters } from "./net/roster";
 import { Social } from "./ui/challenge";
 import { fmt } from "./ui/dom";
 
@@ -43,6 +45,8 @@ const MOCK = params.has("mock");
 const OFFLINE = params.has("offline");
 const SPEED = Math.max(0.25, Math.min(16, Number(params.get("speed") ?? 1) || 1));
 const $ = (id: string) => document.getElementById(id)!;
+/** touch hints on any touch-first device (coarse pointer) or once a touch has been seen, however narrow the window */
+const touchy = () => controls.touchMode || matchMedia("(pointer: coarse)").matches;
 
 // ------------------------------------------------------------------ renderer + scene
 // Let the title paint first, and keep GPU probing / context creation in their own short tasks.
@@ -129,6 +133,7 @@ const water = makeWater();
 scene.add(water.mesh, safeArrow);
 const fx = new Fx(scene);
 const hud = new Hud();
+const coach = new Coach(document.getElementById("coach")!);
 const controls = new Controls(canvas, camera);
 const aimLine = new AimLine();
 scene.add(aimLine.group);
@@ -166,6 +171,8 @@ let introT = 0;
 const INTRO = 1.0;
 let countShown = -1;
 let lastAmmo = -1;
+let gotChest = false;
+let meBushSeen = false;
 let myKillTimes: number[] = [];
 const humanInput: Input = { mx: 0, my: 0, aim: 0, fire: false };
 const inputs = new Map<number, Input>();
@@ -431,6 +438,9 @@ function localFighters(): FighterInfo[] {
 
 function localStart(): StartResult {
   const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
+  // offline fallback after a chain failure: tonight's real roster from the lobby, not the stale default one
+  const cached = SEED_PARAM === null ? specsFromFighters(fighters.filter((f) => isChainAcct(f.account))) : null;
+  if (cached) cfg.fighters = [cfg.fighters[0], ...cached];
   if (SEED_PARAM === null) cfg.fighters[0].upgrades = upgradesForLevel(levelProgress(myXp).level); // your level's gear (offline)
   const b = cfg.fighters.findIndex((f) => f.bounty);
   return { matchId: `local-${cfg.seed}`, cfg, pot: 0, bountyIdx: b >= 0 ? b : null, bountyValue: 0, playerPaid: 0, tx: null };
@@ -482,12 +492,16 @@ async function startMatch() {
   $("end").classList.add("hidden");
   // ?seed=N (tests, replays) always plays the local deterministic roster
   let start: StartResult | null = await social.forcedStart(); // challenge / daily: fixed config, no chain
+  const forced = start !== null;
   const c = start === null && SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
-  if (c && c.mode === "chain") {
+  // "chain_error" = a transient failure last time: the client tries the chain again (and says so if it still fails)
+  const chainTry = !!c && (c.mode === "chain" || c.offlineReason === "chain_error");
+  if (c && chainTry) {
     $("dropping").classList.remove("hidden");
     $("drop-sub").textContent = "sealing the match seed on NEAR…";
-    start = await withTimeout(c.startMatch(), 20000);
+    start = await withTimeout(c.startMatch(), 50000); // includes one quiet retry after 1.5 s inside the client
   } else if (c) start = await withTimeout(c.startMatch(), 3000);
+  const fellBack = chainTry && !forced && (!start || start.matchId.startsWith("local-"));
   current = start ?? localStart();
   $("dropping").classList.add("hidden");
   settleState = null;
@@ -499,6 +513,10 @@ async function startMatch() {
   countShown = -1;
   myKillTimes = [];
   lastAmmo = -1;
+  if (fellBack) toast("Couldn't reach the NEAR island — playing offline practice (not recorded)");
+  coach.startMatch(!AUTOPLAY);
+  gotChest = false;
+  meBushSeen = false;
   const st = current;
   if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
   else hud.banner("READY…", "gold");
@@ -506,14 +524,16 @@ async function startMatch() {
   $("hud").classList.remove("hidden");
   $("pot-chip").classList.toggle("hidden", !(current.pot > 0));
   $("pot").textContent = fmt(current.pot);
+  $("pot-chip").title = current.entries !== undefined ? `Pot: entries ${fmt(current.entries)} + House top-up ${fmt(Math.max(0, current.pot - current.entries))} = ${fmt(current.pot)} NOX, paid to the winner. ${PLAY_MONEY_NOTE}` : `Prize pot, paid to the winner. ${PLAY_MONEY_NOTE}`;
   hud.reset();
   controls.setEnabled(true);
-  if (!AUTOPLAY) hud.showHints(controls.touchMode);
+  if (!AUTOPLAY) hud.showHints(touchy());
   canvas.focus();
 }
 
 function toLobby() {
   sfx.ui();
+  coach.hide();
   menu?.forceClose();
   endOpen = false;
   phase = "title";
@@ -652,6 +672,8 @@ function onEvents(evs: SimEvent[]) {
       }
       case "chest":
         if (e.who === 0) {
+          gotChest = true;
+          coach.hide();
           hud.popup(`${WEAPON_LABEL[e.weapon]}!`);
           sfx.chest();
           shake(0.12);
@@ -724,12 +746,20 @@ function stepSim() {
     controls.touchRange = rangeW;
     // aim help input: visible enemies within weapon range (never ones hidden in bushes)
     controls.targets.length = 0;
+    let nearVisible = Infinity;
     for (const f of st.fighters) {
       if (f.idx === 0 || !f.alive || !match.canSee(0, f.idx)) continue;
       const tx = f.x * U, tz = f.y * U;
-      if (Math.hypot(tx - views[0].pos.x, tz - views[0].pos.z) <= rangeW) controls.targets.push({ x: tx, z: tz });
+      const d = Math.hypot(tx - views[0].pos.x, tz - views[0].pos.z);
+      if (d < nearVisible) nearVisible = d;
+      if (d <= rangeW) controls.targets.push({ x: tx, z: tz });
     }
     controls.read(views[0].pos.x, views[0].pos.z, humanInput);
+    // first-match coaching (HUD only): firing with nothing to hit
+    if (coach.active && humanInput.fire && controls.targets.length === 0 && st.tick > SPAWN_PROTECT) {
+      if (nearVisible < Infinity) coach.cue("range", "Out of range — move closer to shoot", time, { gapMs: 4000 });
+      else coach.cue("notarget", "No target in range", time, { gapMs: 4000 });
+    }
   } else {
     humanInput.mx = 0; humanInput.my = 0; humanInput.fire = false;
   }
@@ -826,6 +856,7 @@ function showEnd(force: boolean) {
   if (phase === "title") return;
   endShown = true;
   spectating = false;
+  coach.hide();
   const el = $("end");
   const won = st.winner === 0;
   const place = me.placement || (me.alive ? 1 : FIGHTERS);
@@ -905,7 +936,11 @@ const menu = new PauseMenu({
   toggleMute: () => toggleMute(),
   aimAssist: () => controls.aimAssist,
   setAimAssist: (on) => { controls.aimAssist = on; saveAimAssist(on); },
-  exit: () => { toLobby(); }, // chain match: left unsettled (the contract's abandon/expiry rules handle it); offline: just a loss
+  exit: () => {
+    const chain = !current?.matchId.startsWith("local-") && !!client && client.mode === "chain";
+    toLobby();
+    toast(chain ? "You left — the match counts as a loss" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
+  },
   onChange: (open) => {
     controls.blocked = open;
     menuPaused = open && (!client || client.mode !== "chain" || !!current?.matchId.startsWith("local-"));
@@ -994,6 +1029,14 @@ function frame(now: number) {
         countShown = n;
       }
     }
+    // "this is you": arrow + label for the first 10 s of the match
+    views[0].setYouMarker(phase === "playing" && !starting && introT <= 0 && time - matchStartT < 10);
+    if (coach.active && phase === "playing" && !starting && introT <= 0 && me.alive && !menuPaused) {
+      if (me.inBush) meBushSeen = true;
+      const secs = Math.max(0, st.tick - SPAWN_PROTECT) / TICK_HZ;
+      if (!gotChest && st.tick > SPAWN_PROTECT && secs < 14) coach.cue("loot", "Grab a weapon from a gold beam", time, { ms: 6000, max: 1 });
+      else if (!meBushSeen && secs > 22) coach.cueOnce("bush", "Hide in a bush to ambush — enemies can't see you until they're close", time);
+    }
     // fighters
     const mobileHud = innerWidth <= 720 || controls.touchMode;
     const hudTop = mobileHud ? 140 : 92;
@@ -1064,7 +1107,7 @@ function frame(now: number) {
         const show = phase === "playing" && me.alive && controls.enabled && !controls.blocked && pv.active && !AUTOPLAY && introT <= 0;
         aimLine.update(show, views[0].pos.x, views[0].pos.z, pv.ang, Math.min(pv.dist, WEAPONS[me.weapon].range / 1000), pv.locked, pv.tx, pv.tz, time);
       }
-      hud.updateHints(controls.used, time - matchStartT);
+      hud.updateHints(controls.used, time - matchStartT, touchy());
       miniT -= rdt;
       if (miniT <= 0) { hud.minimap(match, 0, visibleNow); miniT = 0.05; }
     }
