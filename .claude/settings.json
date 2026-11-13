@@ -30,7 +30,8 @@
       "Edit(~/Developer/bounty-royale/**)",
       "Edit(~/Developer/br-wt/**)"
     ],
-    "ask": [
+    "ask": [],
+    "deny": [
       "Bash(gh repo edit *--visibility*)",
       "Bash(gh repo create *--public*)",
       "Bash(vercel *)",
@@ -71,9 +72,7 @@
       "Bash(npx gh-pages*)",
       "Bash(firebase deploy*)",
       "Bash(npx railway*)",
-      "Bash(npx @railway/cli*)"
-    ],
-    "deny": [
+      "Bash(npx @railway/cli*)",
       "Bash(*network-config mainnet*)",
       "Bash(*--network mainnet*)",
       "Bash(*BR_MAINNET_YES*)",
