@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 5184;
+// BR_PORT lets QA run its own server while someone plays on the default 5184.
+const PORT = Number(process.env.BR_PORT ?? 5184);
 
 export default defineConfig({
   testDir: "tests/e2e",
