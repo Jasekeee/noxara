@@ -105,7 +105,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   // ------------------------------------------------ headline tiles
   const grid = h("div", "etgrid");
   grid.append(
-    tile("SUPPLY", live ? fmt(e.supply) : "–", live ? `of ${fmt(e.genesis)} at genesis · minted after: ${fmt(e.minted - e.genesis)}` : "no data", live ? h("div", "et-x", undefined, bar(e.supply, e.genesis), sparkline(sn.map((s) => s.supply), "Supply over the last matches")) : null),
+    tile("SUPPLY", live ? fmt(e.supply) : "–", live ? (e.minted > e.genesis ? `of ${fmt(e.genesis)} at genesis · 0 minted since economy v2 · ${fmt(e.minted - e.genesis)} was minted by the old v1 economy before this contract was upgraded (testnet)` : `of ${fmt(e.genesis)} at genesis · 0 minted since`) : "no data", live ? h("div", "et-x", undefined, bar(e.supply, e.genesis), sparkline(sn.map((s) => s.supply), "Supply over the last matches")) : null),
     tile("BURNED", live ? fmt(e.burned) : "–", live ? `${fmt(e.seasonBurned)} this season` : "no data", live ? sparkline(sn.map((s) => s.burned), "Burned NOX over the last matches", "#ff4d6d") : null),
     tile("HOUSE TREASURY", live ? fmt(e.house) : "–", live ? `target ${fmt(e.target)} · floor ${fmt(e.floor)} · average ${fmt(e.houseEma)}` : "no data", live ? h("div", "et-x", undefined, bar(e.house, Math.max(e.target * 1.5, e.house), [{ at: e.floor, label: "floor" }, { at: e.target, label: "target" }]), sparkline(sn.map((s) => s.house), "House treasury over the last matches", "#ffc93c")) : null, "gold"),
     tile("REWARD MULTIPLIER m", live ? `×${e.m.toFixed(2)}` : "–", live ? `pot top-up ${fmt(e.topUp)} NOX · max ×1.5` : "no data", live ? sparkline(sn.map((s) => s.m), "Reward multiplier over the last matches", "#3ef0c0", 0, 1.5) : null),
@@ -124,7 +124,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
         "e-explain",
         `The House rule, in plain English: the House holds ${fmt(e.house)} NOX (its 16-match average is ${fmt(e.houseEma)}) against a target of ${fmt(e.target)} and a floor of ${fmt(e.floor)}. ` +
           `It is ${dir} target, so rewards run at ×${e.m.toFixed(2)}, the House keeps ${pct(e.houseShare)} of every pot and ${pct(e.burnShare)} is burned (scaled by the brake ${e.brake.toFixed(2)}). ` +
-          `Richer House means bigger rewards and lighter taxes; a poorer House the opposite. Nothing is minted after genesis, and nobody patches this: the rule is public in get_economy. `,
+          `Richer House means bigger rewards and lighter taxes; a poorer House the opposite. Economy v2 mints nothing (on testnet, 250 NOX were minted by the v1 economy before the upgrade), and nobody patches this: the rule is public in get_economy. `,
         extLinkDoc(),
       ),
     );

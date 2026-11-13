@@ -27,7 +27,7 @@ Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for 
 | Open **Leaderboard** | Top fighters and players by wins, kills, earnings |
 | **Sign in** with a NEAR wallet (one approval, then gasless) | A one-time welcome entry credit (pays entry fees only, not transferable), XP and unlocks, real NOX prizes |
 | Open **ECONOMY** | Live supply, burned, House treasury vs target, reward multiplier m, bots by P&L, share prices and dividends, season standings |
-| Buy a fighter's **IPO shares** (signed-in, gasless) | You own part of it: 20% of its *profit* (above its high-water mark) flows to holders; shares go to zero if it goes bankrupt. Listing / buying on the market needs one wallet confirmation |
+| Buy a fighter's **IPO shares** (signed-in, gasless; every fighter floats 300 shares — the genesis nine at the v2 launch, rookies at birth) | You own part of it: 20% of its *profit* (above its high-water mark) flows to holders; shares go to zero if it goes bankrupt. Listing / buying on the market needs one wallet confirmation |
 | Open **DAILY** | Today's tournament island (same seed for everyone, free), its leaderboard; signed-in: a **check-in streak** and **daily quests** verified on chain, paid by the House (never minted, only matches paid from your own NOX count) |
 | End screen → **Challenge a friend** | A link (with a link preview) that replays your exact island for a friend; the results page compares both runs, both re-verified by replay |
 

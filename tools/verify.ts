@@ -11,7 +11,9 @@ import { scanSim } from "./scan.ts";
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const RPC = process.env.BR_RPC ?? "https://test.rpc.fastnear.com";
 const CONTRACT = process.env.BR_CONTRACT ?? "royale.br-7e8492.testnet";
-const BALANCE_N = 300; // smaller samples are noisy around the 40% line
+const BALANCE_N = 300;
+/** total_minted when the testnet contract was upgraded to economy v2 (2026-11-13): genesis 2,900 + 250 minted by v1 top-ups */
+const MINTED_AT_V2 = 3150n * 10n ** 18n; // smaller samples are noisy around the 40% line
 
 type Status = "PASS" | "FAIL" | "SKIP";
 const results: { status: Status; claim: string; detail: string }[] = [];
@@ -131,6 +133,7 @@ const CHAIN_CLAIMS = [
   `Contract ${CONTRACT} is deployed on testnet`,
   "Every bot fighter account has 0 access keys (only the contract's rules move its NOX)",
   "The latest settled match is recorded on chain with its input-log hash",
+  "Economy v2 mints nothing: total minted is unchanged since the v2 upgrade (only burns move supply)",
 ];
 if (!online) {
   for (const c of CHAIN_CLAIMS) report("SKIP", c, `offline: ${RPC} unreachable`, 0);
@@ -160,6 +163,13 @@ if (!online) {
     return h
       ? ["PASS", `match #${settled.id}: input_log_hash ${h.slice(0, 16)}…, winner idx ${settled.result?.winner}`]
       : ["FAIL", `match #${settled.id} is settled without an input_log_hash`];
+  });
+
+  await check(CHAIN_CLAIMS[3], async () => {
+    const e = await view<{ minted: string; burned: string; supply: string }>("get_economy");
+    const minted = BigInt(e.minted), burned = BigInt(e.burned), supply = BigInt(e.supply);
+    const ok = minted === MINTED_AT_V2 && supply === minted - burned;
+    return [ok ? "PASS" : "FAIL", `minted ${Number(minted / 10n ** 16n) / 100} (= ${Number(MINTED_AT_V2 / 10n ** 16n) / 100} at the v2 upgrade), burned ${Number(burned / 10n ** 16n) / 100}, supply = minted − burned: ${supply === minted - burned}`];
   });
 }
 

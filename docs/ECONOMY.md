@@ -23,6 +23,8 @@ asserts that its constants equal that file, and `scripts/econ-sim-v2.ts` simulat
 
 Every reward is paid out of NOX that was collected earlier through fees and taxes.
 
+> **Testnet note:** the testnet contract started on the v1 economy, whose pot top-ups minted 250 NOX before it was upgraded to v2 on 2026-11-13. Since the upgrade, total minted has not moved; `npm run verify` checks this. A mainnet deploy starts on v2 and mints only the 2,900 genesis.
+
 ## 2. The House rule (an on-chain central bank)
 The House treasury follows one public rule. It is computed from a **moving average** of the treasury
 (`ema += (house − ema) / 16` at every settle), so a single large event can't jolt rewards.
@@ -70,7 +72,7 @@ Entry fees are progressive for bots **and** players: `4 + 2%` of the wallet abov
 
 ## 6. Bot shares (NEP-245, inside the game contract)
 - Each bot has 1,000 shares; `token_id` = the bot's account.
-- **IPO:** a rookie floats 300 shares at 0.1 NOX each (`buy_ipo`). The NOX goes into the bot's own wallet, so investors fund its bankroll. Shares not yet sold stay with the bot.
+- **IPO:** every fighter floats a 300-share block at 0.1 NOX each (`buy_ipo`): the genesis nine when v2 went live, each rookie when it's born. The NOX goes into the bot's own wallet, so investors fund its bankroll. Shares not yet sold stay with the bot.
 - **Dividends come only from profit.** When a settle leaves the bot's bankroll (its wallet plus its entries in other pending matches, so refunds never count as profit) above its high-water mark, holders receive 20% of the gain, pro rata to the shares they own out of 1,000. After that the mark resets; spending and losses lower it. The payout uses an accumulator (`acc_per_share` plus each holder's debt), so it costs O(1) gas and writes one log line. Holders call `claim_dividends`; a transfer settles what is owed first.
 - **Signatures:** listing and buying listed shares need a full wallet signature (1 yoctoNEAR), so a leaked in-game key can't sell your shares to an accomplice. Buying IPO shares, claiming dividends and buying cosmetics stay gasless: with those, NOX only goes into a bot, back to you or into the burn, never to another player.
 - **Leaving:** a player who unregisters must hold no shares and have no dividends owed. With `force`, owed dividends are paid first, the shares go back to their bots and every row is deleted.

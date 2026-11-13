@@ -483,3 +483,10 @@ views (tested against near-kit's decoder and the relayer's signature checks in r
   tx's `bountyroyale` events (returned by `/api/settle`).
 - Live check: `node --env-file=.env --import ./relayer/src/ts-resolve.ts scripts/e2e-net.ts --matches 3`
   (relayed start ≈ 3–4.5 s incl. next-block seed, settle ≈ 2.2–2.6 s, new guest ≈ 4 s).
+
+
+## Explorer labels
+Nearblocks may still label testnet transfers "Bounty (BOUNTY)": it cached the token metadata from before the rename. The contract's `ft_metadata` returns name "Nox", symbol "NOX" (check: `near contract call-function as-read-only royale.br-7e8492.testnet ft_metadata json-args {} network-config testnet now`). A mainnet deploy starts with the new metadata.
+
+## Minting history (testnet)
+Genesis 2,900 NOX + 250 NOX minted by v1 pot top-ups while the House was below its floor = 3,150 total minted. Since the economy v2 upgrade (2026-11-13) total minted is unchanged (`npm run verify` checks it); supply only falls by burns.
