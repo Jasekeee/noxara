@@ -52,7 +52,7 @@ const V1 = 9, V2 = 10;
 export const PERSONALITY: Record<Personality, Params> = {
   aggressive: { engage: 140, pref: 45, lowHp: 40, jitter: 100, react: 6, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
   camper: { engage: 100, pref: 70, lowHp: 55, jitter: 125, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
-  sniper: { engage: 105, pref: 80, lowHp: 55, jitter: 100, react: 12, vision: 13 * FP, passive: false, camp: false, lootUntil: 0 },
+  sniper: { engage: 105, pref: 80, lowHp: 55, jitter: 85, react: 12, vision: 13 * FP, passive: false, camp: false, lootUntil: 0 },
   looter: { engage: 100, pref: 70, lowHp: 60, jitter: 110, react: 8, vision: V1 * FP, passive: false, camp: false, lootUntil: 1100 },
   coward: { engage: 90, pref: 90, lowHp: 70, jitter: 120, react: 9, vision: V1 * FP, passive: true, camp: true, lootUntil: 0 },
   balanced: { engage: 100, pref: 70, lowHp: 55, jitter: 125, react: 9, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
@@ -118,7 +118,7 @@ const GRACE = 640;
 /** ticks during which an idle, never-shooting human is ignored */
 const HUMAN_GRACE = 200;
 /** a bot keeps fighting outside the safe zone while its hp is above this */
-const STORM_TOLERANCE: Record<Personality, number> = { aggressive: 30, camper: 70, sniper: 55, looter: 50, coward: 90, balanced: 45 };
+const STORM_TOLERANCE: Record<Personality, number> = { aggressive: 20, camper: 55, sniper: 40, looter: 40, coward: 90, balanced: 30 };
 /** base % chance to dodge an incoming bullet (checked once per dodge window) */
 const DODGE: Record<Personality, number> = { aggressive: 30, camper: 25, sniper: 30, looter: 30, coward: 45, balanced: 35 };
 /** chance (%) that a roaming bot heads for a nearby bush and lurks there */
@@ -161,7 +161,7 @@ function mind(match: Match): Mind {
           wanderUntil: 0,
           bush: -1,
           outsideSince: -1,
-          stormDelay: f.personality === "coward" ? 0 : rng.range(10, 70),
+          stormDelay: f.personality === "coward" ? 0 : rng.range(40, 170),
           shotFromX: 0,
           shotFromY: 0,
           shotFromT: -999,
@@ -389,7 +389,7 @@ export function botInput(match: Match, idx: number): Input {
   // Busy fighting a visible enemy? Many bots tank some storm damage rather than turn their back
   // (personality hp threshold) — this is where storm deaths come from.
   const busy = T !== null && willFight && dT <= engageR + 1000 && me.hp > STORM_TOLERANCE[me.personality];
-  if ((stormUrgent || stormSoon) && !(busy && st.dps <= 12)) {
+  if ((stormUrgent || stormSoon) && !(busy && st.dps <= 15)) {
     mode = "storm";
     goalA = needT > 0 ? angleTo(st.tx, st.ty) : angleTo(st.cx, st.cy);
     avoidStorm = false;
@@ -461,7 +461,7 @@ export function botInput(match: Match, idx: number): Input {
     }
     else if (dT < pref - 1000) goalA = at + 2048 - b.strafe * 350;
     else goalA = at + b.strafe * 1024;
-  } else if (!armed || (t < P.lootUntil) || (me.personality === "sniper" && me.weapon !== "sniper" && t < 1400)) {
+  } else if (!armed || (t < P.lootUntil) || (me.personality === "sniper" && me.weapon !== "sniper" && t < 900)) {
     // ---- chest run (prefer uncontested chests)
     let best = -1, bestCost = 1e18;
     for (const c of s.chests) {
@@ -519,7 +519,7 @@ export function botInput(match: Match, idx: number): Input {
 
   if (mode === "roam") {
     // Wander a few units at a time inside the safe area; often stop in a bush for a while (lurk).
-    const shrinking = phase !== undefined && t >= phase.shrinkStart - 100;
+    const shrinking = phase !== undefined && t >= phase.shrinkEnd - 60; // roam the current circle until the shrink is nearly over
     const cx = shrinking ? st.tx : st.cx, cy = shrinking ? st.ty : st.cy;
     const lim = Math.max(1000, Math.trunc(((shrinking ? st.targetR : st.r) * 8) / 10));
     const reached = dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(1200);
