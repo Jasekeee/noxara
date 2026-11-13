@@ -7,19 +7,19 @@
 //    blaster 38 / shotgun 27 / sniper 15 / grenade 20 %), 6 heals (+35 hp).
 //  - Fighter: 100 hp, r 0.5 u, 5 u/s (250 FP/tick), soft fighter-fighter separation.
 //    A closed chest opens when the fighter centre is within 1.4 u of it; heals likewise (only if hurt).
-//  - Weapons: popper 12dmg cd6 9u 0.9u/t 6 shots rl30 · blaster 16 cd4 11u 1.0u/t 10 rl36 ·
-//    shotgun 5×9 ±150 cd16 6u 4 rl40 · sniper 55 cd30 22u 2.5u/t 3 rl50 ·
-//    grenade 45 (→50 % at edge) r2.5u, lobbed 9 u over obstacles, fuse 16 t (or impact on an enemy),
-//    3 shots cd20 rl50; owners are immune to their own grenades.
+//  - Weapons (round 2: base damage −15 % for pacing): popper 10dmg cd6 9u 0.9u/t 6 shots rl30 ·
+//    blaster 14 cd4 11u 1.0u/t 10 rl36 · shotgun 5×8 ±150 cd16 6u 4 rl40 · sniper 48 cd30 22u 2.5u/t 3 rl50 ·
+//    grenade 40 (→50 % at edge) r2.5u, lobbed to Input.aimDist (1..9 u, 0.1 u steps; absent = 9 u) over
+//    obstacles, fuse 16 t or on touching an enemy, 3 shots cd20 rl50; owners are immune to their grenades.
 //    Crit 8 % ×1.5. Weapon tier: +10 % dmg and −10 % reload time per tier; armor −2 per hit per level (min 1).
-//  - Grenade proximity fuse: explodes on touching an enemy (0.65 u) or after the fuse.
-//  - Regen: after 3 s without being hurt or shooting, +4 hp every 0.5 s (8 hp/s).
+//  - Regen: after 2.5 s without being hurt or shooting, +5 hp every 0.5 s (10 hp/s).
 //  - Bush stealth: hidden unless viewer ≤2.5 u, target shot ≤20 ticks ago, or was hurt ≤10 ticks ago.
-//  - Storm: 6 phases (rules.ts STORM_PHASES): 32 → 22 → 14 → 8 → 4.5 → 2.5 → 0 u, dps 4/6/9/12/16/20
+//  - Storm: 6 phases (rules.ts STORM_PHASES): 32 → 22 → 15 → 9.5 → 5.5 → 2.5 → 0 u, dps 5/8/11/14/18/24
 //    (applied every 10 ticks as ceil(dps/2), ignores armor). Storm hits emit "hit" with by = -1.
-//    Shrinks (s): 20–35, 50–65, 80–95, 108–123, 140–165 (2.5 u), 169–177 (closed). Each phase is
-//    announced (event "storm") ~13–17 s before it shrinks; the new centre drifts ≤70 % of the slack.
-//    state.storm also carries tx/ty = the centre of the circle it is shrinking toward (StormX).
+//    Shrinks (s): 30–50, 75–95, 112–127, 137–150, 155–166 (2.5 u), 169–177 (closed). Each phase is
+//    announced (event "storm") when the previous one ends; the new centre drifts ≤70 % of the slack.
+//    state.storm.tx/ty = centre of the circle it is shrinking toward.
+//  - Bot-only pacing (300 seeds, QA tool): mean end ≈130 s, median ≈133 s, storm ≈8 % of deaths.
 //  - Time out at 3600 ticks: highest hp wins (tiebreak lowest idx). If every remaining fighter would
 //    die on the same tick, the one with the most hp left survives with 1 hp.
 //
@@ -61,7 +61,9 @@ import {
   STORM_PHASES,
   WEAPONS,
   WEAPON_ORDER,
+  aimDistQ,
   armored,
+  lobDist,
   scaledDamage,
   type StormX,
 } from "./rules";
@@ -236,7 +238,7 @@ export function createMatch(cfg: MatchConfig): Match {
     }
   }
 
-  function fire(f: FighterState, aim: number, ev: SimEvent[]) {
+  function fire(f: FighterState, aim: number, distQ: number, ev: SimEvent[]) {
     const w = WEAPONS[f.weapon];
     const t = state.tick;
     const mx = f.x + Math.trunc((icos(aim) * (FIGHTER_R + 100)) / 1024);
@@ -245,14 +247,16 @@ export function createMatch(cfg: MatchConfig): Match {
     for (let k = 0; k < w.pellets; k++) {
       let a = aim;
       if (w.pellets > 1) a = aim - w.spread + Math.trunc((2 * w.spread * k) / (w.pellets - 1)) + rng.range(-20, 20);
+      // grenades: travel exactly the requested lob distance over the fuse time
+      const speed = f.weapon === "grenade" ? Math.trunc(lobDist(distQ, w.range) / w.fuse) : w.speed;
       state.projectiles.push({
         id: nextProj++,
         owner: f.idx,
         weapon: f.weapon,
         x: mx,
         y: my,
-        vx: Math.trunc((icos(a) * w.speed) / 1024),
-        vy: Math.trunc((isin(a) * w.speed) / 1024),
+        vx: Math.trunc((icos(a) * speed) / 1024),
+        vy: Math.trunc((isin(a) * speed) / 1024),
         ttl,
         dmg: w.dmg,
       });
@@ -453,7 +457,7 @@ export function createMatch(cfg: MatchConfig): Match {
     for (const f of fighters) {
       if (!f.alive) continue;
       if (f.ammo === 0 && t >= f.readyTick) f.ammo = WEAPONS[f.weapon].mag;
-      if (inputs[f.idx].fire && t >= f.readyTick && f.ammo > 0) fire(f, f.aim, ev);
+      if (inputs[f.idx].fire && t >= f.readyTick && f.ammo > 0) fire(f, f.aim, aimDistQ(inputs[f.idx].aimDist), ev);
     }
     stepProjectiles(ev);
     if (t % REGEN_EVERY === 0) {
