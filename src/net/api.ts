@@ -46,6 +46,8 @@ export interface SettleResult {
 export interface GameClient {
   /** "chain" when the relayer + contract are reachable; "offline" = local-only play (still fully playable). */
   readonly mode: "chain" | "offline";
+  /** Why the client is offline (e.g. "sim_version_mismatch", "relayer_unreachable"), for a friendly UI hint. */
+  readonly offlineReason?: string;
   /** Guest account id (created on first call, persisted in localStorage). */
   account(): Promise<string>;
   isGuest(): boolean;

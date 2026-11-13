@@ -17,7 +17,7 @@ import path from "node:path";
 import { Chain } from "./chain.ts";
 import { signatureOk, settleSignatureOk, KeyOwners } from "./verify.ts";
 import { checkDelegate, isGuestAccount, RateLimiter, Budget, GUEST_PREFIX, type RelayPolicy } from "./policy.ts";
-import { judge, inputLogHash, settleMessage } from "./settle.ts";
+import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
 import type { ChainMatch } from "./roster.ts";
 import type { MatchRecord } from "../../src/sim/types.ts";
 
@@ -110,24 +110,26 @@ const recordPath = (id: string) => path.join(DATA_DIR, `${id}.json`);
 
 async function handleSettle(body: Record<string, unknown>) {
   const matchId = String(body.match_id ?? "");
-  if (!/^[0-9]{1,18}$/.test(matchId)) return { code: 400, body: { error: "bad match_id" } };
+  if (!/^[0-9]{1,18}$/.test(matchId)) return { code: 400, body: { error: "bad match_id", code: "bad_request" } };
   const record = body.record as MatchRecord;
-  if (!record || !Array.isArray(record.inputs)) return { code: 400, body: { error: "missing record" } };
+  if (!record || !Array.isArray(record.inputs)) return { code: 400, body: { error: "missing record", code: "bad_request" } };
+  const ver = checkSimVersion(body.simVersion);
+  if (!ver.ok) return { code: ver.status, body: { error: ver.reason, code: ver.code, simVersion: SIM_VERSION } };
   const m = await chain.view<ChainMatch | null>("get_match", { match_id: matchId });
-  if (!m) return { code: 404, body: { error: "no such match" } };
+  if (!m) return { code: 404, body: { error: "no such match", code: "no_match" } };
   // only the match's player may submit its record (else anyone could submit a losing log for them)
   const logHash = inputLogHash(record.inputs);
   const publicKey = String(body.publicKey ?? "");
-  if (!settleSignatureOk(settleMessage(matchId, logHash), publicKey, String(body.signature ?? ""))) return { code: 401, body: { error: "bad signature" } };
-  if (!(await owners.owns(m.player, publicKey))) return { code: 401, body: { error: "unknown key for this player" } };
-  if (settling.has(matchId)) return { code: 409, body: { error: "already settling" } };
+  if (!settleSignatureOk(settleMessage(matchId, logHash), publicKey, String(body.signature ?? ""))) return { code: 401, body: { error: "bad signature", code: "bad_signature" } };
+  if (!(await owners.owns(m.player, publicKey))) return { code: 401, body: { error: "unknown key for this player", code: "unknown_key" } };
+  if (settling.has(matchId)) return { code: 409, body: { error: "already settling", code: "busy" } };
   settling.add(matchId);
   try {
     const v = judge({ ...m, match_id: matchId }, record);
-    if (!v.ok) return { code: v.status, body: { error: v.reason } };
+    if (!v.ok) return { code: v.status, body: { error: v.reason, code: v.code ?? "refused" } };
     fs.writeFileSync(recordPath(matchId), JSON.stringify({ match_id: matchId, input_log_hash: logHash, record }));
     const r = await chain.settle(v.args);
-    if (r.failure) return { code: 409, body: { tx: r.tx, error: r.failure } };
+    if (r.failure) return { code: 409, body: { tx: r.tx, error: r.failure, code: "chain_refused" } };
     console.log(`settled #${matchId}: winner ${v.winner} (replay ${v.ms} ms, kills ${v.killsFrom}), ${r.tgas} Tgas, tx ${r.tx}`);
     return { code: 200, body: { tx: r.tx, result: r.value, events: r.events, verified: true, replay_ms: v.ms, tgas: r.tgas } };
   } finally {
@@ -146,7 +148,7 @@ const server = http.createServer(async (req, res) => {
   const t0 = performance.now();
   try {
     if (req.method === "GET" && req.url === "/api/health") {
-      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, height: chain.height?.toString() ?? null }, origin);
+      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null }, origin);
     }
     const rec = req.method === "GET" ? /^\/api\/match\/([0-9]{1,18})\/record$/.exec(req.url ?? "") : null;
     if (rec) {
@@ -211,5 +213,5 @@ const server = http.createServer(async (req, res) => {
 
 await chain.start();
 await chain.warm();
-server.listen(PORT, () => console.log(`relayer ${relayerId} + match server ${serverId ?? "(off)"} on :${PORT} (${network}, game ${gameId})`));
+server.listen(PORT, () => console.log(`relayer ${relayerId} + match server ${serverId ?? "(off)"} on :${PORT} (${network}, game ${gameId}, sim ${SIM_VERSION})`));
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { chain.stop(); server.close(() => process.exit(0)); });

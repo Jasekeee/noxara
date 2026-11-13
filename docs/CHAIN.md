@@ -180,6 +180,27 @@ node scripts/econ-sim.ts --curve
 
 `relayer/src/ts-resolve.ts` lets Node load `src/sim/*` (extensionless imports written for Vite).
 
+## Simulation version guard
+
+The browser and the match server must run the same simulation or every replay mismatches.
+`SIM_VERSION` (src/sim/types.ts, bumped on any rule/AI/mapgen change) is checked on both sides:
+
+- `GET /api/health` returns `simVersion`. `createGameClient()` goes offline with
+  `offlineReason: "sim_version_mismatch"` if it differs (or is missing: an old server).
+- The client sends `simVersion` with every `/api/settle`; the server refuses a different one with
+  409 `{code: "sim_version_mismatch", simVersion: <server's>}` before replaying anything, and the client
+  then switches to offline for the rest of the session.
+- `/api/settle` error codes: `bad_request`, `sim_version_mismatch`, `no_match`, `bad_signature`,
+  `unknown_key`, `busy`, `config_mismatch`, `replay_mismatch`, `chain_refused`.
+- `offlineReason` values: `relayer_unreachable`, `wrong_contract`, `sim_version_mismatch`,
+  `no_webcrypto`, `chain_error`. The client never logs to the console (quality gate); the last error
+  text is kept in the client's `lastError` for debugging.
+- Deploy rule: restart the match server from the same commit as the client build.
+
+Live check (server on :8798, sim r4): wrong version → `sim_version_mismatch`; the game client played and
+settled match #20 verified (start `AuSDe77Y8yfZwoNimJ4NTYCE9B81TGzNBEgsDPFRyFfr`, settle
+`HZEp1dXU6sPSs5rk6PzYPxnzBbHgkMnXjDMoAPE34V43`).
+
 ## Client integration
 
 `src/net/client.ts` implements `GameClient` (src/net/api.ts) with **no new dependencies**:

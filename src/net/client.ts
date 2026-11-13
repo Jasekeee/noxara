@@ -3,7 +3,7 @@
 // `start_match` is a signed NEP-366 delegate action. If anything chain-side is unreachable the client
 // drops to mode "offline": local seed + t1Roster(), the game stays fully playable.
 import type { CreateGameClient, FighterInfo, GameClient, Payout, SettleResult, StartResult } from "./api";
-import type { MatchConfig, MatchRecord, Personality } from "../sim/types";
+import { SIM_VERSION, type MatchConfig, type MatchRecord, type Personality } from "../sim/types";
 import { t1Roster } from "../sim/roster";
 import { matchConfigFromChain, type ChainMatch, type ChainRosterEntry } from "./roster";
 import { ed25519Supported, generateKey, inputLogHash, rpc, settleMessage, signDelegate, Signer, toBase64, viewCall, type StoredKey } from "./near";
@@ -78,8 +78,19 @@ function randomSeed(): number {
   return a[0] || 1;
 }
 
+/** Why the client is offline (GameClient.offlineReason). */
+export type OfflineReason =
+  | "relayer_unreachable" // no answer from /api/health
+  | "wrong_contract" // the relayer serves another contract
+  | "sim_version_mismatch" // the match server runs another simulation version (it would refuse our records)
+  | "no_webcrypto" // the browser can't make ed25519 keys
+  | "chain_error"; // something failed mid-session (guest creation, relay, views)
+
 class Client implements GameClient {
   private _mode: "chain" | "offline";
+  private _offlineReason: OfflineReason | undefined;
+  /** last chain-side error message (for debugging; never logged) */
+  lastError: string | null = null;
   private relayer: string;
   private rpcUrl: string;
   private contract: string;
@@ -93,8 +104,10 @@ class Client implements GameClient {
   private rosters = new Map<string, ChainRosterEntry[]>();
   private localMatches = 0;
 
-  constructor(mode: "chain" | "offline", o: { relayer: string; rpc: string; contract: string }) {
+  constructor(mode: "chain" | "offline", o: { relayer: string; rpc: string; contract: string }, reason?: OfflineReason, detail?: string) {
     this._mode = mode;
+    this._offlineReason = mode === "offline" ? reason : undefined;
+    this.lastError = detail ?? null;
     this.relayer = o.relayer.replace(/\/$/, "");
     this.rpcUrl = o.rpc;
     this.contract = o.contract;
@@ -107,8 +120,14 @@ class Client implements GameClient {
     return this._mode;
   }
 
-  private goOffline(why: unknown) {
-    if (this._mode === "chain") console.warn("[net] chain unavailable, playing offline:", why instanceof Error ? why.message : why);
+  get offlineReason(): string | undefined {
+    return this._offlineReason;
+  }
+
+  /** Silent by design (quality gate: 0 console warnings); the UI reads `offlineReason`. */
+  private goOffline(why: unknown, reason: OfflineReason = "chain_error") {
+    this.lastError = why instanceof Error ? why.message : String(why);
+    if (this._mode === "chain") this._offlineReason = reason;
     this._mode = "offline";
   }
 
@@ -285,18 +304,20 @@ class Client implements GameClient {
     try {
       const msg = await settleMessage(matchId, await inputLogHash(record.inputs));
       const signature = toBase64(await this.signer.sign(msg));
-      const r = await postJson<{ tx: string; result: MatchResultJson; events: ChainEvent[] }>(
+      const r = await postJson<{ tx: string; result: MatchResultJson; events: ChainEvent[]; code?: string }>(
         `${this.relayer}/api/settle`,
-        { match_id: matchId, record, publicKey: this.saved.key.publicKey, signature },
+        { match_id: matchId, record, publicKey: this.saved.key.publicKey, signature, simVersion: SIM_VERSION },
         60_000,
       );
       if (!r.ok) {
-        console.warn("[net] settle refused:", r.json.error);
+        this.lastError = `${r.json.code ?? r.status}: ${r.json.error ?? "settle refused"}`;
+        // the server was updated to another simulation mid-session: stop committing matches it can't verify
+        if (r.json.code === "sim_version_mismatch") this.goOffline(r.json.error, "sim_version_mismatch");
         return unverified;
       }
       return this.describe(matchId, record, r.json.tx, r.json.result, r.json.events ?? []);
     } catch (e) {
-      console.warn("[net] settle failed:", e instanceof Error ? e.message : e);
+      this.lastError = e instanceof Error ? e.message : String(e);
       return unverified;
     }
   }
@@ -343,15 +364,17 @@ class Client implements GameClient {
 /** Probe the relayer (short timeout) and return a chain client, or an offline one. Never throws. */
 export const createGameClient: CreateGameClient = async (opts = {}) => {
   const o = { relayer: opts.relayer ?? DEFAULTS.relayer, rpc: opts.rpc ?? DEFAULTS.rpc, contract: opts.contract ?? DEFAULTS.contract };
-  let mode: "chain" | "offline" = "offline";
+  const offline = (reason: OfflineReason, detail: string) => new Client("offline", o, reason, detail);
+  if (typeof crypto?.subtle === "undefined" || !(await ed25519Supported())) return offline("no_webcrypto", "WebCrypto ed25519 unavailable");
+  let h: { ok?: boolean; game?: string; simVersion?: string };
   try {
-    if (typeof crypto?.subtle === "undefined" || !(await ed25519Supported())) throw new Error("no WebCrypto ed25519");
     const r = await fetch(`${o.relayer.replace(/\/$/, "")}/api/health`, { signal: AbortSignal.timeout(2500) });
-    const h = (await r.json()) as { ok?: boolean; game?: string };
-    if (!r.ok || !h.ok || h.game !== o.contract) throw new Error(`relayer serves ${h.game ?? "?"}, not ${o.contract}`);
-    mode = "chain";
+    h = (await r.json()) as typeof h;
+    if (!r.ok || !h.ok) return offline("relayer_unreachable", `health: HTTP ${r.status}`);
   } catch (e) {
-    console.warn("[net] offline mode:", e instanceof Error ? e.message : e);
+    return offline("relayer_unreachable", e instanceof Error ? e.message : String(e));
   }
-  return new Client(mode, o);
+  if (h.game !== o.contract) return offline("wrong_contract", `relayer serves ${h.game ?? "?"}, not ${o.contract}`);
+  if (h.simVersion !== SIM_VERSION) return offline("sim_version_mismatch", `server sim ${h.simVersion ?? "unknown"}, client sim ${SIM_VERSION}`);
+  return new Client("chain", o);
 };

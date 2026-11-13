@@ -1,5 +1,5 @@
 // Live end-to-end through the GAME's client (src/net/client.ts), exactly as the browser uses it.
-//   node --env-file=.env --import ./relayer/src/ts-resolve.ts scripts/e2e-net.ts [--matches 3]
+//   node --env-file=.env --import ./relayer/src/ts-resolve.ts scripts/e2e-net.ts [--matches 3] [--relayer http://127.0.0.1:8788]
 import { createGameClient } from "../src/net/client.ts";
 import { createMatch } from "../src/sim/match.ts";
 import { botInput } from "../src/sim/ai.ts";
@@ -8,8 +8,10 @@ import { MATCH_TICKS, type MatchRecord } from "../src/sim/types.ts";
 
 const i = process.argv.indexOf("--matches");
 const n = i > 0 ? Number(process.argv[i + 1]) : 2;
-const c = await createGameClient({ relayer: "http://127.0.0.1:8788", contract: process.env.GAME_CONTRACT_ID });
-console.log("mode:", c.mode);
+const j = process.argv.indexOf("--relayer");
+const relayer = j > 0 ? process.argv[j + 1] : "http://127.0.0.1:8788";
+const c = await createGameClient({ relayer, contract: process.env.GAME_CONTRACT_ID });
+console.log("mode:", c.mode, c.offlineReason ?? "");
 let t = performance.now();
 console.log("account:", await c.account(), `${Math.round(performance.now() - t)} ms`);
 for (let k = 0; k < n; k++) {
