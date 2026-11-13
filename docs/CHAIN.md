@@ -246,6 +246,13 @@ new sign-in pays its own storage through the wallet. Settlement is not counted (
 = 1,514 bytes = **0.01514 NEAR** (was 0.02). Real players keep 0.02 NEAR (measured 1,897 bytes with 3
 sponsorships + welcome records). The relayer reads both from `get_config`.
 
+**Wasm size** (release, `cargo near build non-reproducible-wasm`, wasm-opt included): 375,865 bytes
+(3.76 NEAR of storage). `--no-embed-abi` → **370,091** (−5.8 KB; publish `royale_abi.json` in the repo
+instead); `RUSTFLAGS=-C link-arg=-s` → no change (already stripped); `opt-level = "s"` → 414,299 (worse,
+kept `z`); `lto`, `codegen-units = 1`, `panic = "abort"` were already set; `overflow-checks` stay on
+(safety). Further gains would need code changes (the ~60 `json!` event sites, the NEP-141
+`ft_transfer_call`/resolver path) for maybe 5–10% more — not worth the risk before the second audit.
+
 ## Independent audit (NO-GO → fixes; second audit pending)
 
 | # | Finding | Fix | Regression test |
