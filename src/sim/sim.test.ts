@@ -5,6 +5,7 @@ import { createMatch } from "./match";
 import { Recorder, replayRecord } from "./record";
 import { botOnlyRoster, t1Roster } from "./roster";
 import { botInput } from "./ai";
+import { simulateBots } from "./headless";
 import { FIGHTER_R, WEAPONS } from "./rules";
 
 const NONE = new Map<number, Input>();
@@ -105,6 +106,14 @@ describe("bot-only matches", () => {
       else expect(kills).toBeLessThanOrEqual(FIGHTERS - 1);
     }
   }, 60_000);
+
+  it("headless simulateBots matches a manual run", () => {
+    const a = simulateBots(5);
+    const { m } = runBots(5);
+    expect(a.hash).toBe(m.hash());
+    expect(a.winner).toBe(m.state.winner);
+    expect(a.placements).toEqual(m.state.fighters.map((f) => f.placement));
+  });
 
   it("bots actually fight: shots, hits, chests and kills by players", () => {
     const { events } = runBots(5);
