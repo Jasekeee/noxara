@@ -16,6 +16,11 @@
 // near the next safe zone, ambushes), sniper (hunts a sniper, long preferred range, wide vision),
 // looter (opens chests until ~55 s, avoids early fights), coward (avoids fights unless cornered,
 // moves into the next circle early, hides), balanced.
+// Pacing: an opening phase (GRACE, 32 s) where bots loot/rotate and only fight back; afterwards
+// non-aggressive bots pick only favourable fights, roam at a walk and lurk in bushes. Storm
+// discipline is imperfect on purpose (per-bot reaction delay, keep fighting in a weak storm, flee
+// through it) — that is where storm deaths come from. An idle, never-shooting human is ignored for
+// the first 10 s (onboarding). Bots lob grenades with aimDist = predicted target distance.
 import type { FighterState, Input, Match, Personality } from "./types";
 import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
 import { BULLET_R, FIGHTER_R, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
@@ -43,14 +48,14 @@ interface Params {
 }
 
 /** vision ranges (u): short / normal (the sniper personality uses 15 u; +3 u while holding a sniper) */
-const V1 = 10, V2 = 11;
+const V1 = 9, V2 = 10;
 export const PERSONALITY: Record<Personality, Params> = {
-  aggressive: { engage: 140, pref: 45, lowHp: 30, jitter: 100, react: 6, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
-  camper: { engage: 100, pref: 70, lowHp: 40, jitter: 125, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
-  sniper: { engage: 105, pref: 80, lowHp: 40, jitter: 100, react: 12, vision: 15 * FP, passive: false, camp: false, lootUntil: 0 },
-  looter: { engage: 100, pref: 70, lowHp: 45, jitter: 110, react: 8, vision: V1 * FP, passive: false, camp: false, lootUntil: 1100 },
-  coward: { engage: 90, pref: 90, lowHp: 55, jitter: 120, react: 9, vision: V1 * FP, passive: true, camp: true, lootUntil: 0 },
-  balanced: { engage: 100, pref: 70, lowHp: 40, jitter: 125, react: 9, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
+  aggressive: { engage: 140, pref: 45, lowHp: 40, jitter: 100, react: 6, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
+  camper: { engage: 100, pref: 70, lowHp: 55, jitter: 125, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
+  sniper: { engage: 105, pref: 80, lowHp: 55, jitter: 100, react: 12, vision: 13 * FP, passive: false, camp: false, lootUntil: 0 },
+  looter: { engage: 100, pref: 70, lowHp: 60, jitter: 110, react: 8, vision: V1 * FP, passive: false, camp: false, lootUntil: 1100 },
+  coward: { engage: 90, pref: 90, lowHp: 70, jitter: 120, react: 9, vision: V1 * FP, passive: true, camp: true, lootUntil: 0 },
+  balanced: { engage: 100, pref: 70, lowHp: 55, jitter: 125, react: 9, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
 };
 
 interface Brain {
@@ -73,6 +78,8 @@ interface Brain {
   wanderY: number;
   wanderUntil: number;
   bush: number;
+  outsideSince: number;
+  stormDelay: number;
   shotFromX: number;
   shotFromY: number;
   shotFromT: number;
@@ -98,16 +105,25 @@ interface Mind {
   py: number[];
   vx: number[];
   vy: number[];
+  /** has this fighter ever moved (for the human onboarding grace) */
+  moved: boolean[];
   brains: Brain[];
 }
 
 const minds = new WeakMap<Match, Mind>();
 /** campers hold still in their bush while the target is farther than this */
 const BUSH_HOLD = 2800;
+/** opening phase (ticks): bots loot and rotate, and only fight back when shot or touched */
+const GRACE = 640;
+/** ticks during which an idle, never-shooting human is ignored */
+const HUMAN_GRACE = 200;
+/** a bot keeps fighting outside the safe zone while its hp is above this */
+const STORM_TOLERANCE: Record<Personality, number> = { aggressive: 30, camper: 70, sniper: 55, looter: 50, coward: 90, balanced: 45 };
 /** base % chance to dodge an incoming bullet (checked once per dodge window) */
 const DODGE: Record<Personality, number> = { aggressive: 30, camper: 25, sniper: 30, looter: 30, coward: 45, balanced: 35 };
 /** chance (%) that a roaming bot heads for a nearby bush and lurks there */
-const BUSH_PCT: Record<Personality, number> = { aggressive: 15, camper: 80, sniper: 50, looter: 35, coward: 80, balanced: 45 };
+const BUSH_PCT: Record<Personality, number> = { aggressive: 25, camper: 85, sniper: 60, looter: 45, coward: 85, balanced: 60 };
+const ROAM_PACE = 550;
 const BURST_MIN = 2, BURST_MAX = 4, PAUSE_MIN = 10, PAUSE_MAX = 22;
 const sq = (v: number) => v * v;
 
@@ -121,6 +137,7 @@ function mind(match: Match): Mind {
       py: fs.map((f) => f.y),
       vx: fs.map(() => 0),
       vy: fs.map(() => 0),
+      moved: fs.map(() => false),
       brains: fs.map((f, i) => {
         const rng = new Rng(mixSeed(match.cfg.seed, 0xa1000 + i));
         const p = PERSONALITY[f.personality] ?? PERSONALITY.balanced;
@@ -143,6 +160,8 @@ function mind(match: Match): Mind {
           wanderY: 0,
           wanderUntil: 0,
           bush: -1,
+          outsideSince: -1,
+          stormDelay: f.personality === "coward" ? 0 : rng.range(10, 70),
           shotFromX: 0,
           shotFromY: 0,
           shotFromT: -999,
@@ -169,6 +188,7 @@ function mind(match: Match): Mind {
       m.vy[i] = fs[i].y - m.py[i];
       m.px[i] = fs[i].x;
       m.py[i] = fs[i].y;
+      if (m.vx[i] !== 0 || m.vy[i] !== 0) m.moved[i] = true;
     }
     m.tick = match.state.tick;
   }
@@ -250,6 +270,12 @@ export function botInput(match: Match, idx: number): Input {
       continue;
     }
     const d = isqrt(d2);
+    // Onboarding grace: ignore a human who hasn't moved or shot yet during the first 10 s
+    // (unless they're right next to us). Deterministic: uses only the human's state.
+    if (f.human && t < HUMAN_GRACE && f.lastShotTick < 0 && m.vx[f.idx] === 0 && m.vy[f.idx] === 0 && !m.moved[f.idx] && d > 3 * FP) {
+      b.aw[f.idx] = 0;
+      continue;
+    }
     // Awareness: an enemy must be noticed before it counts (view cone, hearing shots, being shot at).
     const need = 3 + Math.trunc(d / 700);
     if (b.aw[f.idx] < need) {
@@ -295,24 +321,36 @@ export function botInput(match: Match, idx: number): Input {
   const toShrink = phase ? phase.shrinkEnd - t : 9999;
   const needT = dTarget - Math.max(0, st.targetR - 1500);
   const ticksToWalk = Math.trunc(Math.max(0, needT) / SPEED);
-  const stormUrgent = dStorm > st.r - 700;
+  // Storm discipline: bots notice they're outside only after a personal delay (cowards at once).
+  const outside = dStorm > st.r - 300;
+  if (!outside) b.outsideSince = -1;
+  else if (b.outsideSince < 0) b.outsideSince = t;
+  const stormUrgent = outside && t - b.outsideSince >= b.stormDelay;
   const stormSoon =
     needT > 0 &&
     st.phase > 0 &&
-    (toShrink < ticksToWalk * 2 + 120 || (P.passive && t > 200) || (st.targetR <= 4500 && needT > 0));
-  const provoked = hurtRecently || (dT < 3500 && t >= 300) || s.alive <= 3;
-  const earlyLoot = t < 60 || (!armed && t < 700 && me.personality !== "aggressive");
+    (toShrink < ticksToWalk + (P.passive ? 200 : 30) || (P.passive && t > 200) || (st.targetR <= 2500 && needT > 0));
+  const provoked = hurtRecently || (dT < 3500 && t >= GRACE) || s.alive <= 3;
+  const earlyLoot = t < GRACE || (!armed && t < 900 && me.personality !== "aggressive");
   const willFight =
     T !== null &&
-    (!P.passive || provoked) &&
+    (!P.passive || provoked || (T.hp <= 35 && dT <= w.range)) && // passive bots still steal finishing blows
     !(earlyLoot && !provoked) &&
     // non-aggressive bots only take fair fights unless cornered
-    (me.personality === "aggressive" || provoked || me.hp >= 55 || me.hp >= T.hp) && !(me.personality === "looter" && t < P.lootUntil && !provoked && !armed);
+    // non-aggressive bots pick fights only when they look favourable (or they're cornered)
+    (me.personality === "aggressive" ||
+      provoked ||
+      T.hp <= 50 ||
+      me.hp >= T.hp + 25 ||
+      dT < 5 * FP ||
+      (P.camp && me.inBush) ||
+      (me.personality === "sniper" && me.weapon === "sniper") ||
+      s.alive <= 4) && !(me.personality === "looter" && t < P.lootUntil && !provoked && !armed);
   const engageR = Math.min(vision, Math.trunc((w.range * P.engage) / 100));
 
   const angleTo = (x: number, y: number) => iatan2(y - me.y, x - me.x);
   // Disengage when losing (not aggressive bots, not in the endgame) or low; keep it up for a while.
-  const losing = T !== null && me.personality !== "aggressive" && s.alive > 3 && me.hp < 60 && T.hp > me.hp + 20;
+  const losing = T !== null && me.personality !== "aggressive" && s.alive > 3 && me.hp < 75 && T.hp > me.hp + 15;
   if ((me.hp < P.lowHp || losing) && threats > 0 && s.alive > 2) b.fleeUntil = t + 50;
   // Shot by someone we can't see (long range / hidden): break line of fire, head for cover.
   if (T === null && t - me.lastHurtTick <= 10 && t - b.shotFromT <= 30 && s.alive > 2 && b.fleeUntil < t) {
@@ -330,6 +368,13 @@ export function botInput(match: Match, idx: number): Input {
   for (const h of s.heals) {
     if (h.taken || !insideTarget(h.x, h.y, 500)) continue;
     const d = isqrt(dist2(me.x, me.y, h.x, h.y));
+    // don't race a visible enemy to the same heal
+    let contested = false;
+    for (const f of s.fighters) {
+      if (f.idx === idx || !f.alive || b.aw[f.idx] < 3 || !match.canSee(idx, f.idx)) continue;
+      if (dist2(f.x, f.y, h.x, h.y) < sq(d + 2000)) contested = true;
+    }
+    if (contested) continue;
     if (d < healD) {
       healD = d;
       heal = h.id;
@@ -341,7 +386,10 @@ export function botInput(match: Match, idx: number): Input {
     const ha = angleTo(s.heals[heal].x, s.heals[heal].y);
     healSafe = Math.abs(angDiff(ha, iatan2(Math.trunc(threatY / threats) - me.y, Math.trunc(threatX / threats) - me.x))) > 1200;
   }
-  if (stormUrgent || stormSoon) {
+  // Busy fighting a visible enemy? Many bots tank some storm damage rather than turn their back
+  // (personality hp threshold) — this is where storm deaths come from.
+  const busy = T !== null && willFight && dT <= engageR + 1000 && me.hp > STORM_TOLERANCE[me.personality];
+  if ((stormUrgent || stormSoon) && !(busy && st.dps <= 12)) {
     mode = "storm";
     goalA = needT > 0 ? angleTo(st.tx, st.ty) : angleTo(st.cx, st.cy);
     avoidStorm = false;
@@ -350,6 +398,7 @@ export function botInput(match: Match, idx: number): Input {
     goalA = angleTo(s.heals[heal].x, s.heals[heal].y);
   } else if (fleeing) {
     mode = "flee";
+    avoidStorm = st.dps >= 14; // running from a fight, bots will cut through a weak storm
     let ax = st.tx, ay = st.ty;
     if (threats > 0) {
       ax = Math.trunc(threatX / threats);
@@ -435,7 +484,7 @@ export function botInput(match: Match, idx: number): Input {
     }
   }
 
-  if (mode === "roam" && T && willFight && t >= 300 && (me.personality === "aggressive" || (!P.camp && me.hp >= T.hp + 30))) {
+  if (mode === "roam" && T && willFight && t >= GRACE && (me.personality === "aggressive" || (!P.camp && me.hp >= T.hp + 30))) {
     // chase visible targets beyond engage range
     mode = "chase";
     goalA = angleTo(T.x, T.y);
@@ -568,8 +617,10 @@ export function botInput(match: Match, idx: number): Input {
     let want = goalA & 4095;
     if (t < b.detourUntil) want = (want + b.detourSide * 1024) & 4095;
     const a = steer(match, me, b, want, avoidStorm);
-    mx = Math.trunc((icos(a) * 1000) / 1024);
-    my = Math.trunc((isin(a) * 1000) / 1024);
+    // cautious walk while roaming (fewer blind encounters); full speed otherwise
+    const pace = mode === "roam" && t >= GRACE ? ROAM_PACE : 1000;
+    mx = Math.trunc((icos(a) * pace) / 1024);
+    my = Math.trunc((isin(a) * pace) / 1024);
   }
 
   // ---- 4. Aim + fire.

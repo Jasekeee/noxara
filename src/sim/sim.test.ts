@@ -294,7 +294,8 @@ describe("rules", () => {
     let hit: SimEvent | undefined;
     for (let i = 0; i < 10 && !hit; i++) hit = m.step(new Map([[0, { mx: 0, my: 0, aim: 0, fire: true }]])).find((e) => e.t === "hit");
     expect(hit && hit.t === "hit" && hit.who).toBe(1);
-    if (hit && hit.t === "hit") expect(hit.dmg).toBe(hit.crit ? 18 - 4 : 12 - 4);
+    const base = WEAPONS.popper.dmg;
+    if (hit && hit.t === "hit") expect(hit.dmg).toBe((hit.crit ? Math.trunc((base * 3) / 2) : base) - 4);
     const h = m.state.heals[0];
     b.hp = 90;
     b.x = h.x; b.y = h.y;
