@@ -15,7 +15,7 @@ dev patch.
 | Match server (only account allowed to `settle_match`) | `server.br-7e8492.testnet` |
 | Relayer / guest parent (`g-*.relay.br-7e8492.testnet`) | `relay.br-7e8492.testnet` |
 | House treasury (keyless) | `house.royale.br-7e8492.testnet` |
-| Genesis bots (keyless) | `bramble`, `ox`, `pip`, `vex`, `moss`, `juno`, `rook`, `tink`, `sable` `.royale.br-7e8492.testnet` |
+| Genesis bots (keyless) | `bramble`, `ox`, `pip`, `vex`, `moss`, `juno`, `rook`, `tink`, `sable` `.royale.br-7e8492.testnet` (a fresh deploy now uses the t1Roster nine: Brindle, Quillon, Vesper, Magpie, Tallow, Dorrit, Zinnia, Okapi, Fenwick; the live contract kept its bots through the migrations) |
 
 | Tx | Hash |
 |---|---|
@@ -27,6 +27,11 @@ dev patch.
 | live e2e: `settle_match` #4 (Vex won, real sim replayed by the server) | `8ikqTyFN2J7KjqTJ6B4LDBgekV4yk5eyWTbTbYWSMsC9` |
 | live e2e: `settle_match` #5..#7 | `64Zy8cYWExbDdLKJvRvm5p71UfNKVj5K3azkH1oQyFWw`, `3pnDcuqbD4duCYzt4YFxf4VfSgQc1Dombvx4bLymyXRf`, `6daxzXywUnYSgQbA6msNCLtdWux8zs1F3EdNyUJmsdXQ` |
 | live e2e: `settle_match` #9 (sim round 2): Bramble + Ox went broke and retired, rookies Pep + Kit spawned with new keyless accounts (29 Tgas) | `W19iJAQ4GbxpjKeyiBuL9m1m6sWAXVTYEzXyXF5W65r` |
+| migration 1: economy retune (deploy + `migrate`, same account, bots and balances kept) | `AJah7gF5kH8NFmZPzZjJdmgtGZ3qddEz8eqBemRv87K` |
+| migration 2: the house reinvests above its floor | `9bkZhcLyxmKFqxDchdQhRLDw48db6M3BbvDP2ZkW2PZ9` |
+| migration 3: unique rookie names | `gZGvktitGfoaThArEEYw7Y2oLA5bJUCXmKyVJdc6DPR` |
+| game client (`src/net/client.ts`) live: relayed start #10 / settle #10 | `3N9AZGUcr44mThDynKk8RdsHFQ6zVqhWucMe9Z9peVqN` / `3evgSJ8tSTYnMxqpcfzK5GD7VJqHFMDLCLTLXQdAh3E6` |
+| game client live after migration 2: start #13 / settle #13 | `DYZu1i7WoPfCwpfyTGTc898VJhtNucdBxEvM9apqR8wY` / `GjLi1XqfSGBnYfxW8TRGRmRcNajmrh95pNma7B7sTyp6` |
 
 All NPC accounts were checked to have 0 access keys after deploy (`scripts/deployments/testnet.json`).
 Keys of `server.*` and `relay.*` live only in the worktree's `.env` (gitignored, mode 600).
@@ -51,13 +56,13 @@ Explorer: `https://testnet.nearblocks.io/address/royale.br-7e8492.testnet`.
    (`storage_deposit({account_id})`, 0.02 NEAR).
 2. **Start:** the client signs a delegate action for `start_match` → `POST /api/relay`. The contract:
    - lazily sweeps up to 3 expired free matches; abandons the player's previous unsettled match (see rules);
-   - charges each active bot `ENTRY_FEE` (10 $BOUNTY) into escrow (the contract's own token balance);
-     a real player with ≥ 10 $BOUNTY pays too;
+   - charges each active bot `ENTRY_FEE` (4 $BOUNTY) into escrow (the contract's own token balance);
+     a real player with ≥ 4 $BOUNTY pays too;
    - a bot that can't pay **and** has nothing in escrow retires; a rookie takes the slot;
    - marks the richest active bot as the bounty carrier;
    - self-calls `resolve_start`, which fixes the **seed in a later block** (`random_seed` + sha256 with the
      match id and player). The tx's final value is `MatchStart {match_id, seed, roster, bounty_idx, ...}`.
-3. **Play:** the client builds the sim config with `matchConfigFromChain(start)` (relayer/src/roster.ts;
+3. **Play:** the client builds the sim config with `matchConfigFromChain(start)` (src/net/roster.ts;
    fighter idx 0 = the player, idx 1..9 = bot slots 0..8) and plays with the shared deterministic sim.
 4. **Settle:** the client signs `settleMessage(match_id, inputLogHash(record.inputs))` with its key and
    `POST /api/settle {match_id, record, publicKey, signature}`. The server checks the signature belongs to
@@ -73,24 +78,56 @@ Explorer: `https://testnet.nearblocks.io/address/royale.br-7e8492.testnet`.
 
 | Rule | Value |
 |---|---|
-| Entry | 10 $BOUNTY per bot; real players pay if they have it |
-| Pot top-up (only per-match mint) | 20 $BOUNTY per settled match |
+| Entry | 4 $BOUNTY per bot; real players pay if they have it |
+| Pot top-up | 30 $BOUNTY per settled match: paid by the house while it holds > 1,000 (`HOUSE_FLOOR`), minted only below that |
 | Burn / house cut | 2% / 5% of each pot |
-| Bounty | 25% of the carrier's wallet, to whoever killed it (guests / non-payers: to the house) |
+| Bounty | 15% of the carrier's wallet, to whoever killed it (guests / non-payers: to the house) |
 | Winner payout | bot → its wallet; real player who paid → their wallet; guest, non-payer or no winner → house |
-| Upgrades (one per bot per settlement, only if ≥ 40 left after) | weapon tier 1/2: 120/240; armor 1/2: 160/320; then a new skin: 150. Paid to the house |
+| Upgrades (one per bot per settlement, only if ≥ 50 left after) | weapon tier 1/2: 60/120; armor 1/2: 90/180; then a new skin: 150. Paid to the house |
 | Retirement | wallet < entry AND nothing in escrow; the bot keeps its dust, its record stays (`get_retired`) |
-| Rookie | name + play style from the match seed, new keyless account `<name>-<n>.royale…`, 100 from the house (or what it has), generation = predecessor + 1 |
+| Rookie | play style from the match seed, a name no active fighter uses, new keyless account `<name>-<n>.royale…`, 100 from the house (or what it has), generation = predecessor + 1 |
 | Expiry | free matches 500 blocks, paid 1,200 blocks; `sweep_match` by anyone; `start_match` sweeps the oldest free ones |
 | Storage | 0.02 NEAR per player (NEP-145, min = max); guests: prepaid by the relayer. Measured: 983 bytes for player + FT account + one pending match |
 
 **$BOUNTY supply:** minted only at genesis (9 × 100 to the bots, 2,000 to the house) and as the per-match
-pot top-up; burned 2% of every pot (+ unregister burns). Entries, prizes, bounties, upgrades and rookie
-grants move existing tokens. `get_config` exposes `total_minted`, `total_burned`, `total_supply`; tests
-assert `sum(balances) == total_supply == minted − burned` after every match.
+pot top-up when the house is below its floor; burned 2% of every pot (+ unregister burns). Entries,
+prizes, bounties, upgrades, rookie grants and house-funded top-ups move existing tokens. `get_config`
+exposes `total_minted`, `total_burned`, `total_supply`, `house_floor`; tests assert
+`sum(balances) == total_supply == minted − burned` after every match.
 
-**On-ramp for real accounts:** players get $BOUNTY only from winning paid matches, bounties, transfers,
-or `house_grant` (owner-only, ≤ 100 per call, from the house treasury, never mints, never to guests).
+## Economy tuning (scripts/econ-sim.ts) [simulated]
+
+`node scripts/econ-sim.ts [--curve]` mirrors the contract rules (defaults = lib.rs) and draws winners from
+docs/balance.json's per-personality win rates (300 bot-only matches), × (1 + 0.12 per upgrade level)
+[assumed], with the human a guest winning 8% [assumed]; the bounty carrier is killed by someone else 75%
+of the time when it doesn't win [assumed]. 400 runs × 200 matches:
+
+| Constants | Retirements / 200 matches | First weapon tier 2 (median match) | Tier 2 by match 20 | House after 200 |
+|---|---|---|---|---|
+| old (entry 10, top-up 20, bounty 25%, reserve 40, weapon 120/240) | 72 (1 per 2.8) | 26 | 35% of runs | 5,446 (≈ all supply) |
+| **new** (entry 4, top-up 30, bounty 15%, reserve 50, weapon 60/120, armor 90/180, house floor) | **10 (1 per 20)**, p10 6, max 18 | **11** | **95%** | ~1,800, supply flat/slightly deflationary |
+
+Robustness of the new set: human win 3% → 8 retirements, 15% → 12; upgrade edge 0.05 → 9, 0.25 → 11
+(all within ~1 per 17–25 matches). Without the house floor the house soaked up ~90% of the supply; with
+it the house reinvests its income (cut + upgrades + guest wins) as the top-up.
+
+## Real players' first $BOUNTY (proposals, not implemented)
+
+Today a real account gets $BOUNTY only from `house_grant` (owner-only, ≤ 100 per call), transfers, or
+winning a paid match — which it can't enter without $BOUNTY. A real account that plays free can't win.
+
+1. **Welcome stake from the house (one-time, small).** On the first `storage_deposit` of a non-guest
+   account, the house moves `ENTRY_FEE × 3` to it (only while the house is above its floor). The account
+   is paid-eligible from match one. Sybil cost: an account + the 0.02 NEAR deposit, refundable on
+   unregister — so cap it per day globally (e.g. 50 welcomes/day) and require the account to be older
+   than the contract's last N blocks, or have a NEAR balance ≥ 0.5. Simple, instant, a bit farmable.
+2. **Earned qualification ("prove yourself on the free island").** Free matches stay prize-ineligible,
+   but a real account that finishes top-3 in K free matches (counted on chain from settled results,
+   e.g. K = 3) earns a one-time qualifying purse from the house (e.g. 3 entries). Rewards skill and play
+   time, not account creation; the match server already verifies every result, so farming costs real
+   (replayed) play. Slower and needs a counter in `PlayerV1` (state migration V2).
+
+Recommendation: (2) fits "judged on the game loop" better; (1) is the fallback if we need it today.
 
 ## Security review fixes (2026-11-13)
 
@@ -135,14 +172,30 @@ npm i --prefix relayer && npm test --prefix relayer && npm start --prefix relaye
 node --env-file=.env --import ./relayer/src/ts-resolve.ts scripts/e2e.ts --matches 3
 # deploy (dry run prints steps + NEAR cost; mainnet refused without BR_MAINNET_YES=yes)
 npm i --prefix scripts && node scripts/deploy.ts --root <root>.testnet --dry-run
+# upgrade in place (deploy + migrate; keeps bots and balances)
+node scripts/upgrade.ts --root br-7e8492.testnet [--dry-run]
+# economy simulation (defaults = lib.rs constants)
+node scripts/econ-sim.ts --curve
 ```
 
 `relayer/src/ts-resolve.ts` lets Node load `src/sim/*` (extensionless imports written for Vite).
 
-## Client integration (for the lead)
+## Client integration
 
-`relayer/src/client.ts` is browser-ready: `Session.restore(cfg) ?? Session.createGuest(cfg)`,
-`session.startMatch()` → on-chain match, `matchConfigFromChain(m, {name})` → `createMatch`,
-`session.settle(match_id, record)`. Views: `view(cfg, "get_fighters" | "get_leaderboard" | "get_match" |
-"get_recent_matches" | "get_retired" | "get_player" | "get_config" | "ft_balance_of")`.
-Needs in the root package.json: `near-kit` 0.20.2, `@noble/hashes` 2.4.0 (already deps of the relayer).
+`src/net/client.ts` implements `GameClient` (src/net/api.ts) with **no new dependencies**:
+`src/net/near.ts` does ed25519 with WebCrypto, base58, borsh for NEP-366 delegate actions, sha256 and RPC
+views (tested against near-kit's decoder and the relayer's signature checks in relayer/test/net.test.ts).
+
+- `createGameClient()` probes `GET /api/health` (2.5 s); chain mode only if the relayer serves the expected
+  contract and WebCrypto ed25519 exists, else `mode: "offline"` (local seed + `t1Roster()`).
+- Any chain failure during `account()`, `fighters()` or `startMatch()` flips to offline for the session;
+  `settle()` never throws: on failure it returns `verified: false` with no payouts.
+- The guest key is stored in localStorage (`bountyroyale.guest.v1`); a stale guest (unknown key / not
+  registered, e.g. after a fresh deploy) is replaced automatically.
+- Config: `VITE_RELAYER_URL` (default `http://127.0.0.1:8788`), `VITE_CONTRACT_ID` (default
+  `royale.br-7e8492.testnet`), `VITE_NEAR_RPC`, `VITE_EXPLORER`.
+- The relayer allows CORS from 5173/5180/5181/5184 on localhost and 127.0.0.1 (`CORS_ORIGINS` overrides).
+- `settle()` reads payouts from the `settle_match` result and retirements / rookies / upgrades from the
+  tx's `bountyroyale` events (returned by `/api/settle`).
+- Live check: `node --env-file=.env --import ./relayer/src/ts-resolve.ts scripts/e2e-net.ts --matches 3`
+  (relayed start ≈ 3–4.5 s incl. next-block seed, settle ≈ 2.2–2.6 s, new guest ≈ 4 s).

@@ -5,7 +5,7 @@ use near_workspaces::{network::Sandbox, Account, Contract, Worker};
 use serde_json::{json, Value};
 
 const WASM: &str = "target/near/royale.wasm";
-const ONE: u128 = 1_000_000_000_000_000_000;
+use royale::{BOUNTY_BPS, ENTRY_FEE as E, ONE, POT_TOP_UP as T, RESERVE, STARTER, WEAPON_PRICES};
 
 struct World {
     w: Worker<Sandbox>,
@@ -106,7 +106,7 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
         let id: near_workspaces::AccountId = f["account"].as_str().unwrap().parse()?;
         assert!(wd.w.view_account(&id).await.is_ok(), "{id} exists");
         assert_eq!(wd.w.view_access_keys(&id).await?.len(), 0, "{id} has no keys");
-        assert_eq!(f["balance"], (100 * ONE).to_string());
+        assert_eq!(f["balance"], STARTER.to_string());
     }
     let house: near_workspaces::AccountId = format!("house.{}", c.id()).parse()?;
     assert_eq!(wd.w.view_access_keys(&house).await?.len(), 0);
@@ -118,7 +118,7 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
     assert_eq!(s["guest"], true);
     assert_eq!(s["roster"].as_array().unwrap().len(), 9);
     assert_eq!(s["roster"][0]["upgrades"]["weaponTier"], 0);
-    assert_eq!(ft(c, c.id().as_str()).await?, 90 * ONE, "9 entries escrowed");
+    assert_eq!(ft(c, c.id().as_str()).await?, 9 * E, "9 entries escrowed");
     let id = s["match_id"].clone();
 
     // only the server may settle
@@ -131,7 +131,7 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
     println!("settle_match (guest won): {gas_settle} Tgas");
     assert_eq!(r["prize_to"], house.as_str(), "a guest's pot goes to the house");
     assert_eq!(ft(c, g.id().as_str()).await?, 0, "guests earn zero");
-    assert_eq!(ft(c, house.as_str()).await?, house0 + 110 * ONE * 98 / 100);
+    assert_eq!(ft(c, house.as_str()).await?, house0 + (9 * E + T) * 98 / 100 - T, "the house paid the top-up and got the pot");
     let p: Value = c.view("get_player").args_json(json!({"account_id": g.id()})).await?.json()?;
     assert_eq!(p["wins"], 1);
     assert_eq!(p["pending"], Value::Null);
@@ -171,14 +171,17 @@ async fn bounty_retirement_and_rookies() -> anyhow::Result<()> {
     let (r, gas) = settle(&wd.server, c, &s["match_id"], 5, Some(2)).await?;
     let r = r.map_err(anyhow::Error::msg)?;
     println!("settle_match with bounty: {gas} Tgas");
-    assert_eq!(r["bounty_amount"], (before / 4).to_string());
-    assert_eq!(ft(c, &carrier).await?, before - before / 4);
-    assert_eq!(ft(c, &killer).await?, 90 * ONE + before / 4);
+    let bounty = before * BOUNTY_BPS / 10_000;
+    assert_eq!(r["bounty_amount"], bounty.to_string());
+    assert_eq!(ft(c, &carrier).await?, before - bounty);
+    let k = STARTER - E + bounty;
+    let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
+    assert_eq!(ft(c, &killer).await?, k, "the killer may spend its windfall on a weapon right away");
 
     // Moss (idx 5) wins everything; the others lose 10 per match until they're broke
     let mut gas_max = 0;
     let pip = s["roster"][2]["account"].as_str().unwrap().to_string();
-    for _ in 1..10 {
+    for _ in 1..(STARTER / E) {
         let (s, _) = start(&g, c).await?;
         let (r, gas) = settle(&wd.server, c, &s["match_id"], 5, None).await?;
         r.map_err(anyhow::Error::msg)?;
@@ -191,7 +194,7 @@ async fn bounty_retirement_and_rookies() -> anyhow::Result<()> {
     let rookie = &fs[2];
     assert_eq!(rookie["generation"], 1);
     assert_eq!(rookie["status"], "active");
-    assert_eq!(rookie["balance"], (100 * ONE).to_string(), "the house funded the rookie");
+    assert_eq!(rookie["balance"], STARTER.to_string(), "the house funded the rookie");
     let rid: near_workspaces::AccountId = rookie["account"].as_str().unwrap().parse()?;
     assert!(wd.w.view_account(&rid).await.is_ok(), "the rookie got a real account");
     assert_eq!(wd.w.view_access_keys(&rid).await?.len(), 0, "with no keys");
@@ -230,20 +233,20 @@ async fn real_player_pays_and_earns() -> anyhow::Result<()> {
     // the on-ramp: the owner grants from the house treasury (no minting)
     wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": alice.id(), "amount": (30 * ONE).to_string()})).transact().await?.into_result()?;
     let (s, _) = start(&alice, c).await?;
-    assert_eq!(s["player_paid"], (10 * ONE).to_string());
+    assert_eq!(s["player_paid"], E.to_string());
     let (r, _) = settle(&wd.server, c, &s["match_id"], 0, None).await?;
     let r = r.map_err(anyhow::Error::msg)?;
     let prize: u128 = r["prize"].as_str().unwrap().parse()?;
     assert_eq!(r["prize_to"], alice.id().as_str());
-    assert_eq!(ft(c, alice.id().as_str()).await?, 20 * ONE + prize);
+    assert_eq!(ft(c, alice.id().as_str()).await?, 30 * ONE - E + prize);
 
     // review fix #1: abandoning a seeded match forfeits the entry (bots are refunded)
     let (s1, _) = start(&alice, c).await?;
     let before_house = ft(c, &house).await?;
     let (s2, _) = start(&alice, c).await?;
     assert_ne!(s1["match_id"], s2["match_id"]);
-    assert_eq!(ft(c, alice.id().as_str()).await?, prize, "two entries gone: one forfeited, one in escrow");
-    assert_eq!(ft(c, &house).await?, before_house + 10 * ONE);
+    assert_eq!(ft(c, alice.id().as_str()).await?, 30 * ONE - 3 * E + prize, "two entries gone: one forfeited, one in escrow");
+    assert_eq!(ft(c, &house).await?, before_house + E);
     let gone: Value = c.view("get_match").args_json(json!({"match_id": s1["match_id"]})).await?.json()?;
     assert_eq!(gone, Value::Null);
     let p: Value = c.view("get_player").args_json(json!({"account_id": alice.id()})).await?.json()?;
@@ -280,7 +283,7 @@ async fn full_free_pool_never_blocks_a_paying_player() -> anyhow::Result<()> {
     alice.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
     wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": alice.id(), "amount": (20 * ONE).to_string()})).transact().await?.into_result()?;
     let (s, _) = start(&alice, c).await?;
-    assert_eq!(s["player_paid"], (10 * ONE).to_string());
+    assert_eq!(s["player_paid"], E.to_string());
     let cfg: Value = c.view("get_config").await?.json()?;
     assert_eq!((cfg["pending_free"].as_u64(), cfg["pending_paid"].as_u64()), (Some(2), Some(1)));
     // settling a free match frees its slot

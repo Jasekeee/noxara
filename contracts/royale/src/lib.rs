@@ -23,7 +23,9 @@
 //!
 //! $BOUNTY supply rules (NEP-141 inside this contract, see token.rs):
 //! * minted ONLY (a) once in `new()` (bot starter wallets + the house reserve) and (b) as the
-//!   fixed `POT_TOP_UP` added to every SETTLED match's pot;
+//!   fixed `POT_TOP_UP` added to every SETTLED match's pot — and only when the house can't pay it:
+//!   while the house holds more than `HOUSE_FLOOR`, it reinvests its income as the top-up instead,
+//!   so the supply stops growing once the house is healthy;
 //! * burned: `BURN_BPS` of every pot;
 //! * everything else (entries, prizes, bounties, upgrades, rookie grants) moves existing tokens.
 use near_contract_standards::fungible_token::events::{FtBurn, FtMint};
@@ -41,17 +43,21 @@ pub const BOTS: usize = 9;
 
 /// 1 $BOUNTY (18 decimals).
 pub const ONE: u128 = 1_000_000_000_000_000_000;
-pub const ENTRY_FEE: u128 = 10 * ONE;
-pub const POT_TOP_UP: u128 = 20 * ONE;
+// Economy constants tuned with scripts/econ-sim.ts against docs/balance.json (200 matches: ~1
+// retirement per 17-25 matches, the strongest bot reaches weapon tier 2 around match 10-13).
+pub const ENTRY_FEE: u128 = 4 * ONE;
+pub const POT_TOP_UP: u128 = 30 * ONE;
+/// The house keeps this much for rookie grants; above it, the house funds the pot top-up itself.
+pub const HOUSE_FLOOR: u128 = 1_000 * ONE;
 pub const BURN_BPS: u128 = 200; // 2% of every pot is burned
 pub const HOUSE_BPS: u128 = 500; // 5% of every pot goes to the house treasury
-pub const BOUNTY_BPS: u128 = 2_500; // killing the bounty carrier takes 25% of its wallet
+pub const BOUNTY_BPS: u128 = 1_500; // killing the bounty carrier takes 15% of its wallet
 pub const STARTER: u128 = 100 * ONE; // genesis wallet of each bot; rookie grant (from the house)
 pub const HOUSE_GENESIS: u128 = 2_000 * ONE;
 /// A bot only buys an upgrade if it keeps at least this much afterwards.
-pub const RESERVE: u128 = 40 * ONE;
-pub const WEAPON_PRICES: [u128; 2] = [120 * ONE, 240 * ONE];
-pub const ARMOR_PRICES: [u128; 2] = [160 * ONE, 320 * ONE];
+pub const RESERVE: u128 = 50 * ONE;
+pub const WEAPON_PRICES: [u128; 2] = [60 * ONE, 120 * ONE];
+pub const ARMOR_PRICES: [u128; 2] = [90 * ONE, 180 * ONE];
 pub const SKIN_PRICE: u128 = 150 * ONE;
 pub const SKINS: u8 = 12;
 
@@ -77,17 +83,18 @@ pub const NPC_NEAR: NearToken = NearToken::from_millinear(1);
 const GAS_RESOLVE: Gas = Gas::from_tgas(10);
 
 pub const PERSONALITIES: [&str; 6] = ["aggressive", "camper", "sniper", "looter", "coward", "balanced"];
-/// The genesis nine (names match the client roster; personalities are the bots' play styles).
+/// The genesis nine for a fresh deploy (= src/sim/roster.ts t1Roster(); skins slot + 1). The live
+/// testnet contract was created with an earlier nine (Bramble, Ox, ...) and kept them on migration.
 pub const GENESIS: [(&str, &str, &str); BOTS] = [
-    ("bramble", "Bramble", "camper"),
-    ("ox", "Ox", "aggressive"),
-    ("pip", "Pip", "coward"),
-    ("vex", "Vex", "sniper"),
-    ("moss", "Moss", "looter"),
-    ("juno", "Juno", "balanced"),
-    ("rook", "Rook", "aggressive"),
-    ("tink", "Tink", "looter"),
-    ("sable", "Sable", "sniper"),
+    ("brindle", "Brindle", "aggressive"),
+    ("quillon", "Quillon", "camper"),
+    ("vesper", "Vesper", "sniper"),
+    ("magpie", "Magpie", "looter"),
+    ("tallow", "Tallow", "coward"),
+    ("dorrit", "Dorrit", "balanced"),
+    ("zinnia", "Zinnia", "aggressive"),
+    ("okapi", "Okapi", "camper"),
+    ("fenwick", "Fenwick", "balanced"),
 ];
 pub const ROOKIE_NAMES: [&str; 24] = [
     "ash", "bolt", "clove", "dash", "ember", "fizz", "gale", "hex", "ivy", "jinx", "kit", "lark", "nyx", "onyx", "pep",
@@ -205,6 +212,7 @@ pub struct MatchResult {
     /// who received the prize (the house for a guest win or no winner)
     pub prize_to: AccountId,
     pub prize: U128,
+    /// part of the top-up that was newly minted (0 when the house paid it)
     pub minted: U128,
     pub burned: U128,
     pub house_cut: U128,
@@ -301,6 +309,7 @@ pub struct ConfigView {
     pub rookies: u32,
     pub entry_fee: U128,
     pub pot_top_up: U128,
+    pub house_floor: U128,
     pub burn_bps: u16,
     pub house_bps: u16,
     pub bounty_bps: u16,
@@ -395,7 +404,7 @@ impl Contract {
                 name: name.to_string(),
                 personality: personality.to_string(),
                 slot: slot as u8,
-                upgrades: Upgrades { weapon_tier: 0, armor: 0, skin: slot as u8 },
+                upgrades: Upgrades { weapon_tier: 0, armor: 0, skin: slot as u8 + 1 },
                 record: Record::default(),
                 active: true,
                 generation: 0,
@@ -563,13 +572,19 @@ impl Contract {
         self.release_escrow(&m);
 
         // ---- the pot: escrowed entries + the minted top-up
-        self.mint(&me, POT_TOP_UP, "pot top-up");
+        let house = self.house.clone();
+        let minted = if self.balance(&house) >= HOUSE_FLOOR + POT_TOP_UP {
+            self.move_tokens(&house, &me, POT_TOP_UP, "pot top-up (the house reinvests)");
+            0
+        } else {
+            self.mint(&me, POT_TOP_UP, "pot top-up");
+            POT_TOP_UP
+        };
         let pot = m.pot.0 + POT_TOP_UP;
         let burned = pot * BURN_BPS / 10_000;
         let house_cut = pot * HOUSE_BPS / 10_000;
         let prize = pot - burned - house_cut;
         let prize_to = winner.map(|w| self.payee(&m, w)).unwrap_or_else(|| self.house.clone());
-        let house = self.house.clone();
         self.move_tokens(&me, &prize_to, prize, "match prize");
         self.move_tokens(&me, &house, house_cut, "house cut");
         self.burn(&me, burned, "pot burn");
@@ -637,7 +652,7 @@ impl Contract {
             winner,
             prize_to,
             prize: U128(prize),
-            minted: U128(POT_TOP_UP),
+            minted: U128(minted),
             burned: U128(burned),
             house_cut: U128(house_cut),
             bounty_killer,
@@ -766,6 +781,7 @@ impl Contract {
             rookies: self.rookies,
             entry_fee: U128(ENTRY_FEE),
             pot_top_up: U128(POT_TOP_UP),
+            house_floor: U128(HOUSE_FLOOR),
             burn_bps: BURN_BPS as u16,
             house_bps: HOUSE_BPS as u16,
             bounty_bps: BOUNTY_BPS as u16,
@@ -1002,7 +1018,12 @@ impl Contract {
         let prev = self.slot_fighter(slot);
         self.rookies += 1;
         let n = self.rookies;
-        let base = ROOKIE_NAMES[entropy[0] as usize % ROOKIE_NAMES.len()];
+        // a name no active fighter is using (the pool is larger than the roster)
+        let taken: Vec<String> = (0..BOTS).filter(|s| *s != slot).map(|s| self.slot_fighter(s).name.to_ascii_lowercase()).collect();
+        let base = (0..ROOKIE_NAMES.len())
+            .map(|k| ROOKIE_NAMES[(entropy[0] as usize + k) % ROOKIE_NAMES.len()])
+            .find(|n| !taken.iter().any(|t| t == n))
+            .unwrap_or(ROOKIE_NAMES[entropy[0] as usize % ROOKIE_NAMES.len()]);
         let personality = PERSONALITIES[entropy[1] as usize % PERSONALITIES.len()];
         let account: AccountId = format!("{base}-{n}.{}", env::current_account_id()).parse().unwrap();
         let mut name = base.to_string();
