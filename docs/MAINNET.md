@@ -16,6 +16,8 @@ the owner's literal reply **"yes, deploy"**.
 
 **Deadline rule:** if mainnet is not live and stable by 2026-11-14 15:00 UTC, the testnet version is submitted. **Keys:** the contract's full-access key is NOT removed (fixes during judging, teardown after 2026-11-25); the README lists every admin method.
 
+**Economy v2 release candidate (branch `main` after the econ-v2 merge):** audits #4 (1 HIGH, 2 MEDIUM — fixed with regression tests) and #5 (GO); unit 99/99, sandbox 14/14; wasm 491,729 bytes, sha256 `3f8113a2a0e254a004660547bf7c3716c10384e3694136218456a42d752795ad` (sources `8bb89e2a4523`), live on testnet since tx `Cee2iTn4tY1ViFucoT4j8qfQ4gkX2i7wfuGmW4B2EJSA`. Fallback: `release/v1` (economy v1, audit #3 GO, sha256 `a6377e2e…063ca`).
+
 ## 1. Accounts (nothing beyond these)
 | Account | Role |
 |---|---|
@@ -28,12 +30,12 @@ The owner account (your wallet, e.g. `<you>.near`) is set as `owner` and as the 
 ## 2. Cost (preliminary — final numbers after the audit fixes and the testnet rehearsal)
 | Item | NEAR | Kind |
 |---|---|---|
-| Contract code storage (wasm ≈ 353 KB → 1 NEAR per 100 KB) | ≈ 3.53 | refundable (on teardown) |
+| Contract code storage (economy v2 wasm 491,729 B → 1 NEAR per 100 KB) | ≈ 4.92 | refundable (on teardown) |
 | Contract state headroom (testnet: ≈ 56 KB after 46 matches) | ≈ 0.96 | refundable |
 | Relayer budget: guest accounts + storage deposits + relayed gas, hard-capped | 1.00 | mostly spent; unused part refundable |
 | 10 keyless bot/house accounts | 0.01 | spent (no key → can't be deleted) |
 | Deploy gas | ≤ 0.05 | spent |
-| **Total** | **≈ 5.6** (fund the root with ≥ 7) | ≈ 4.5 refundable / ≈ 1.1 spent |
+| **Total** | **≈ 7.0** (fund the root with ≥ 8) | ≈ 5.9 refundable / ≈ 1.1 spent |
 
 Ongoing: Railway smallest plan for match server + relayer (≈ $5/month [assumed — check price before launch]); Vercel static hosting free tier [assumed].
 
