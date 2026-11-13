@@ -169,7 +169,22 @@ export function withMock(base: GameClient): GameClientT3 & GameClientEcon {
       return { tx: null };
     },
   };
-  Object.assign(extra, econ);
+  const dailyMock: Pick<import("../net/api").GameClientDaily, keyof import("../net/api").GameClientDaily> = {
+    async daily() {
+      return { streak: 3, checkedInToday: false, canCheckIn: true, whyNot: null, nextReward: 1.5, quests: [
+        { id: 0, title: "play 3 matches", progress: 2, goal: 3, done: false, claimed: false, reward: 0.75 },
+        { id: 1, title: "finish in the top 3", progress: 1, goal: 1, done: true, claimed: false, reward: 0.75 },
+        { id: 2, title: "take down the bounty carrier", progress: 0, goal: 1, done: false, claimed: false, reward: 1.5 },
+      ] };
+    },
+    async checkIn() {
+      return { tx: null, paid: 1.5 };
+    },
+    async claimQuest() {
+      return { tx: null, paid: 0.75 };
+    },
+  };
+  Object.assign(extra, econ, dailyMock);
   // keep the base object's prototype (mode/getters) and just add the T3 methods
   const t3 = Object.assign(base, extra) as GameClientT3 & GameClientEcon;
   const baseGuest = base.isGuest.bind(base);

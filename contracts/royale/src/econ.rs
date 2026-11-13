@@ -366,7 +366,11 @@ impl Contract {
     /// The daily-diminishing share (bps) of a prize for a real player's next paid win today.
     /// NEAR kept from an unregistering account's refund for its daily-wins row (it outlives the account)
     pub(crate) fn daily_row_near(&self, id: &AccountId) -> u128 {
-        if daily_map().get(id).is_some() { (40 + 8 + id.len() as u128 + 8) * env::storage_byte_cost().as_yoctonear() } else { 0 }
+        let a = if daily_map().get(id).is_some() { 40 + 8 + id.len() as u128 + 8 } else { 0 };
+        // the check-in/quest row also outlives the account (re-registering must not reset today's claims)
+        // PlayerDaily row: key (1 + 4 + len) + value (8 + 4 + 4 + 4 + 12 + 1 + 4) + 40 overhead
+        let b = if StoreMap::<AccountId, crate::daily::PlayerDaily>::new(Key::PlayerDaily).get(id).is_some() { 40 + 5 + id.len() as u128 + 37 } else { 0 };
+        (a + b) * env::storage_byte_cost().as_yoctonear()
     }
 
     pub(crate) fn player_prize_bps(&mut self, player: &AccountId) -> u128 {
@@ -408,7 +412,10 @@ impl Contract {
             b.hwm = U128(b.hwm.0.max(self.bankroll(bot)));
         }
         self.save_bot_econ(bot, b);
-        let u = upkeep(self.balance(bot));
+        // rookie protection: no upkeep in a rookie's first matches
+        // (record.matches already counts this match: protect the first ROOKIE_PROTECTED_MATCHES settles)
+        let protected = self.load_fighter_pub(bot).is_some_and(|f| crate::daily::is_protected_rookie(f.generation, f.record.matches.saturating_sub(1)));
+        let u = if protected { 0 } else { upkeep(self.balance(bot)) };
         if u > 0 {
             let to_house = u * UPKEEP_HOUSE_BPS / 10_000;
             let house = self.house.clone();
@@ -935,6 +942,9 @@ impl Contract {
         let mut cm = cosmetics_map();
         cm.remove(a);
         cm.flush();
+        let mut pd = StoreMap::<AccountId, crate::daily::PlayerDaily>::new(Key::PlayerDaily);
+        pd.remove(a);
+        pd.flush();
     }
 
     pub(crate) fn clear_econ_globals(&mut self) {

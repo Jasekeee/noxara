@@ -110,7 +110,15 @@ function run(seed: number): RunOut {
   let house = P.HOUSE_GENESIS;
   let burned = 0;
   const minted = 0; // v2: nothing is minted after genesis (the contract test asserts the same)
-  const players = Array.from({ length: PLAYERS }, () => ({ bal: 0, credit: P.WELCOME_CREDIT, winsDay: -1, wins: 0 }));
+  const players = Array.from({ length: PLAYERS }, () => ({ bal: 0, credit: P.WELCOME_CREDIT, winsDay: -1, wins: 0, statDay: -1, paid: 0, top3: 0, bounty: 0, streak: 0, lastCheck: -2 }));
+  /** House-paid daily rewards (check-in + quests): m-scaled, never below the floor (econ v3, daily.rs) */
+  const houseReward = (pl: { bal: number }, base: number, m: number) => {
+    const amt = Math.min(base * Math.min(m, 1), Math.max(0, house - P.HOUSE_FLOOR)); // m capped at 1 for dailies (audit #6)
+    house -= amt;
+    pl.bal += amt;
+    return amt;
+  };
+  let dailyPaid = 0;
   const supplyOf = () => house + bots.reduce((s, b) => s + b.bal, 0) + players.reduce((s, p) => s + p.bal, 0);
   const genesis = supplyOf();
   const out: RunOut = { portCost: 0, portBack: 0, supply: [], burned: [], house: [], m: [], gini: [], lifespans: [], richFell: 0, richN: 0, rookieRose: 0, rookieN: 0, shareRoi: [], minted, floorStreakMax: 0, retired: 0 };
@@ -171,7 +179,8 @@ function run(seed: number): RunOut {
     }
     let pot = 0;
     for (const b of bots) {
-      const e = Math.min(b.bal, entryFee(b.bal));
+      const prot = b.born > 0 && b.matches < P.ROOKIE_PROTECTED_MATCHES;
+      const e = Math.min(b.bal, prot ? P.ENTRY : entryFee(b.bal));
       b.bal -= e;
       b.matches++;
       const eb = e * P.ENTRY_BURN_BPS / 1e4;
@@ -182,8 +191,9 @@ function run(seed: number): RunOut {
     const guest = R() < GUEST_P;
     const pl = guest ? null : players[Math.floor(R() * PLAYERS)];
     let humanPaid = false;
+    let byCredit = false;
     if (pl) {
-      if (pl.credit >= P.ENTRY && house >= P.HOUSE_FLOOR + P.ENTRY) { pl.credit -= P.ENTRY; house -= P.ENTRY; humanPaid = true; }
+      if (pl.credit >= P.ENTRY && house >= P.HOUSE_FLOOR + P.ENTRY) { pl.credit -= P.ENTRY; house -= P.ENTRY; humanPaid = true; byCredit = true; }
       let fee = P.ENTRY;
       if (!humanPaid) { fee = entryFee(pl.bal); if (pl.bal >= fee) { pl.bal -= fee; humanPaid = true; } }
       if (humanPaid) { const eb = fee * P.ENTRY_BURN_BPS / 1e4; burn(eb); pot += fee - eb; }
@@ -191,6 +201,7 @@ function run(seed: number): RunOut {
     const topUp = Math.min(P.BASE_TOP_UP * m, Math.max(0, house - P.HOUSE_FLOOR));
     house -= topUp;
     pot += topUp;
+    const walletPaid = !!pl && humanPaid && !byCredit;
     // ---- outcome
     const weights = bots.map((b) => (RATE[b.p] ?? 10) * (1 + EDGE * (b.w + b.a)));
     const wsum = weights.reduce((a, b) => a + b, 0);
@@ -213,8 +224,9 @@ function run(seed: number): RunOut {
       house += prize * (1 - f);
     } else house += prize; // guests earn 0
     // ---- bounty: richest bot carries it
-    let carrier = 0;
-    bots.forEach((b, i) => { if (b.bal > bots[carrier].bal) carrier = i; });
+    let carrier = -1;
+    bots.forEach((b, i) => { if (!(b.born > 0 && b.matches < P.ROOKIE_PROTECTED_MATCHES) && (carrier < 0 || b.bal > bots[carrier].bal)) carrier = i; });
+    if (carrier < 0) carrier = 0;
     if (winner !== carrier && R() < BOUNTY_KILL_P) {
       const amt = bots[carrier].bal * P.BOUNTY_BPS / 1e4;
       bots[carrier].bal -= amt;
@@ -228,7 +240,7 @@ function run(seed: number): RunOut {
     // ---- dividends from profit, then upkeep + upgrades (one purchase per settle)
     for (const b of bots) dividends(b);
     for (const b of bots) {
-      const u = upkeep(b.bal);
+      const u = b.born > 0 && b.matches < P.ROOKIE_PROTECTED_MATCHES ? 0 : upkeep(b.bal);
       if (u > 0) { b.bal -= u; house += u * P.UPKEEP_HOUSE_BPS / 1e4; burn(u * (1 - P.UPKEEP_HOUSE_BPS / 1e4)); }
       const buy = (price: number, burnBps: number) => {
         if (b.bal - price < P.RESERVE) return false;
@@ -251,6 +263,16 @@ function run(seed: number): RunOut {
     }
     // players with spare NOX buy cosmetics (status, no power): chance grows with wealth
     for (const p of players) if (p.bal >= 150 && R() < COSMETIC_P * (p.bal / 150)) { const price = p.bal >= 400 ? 200 : p.bal >= 250 ? 100 : 50; p.bal -= price; burn(price); }
+    // ---- daily check-in + quests (only matches paid from the player's own wallet count)
+    if (pl && walletPaid) {
+      if (pl.statDay !== day) { pl.statDay = day; pl.paid = 0; pl.top3 = 0; pl.bounty = 0; }
+      pl.paid++;
+      if (winner === -1 || R() < 0.2) pl.top3++;
+      const m0 = houseRule(ema).m;
+      if (pl.lastCheck !== day) { pl.streak = pl.lastCheck === day - 1 ? pl.streak + 1 : 1; pl.lastCheck = day; dailyPaid += houseReward(pl, P.CHECKIN_REWARDS[Math.min(pl.streak, 7) - 1], m0); }
+      if (pl.paid === P.QUEST_GOALS[0]) dailyPaid += houseReward(pl, P.QUEST_REWARDS[0], m0);
+      if (pl.top3 === 1 && (winner === -1 || pl.paid === 1)) dailyPaid += houseReward(pl, P.QUEST_REWARDS[1], m0);
+    }
     // ---- metrics
     const sup = supplyOf();
     out.supply.push(sup); out.burned.push(burned); out.house.push(house); out.m.push(m); out.gini.push(gini(bots.map((b) => b.bal)));
@@ -296,6 +318,9 @@ const giniHalf = S.gini.slice(half).reduce((a, b) => a + b, 0) / (N - half);
 const richFell = runs.reduce((s, r) => s + r.richFell, 0) / Math.max(1, runs.reduce((s, r) => s + r.richN, 0));
 const rookieRose = runs.reduce((s, r) => s + r.rookieRose, 0) / Math.max(1, runs.reduce((s, r) => s + r.rookieN, 0));
 const roi = median(runs.flatMap((r) => r.shareRoi));
+const allRoi = runs.flatMap((r) => r.shareRoi).sort((a, b) => a - b);
+const top10 = allRoi.length ? allRoi[Math.floor(allRoi.length * 0.9)] : NaN;
+const winners = allRoi.filter((x) => x > 0).length / Math.max(1, allRoi.length);
 const portRoi = runs.reduce((s, r) => s + r.portBack, 0) / Math.max(1e-9, runs.reduce((s, r) => s + r.portCost, 0)) - 1;
 
 const checks: [string, boolean, string][] = [
@@ -339,11 +364,13 @@ const charts: Record<string, string> = {
 };
 for (const [f, c] of Object.entries(charts)) fs.writeFileSync(path.join(OUT, f), c);
 const pass = checks.every((c) => c[1]);
-const summary = { generatedAt: new Date().toISOString(), matches: N, runs: RUNS, seed: SEED0, params: P, assumptions: { HUMAN_WIN, EDGE, BOUNTY_KILL_P, GUEST_P, PLAYERS, MATCHES_PER_DAY, IPO_BUY_P, TRADE_P, COSMETIC_P }, checks: checks.map(([name, ok, value]) => ({ name, ok, value })), pass };
+const shareReturns = { medianSingleIpo: roi, top10pctSingleIpo: top10, shareOfIposInProfit: winners, portfolio: portRoi };
+const summary = { shareReturns, generatedAt: new Date().toISOString(), matches: N, runs: RUNS, seed: SEED0, params: P, assumptions: { HUMAN_WIN, EDGE, BOUNTY_KILL_P, GUEST_P, PLAYERS, MATCHES_PER_DAY, IPO_BUY_P, TRADE_P, COSMETIC_P }, checks: checks.map(([name, ok, value]) => ({ name, ok, value })), pass };
 fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
 if (!QUIET) {
   console.log(`NOXARA economy v2 — ${RUNS} runs × ${N} matches (seed ${SEED0})`);
   for (const [name, ok, value] of checks) console.log(`${ok ? "PASS" : "FAIL"}  ${name}: ${value}`);
+  console.log(`share returns: median single IPO ${(roi * 100).toFixed(0)}% · top 10% ${(top10 * 100).toFixed(0)}% · IPOs in profit ${(winners * 100).toFixed(0)}% · portfolio ${(portRoi * 100).toFixed(0)}%`);
   console.log(pass ? "\nPASS — charts in " + path.relative(repo, OUT) : "\nFAIL");
 }
 process.exit(pass ? 0 : 1);
