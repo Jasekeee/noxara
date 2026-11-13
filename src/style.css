@@ -723,3 +723,11 @@ kbd {
   .etable td.rank { display: none !important; }
   .board.etable th:nth-child(6) { display: none; }
 }
+
+/* real NEAR account ids (bots) */
+.acct { font: 600 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--cyan); opacity: .85; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; display: inline-block; }
+a.acct:hover { text-decoration: underline; opacity: 1; }
+.fc-acct { font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--cyan); opacity: .75; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-acct { font-size: 13px; word-break: break-all; white-space: normal; }
+.board .nm .acct, .etable td.nm .acct { display: block; margin-top: 3px; }
+.lg-winner .acct { display: block; margin-top: 4px; }

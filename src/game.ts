@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
+import { isChainAcct } from "./ui/acct";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
 import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
@@ -529,6 +530,13 @@ function nameOf(i: number | null) {
   return i === 0 ? "You" : match.state.fighters[i].name;
 }
 
+/** The bot's real chain sub-account (undefined offline and for the player). */
+function acctOf(i: number | null): string | undefined {
+  if (i === null || i === 0 || !match) return undefined;
+  const a = match.cfg.fighters[i]?.id;
+  return isChainAcct(a) ? a : undefined;
+}
+
 // ------------------------------------------------------------------ events
 const _v3 = new THREE.Vector3();
 function onEvents(evs: SimEvent[]) {
@@ -588,7 +596,7 @@ function onEvents(evs: SimEvent[]) {
         v.die();
         fx.poof(v.pos.x, v.pos.z, v.color);
         sfx.poof(distVol(v.pos.x, v.pos.z));
-        hud.feedItem(nameOf(e.by), nameOf(e.who)!, e.weapon, { me: e.by === 0 || e.who === 0, bounty: f.bounty });
+        hud.feedItem(nameOf(e.by), nameOf(e.who)!, e.weapon, { me: e.by === 0 || e.who === 0, bounty: f.bounty, kAcct: acctOf(e.by), vAcct: acctOf(e.who) });
         if (e.by === 0) {
           sfx.kill(true);
           myKillTimes.push(time);

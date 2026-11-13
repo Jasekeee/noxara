@@ -221,7 +221,7 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- events
-  feedItem(killer: string | null, victim: string, weapon: WeaponKind | "storm", opts: { me?: boolean; bounty?: boolean }) {
+  feedItem(killer: string | null, victim: string, weapon: WeaponKind | "storm", opts: { me?: boolean; bounty?: boolean; kAcct?: string; vAcct?: string }) {
     const li = document.createElement("li");
     if (opts.bounty) li.className = "bounty";
     else if (opts.me) li.className = "me";
@@ -230,6 +230,8 @@ export class Hud {
     const icon = weapon === "storm" ? Object.assign(document.createElement("span"), { className: "storm", textContent: "STORM" }) : Object.assign(document.createElement("img"), { src: this.icons[weapon] ?? "", alt: weapon });
     const v = document.createElement("span");
     v.textContent = victim;
+    if (opts.kAcct) k.title = opts.kAcct;
+    if (opts.vAcct) v.title = opts.vAcct;
     if (killer) li.append(k);
     li.append(icon, v);
     if (opts.bounty) li.append(Object.assign(document.createElement("span"), { className: "crown", textContent: "BOUNTY!" }));
