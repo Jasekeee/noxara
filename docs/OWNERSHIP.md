@@ -12,3 +12,14 @@ Write it in your final report; the lead integrates. Shared contract: `src/sim/ty
 | D — balance + tests + Playwright | `agent/qa` | `tests/**`, `tools/**`, `playwright.config.ts`, `vitest.config.ts`, `docs/BALANCE.md`, `docs/QA.md` |
 
 New dependencies: ask the lead (list them in your report with exact versions); don't edit `package.json` yourself.
+
+## Cross-agent API (stable names; B implements, A/D call)
+- `src/sim/match.ts` → `createMatch(cfg: MatchConfig): Match` (see `types.ts`).
+- `src/sim/ai.ts` → `botInput(match: Match, idx: number): Input` — deterministic; the sim uses it for every non-human fighter, the client uses it for `?autoplay`.
+- `src/sim/record.ts` → `class Recorder { push(tick, idx, input) }`, `replayRecord(cfg, inputs) → { hash, winner, placements }`.
+- `src/sim/roster.ts` → `t1Roster(): FighterSpec[]` (10 entries; idx 0 = the human "You").
+
+## Test hook (A implements, D uses)
+With `?e2e` in the URL the client exposes `window.__br = { phase(): "title" | "playing" | "over", tick(): number, alive(): number, placement(): number | null, fps(): number }`.
+`?autoplay` makes the human fighter play with `botInput` (inputs are still recorded). `?seed=N` fixes the match seed. `?bots=1` skips the title screen.
+On match end the client also exposes `window.__br.record(): MatchRecord`.
