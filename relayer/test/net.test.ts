@@ -134,3 +134,41 @@ test("offline fallback: unreachable relayer -> local play, unverified settle, no
   assert.deepEqual(r, { tx: null, verified: false, winner: 3, payouts: [], retired: [], rookies: [], upgrades: [] });
   assert.match(c.explorerTx("abc"), /txns\/abc$/);
 });
+
+import { histEvent } from "../../src/net/client.ts";
+import { matchConfigFromChain } from "../../src/net/roster.ts";
+import { registerMessage } from "../src/protocol.ts";
+import { sha256 } from "../../src/net/near.ts";
+
+test("T3: history entries become ready-to-show lines", () => {
+  const e = (kind: string, amount: string, detail: string) => histEvent({ match_id: "42", at_ms: "1000", kind, amount, detail });
+  assert.equal(e("win", "70420000000000000000", "1:3").text, "Won match #42 and took 70.42 $BOUNTY (3 kills)");
+  assert.equal(e("death", "0", "4:1").kind, "kill");
+  assert.equal(e("death", "0", "9:0").text, "Finished #9 in match #42");
+  assert.equal(e("upgrade", "120000000000000000000", "weapon 2").text, "Bought weapon tier 2 for 120 $BOUNTY");
+  assert.equal(e("bounty", "15000000000000000000", "lost").kind, "bounty");
+  assert.equal(e("retired", "0", "broke").kind, "retired");
+  assert.equal(e("dividend", "7040000000000000000", "").kind, "sponsored");
+  assert.equal(e("win", "1", "1:0").at, 1000);
+});
+
+test("T3: guests get human-readable refusals, offline T3 calls stay quiet", async () => {
+  const c = (await createGameClient({ relayer: "http://127.0.0.1:9", contract: "royale.t" })) as unknown as import("../../src/net/api.ts").GameClientT3;
+  await assert.rejects(() => c.sponsor("bot.t", 10), /Sign in with a NEAR account/);
+  await assert.rejects(() => c.unsponsor("bot.t"), /Sign in with a NEAR account/);
+  assert.equal(await c.balance(), 0);
+  assert.deepEqual(await c.market(), []);
+  assert.equal((await c.leaderboard("bots")).length, 9);
+  const p = await c.progress();
+  assert.equal(p.level, 1);
+});
+
+test("T3: the player's level upgrades from the chain go into fighter 0", () => {
+  const roster = Array.from({ length: 9 }, (_, i) => ({ idx: i + 1, account: `b${i}.t`, name: `B${i}`, personality: "balanced", upgrades: { weaponTier: 0, armor: 0, skin: i }, bounty: false, paid: "0" }));
+  const cfg = matchConfigFromChain({ seed: 7, player: "alice.t", guest: false, bounty_idx: null, roster, player_upgrades: { weaponTier: 2, armor: 1, skin: 14 }, player_level: 10 }, { skin: 3 });
+  assert.deepEqual(cfg.fighters[0].upgrades, { weaponTier: 2, armor: 1, skin: 14 }, "chain wins over the client's choice");
+});
+
+test("T3: register message matches between browser and relayer", async () => {
+  assert.deepEqual(await sha256("bountyroyale:register:alice.testnet"), registerMessage("alice.testnet"));
+});

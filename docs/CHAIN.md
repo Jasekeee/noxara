@@ -32,6 +32,12 @@ dev patch.
 | migration 3: unique rookie names | `gZGvktitGfoaThArEEYw7Y2oLA5bJUCXmKyVJdc6DPR` |
 | game client (`src/net/client.ts`) live: relayed start #10 / settle #10 | `3N9AZGUcr44mThDynKk8RdsHFQ6zVqhWucMe9Z9peVqN` / `3evgSJ8tSTYnMxqpcfzK5GD7VJqHFMDLCLTLXQdAh3E6` |
 | game client live after migration 2: start #13 / settle #13 | `DYZu1i7WoPfCwpfyTGTc898VJhtNucdBxEvM9apqR8wY` / `GjLi1XqfSGBnYfxW8TRGRmRcNajmrh95pNma7B7sTyp6` |
+| migration 4: **state V1 → V2** (sponsorship, progression, history; duplicate "Pep" renamed "Ash") | `6qfo7kenRcEyes8THEyGGnXfmj5kfQxUp67emEdD9f8` |
+| `set_max_free(24)` | `DycYSVwD5gmquH3fqaLRtXMHs3wUyw48xJuKsHPHAMRC` |
+| migration 5: sponsorship review fixes (code only, V2 → V2) | `EBxwrtQymR9RuxVBxm93oGgYdM6f33RyoBUKwUJMdqUC` |
+| T3 live (game client): real account created / wallet adds the game key | `DBxrCqzzSwc9SrHUdQ4wHhV1tHvTbmuF4SHCd2xq4iA7` / `iwpQgpWqkjpADK9TVmzJt6WERewsCBH72SzfyNikEc4` |
+| T3 live: `house_grant` 60 (testing on-ramp) / relayed `sponsor` Pep 20 | `9RnX2RXNaswbbSZKrijUyAauBE8fhuBDfAm1pL9u5gVG` / `D4bU7p7cSzDGzyJfm25C6nhfaVGRpUSP1Unzc9AKV2Z8` |
+| T3 live: paid match #42 start / settle (Pep won, sponsor got 7.04 cash) | `Frk8ex3MUgn6oTawvfBSmEyJoi61zqLVg9PDW1wBwx8L` / `EZNFJ1SMGGqjMNjg4EKkep4B8VX84SQbdJq25Koo7QBy` |
 
 All NPC accounts were checked to have 0 access keys after deploy (`scripts/deployments/testnet.json`).
 Keys of `server.*` and `relay.*` live only in the worktree's `.env` (gitignored, mode 600).
@@ -78,15 +84,15 @@ Explorer: `https://testnet.nearblocks.io/address/royale.br-7e8492.testnet`.
 
 | Rule | Value |
 |---|---|
-| Entry | 4 $BOUNTY per bot; real players pay if they have it |
+| Entry | bots: 4 $BOUNTY + 2% of the wallet above the 50 reserve, max 16 (progressive); real players: 4 if they have it |
 | Pot top-up | 30 $BOUNTY per settled match: paid by the house while it holds > 1,000 (`HOUSE_FLOOR`), minted only below that |
 | Burn / house cut | 2% / 5% of each pot |
 | Bounty | 15% of the carrier's wallet, to whoever killed it (guests / non-payers: to the house) |
 | Winner payout | bot → its wallet; real player who paid → their wallet; guest, non-payer or no winner → house |
 | Upgrades (one per bot per settlement, only if ≥ 50 left after) | weapon tier 1/2: 60/120; armor 1/2: 90/180; then a new skin: 150. Paid to the house |
-| Retirement | wallet < entry AND nothing in escrow; the bot keeps its dust, its record stays (`get_retired`) |
+| Retirement | at `start_match`: a bot that can't pay the base entry retires (escrow elsewhere doesn't count — judge #2 saw a 0-$BOUNTY bot play); after settlement: wallet < entry and nothing in escrow. The bot keeps its dust, its record stays (`get_retired`) |
 | Rookie | play style from the match seed, a name no active fighter uses, new keyless account `<name>-<n>.royale…`, 100 from the house (or what it has), generation = predecessor + 1 |
-| Expiry | free matches 500 blocks, paid 1,200 blocks; `sweep_match` by anyone; `start_match` sweeps the oldest free ones |
+| Expiry | free matches 500 blocks, paid 1,200 blocks; `sweep_match` by anyone; `start_match` sweeps the oldest free ones. Free pool 24 (owner `set_max_free`), paid pool 1,000 |
 | Storage | 0.02 NEAR per player (NEP-145, min = max); guests: prepaid by the relayer. Measured: 983 bytes for player + FT account + one pending match |
 
 **$BOUNTY supply:** minted only at genesis (9 × 100 to the bots, 2,000 to the house) and as the per-match
@@ -111,10 +117,70 @@ Robustness of the new set: human win 3% → 8 retirements, 15% → 12; upgrade e
 (all within ~1 per 17–25 matches). Without the house floor the house soaked up ~90% of the supply; with
 it the house reinvests its income (cut + upgrades + guest wins) as the top-up.
 
+## T3: sponsorship market, progression, history, leaderboards (state V2)
+
+**Sponsorship (real accounts only, `sponsor` / `unsponsor`, relayed and gasless):**
+- A stake moves INTO the bot's wallet (it really pays the bot's entries and upgrades) and buys pool
+  shares of the bot's bankroll (wallet + entries in escrow). The bot owns the rest; sponsors together
+  own at most 30%. Minimum stake 10 $BOUNTY.
+- **10% of every prize or bounty** the bot collects is paid to its sponsors in cash, split by shares.
+- `unsponsor` after the bot played 5 matches since the (last) stake returns the stake's CURRENT value
+  (can be less than staked).
+- A bot that retires broke closes its pool once nothing of it is left in escrow: sponsors split the dust,
+  the rest of the stake is lost.
+- Bounded: 3 bots per player, 12 sponsors per bot; the player's 0.02 NEAR storage deposit covers it
+  (measured 1,674 of 2,000 bytes incl. a pending match, XP and 3 sponsorships). `sponsor` ≈ 3 Tgas.
+- Simulated (scripts/econ-sim.ts, a 20-$BOUNTY stake every 4 matches, 60% on the richest bot, held 5–30
+  matches): 62% of positions profitable, median ROI +21%, 2% lost to retirement (median −88% there)
+  [assumed behaviour]. A 30% cut gave +128% and drained bots, so 10% was chosen.
+
+**Progression:** `contracts/royale/src/progression.rs` mirrors `src/sim/progression.ts` exactly (the
+unit test reads `src/sim/progression.vectors.json`). Every settled match adds XP to the player (guests
+too). `start_match` stores the level's upgrades in the match and returns `player_upgrades` /
+`player_level`; `matchConfigFromChain` puts them into `cfg.fighters[0].upgrades`, so the server's replay
+uses exactly what the client played. View: `get_progress(account_id)`.
+
+**History and leaderboards:** a ring of the last 24 events per fighter (`get_history`: win, death,
+bounty, upgrade, retired, rookie, sponsored, unsponsored, dividend); `get_top(kind: "bots"|"players",
+by: "earnings"|"wins"|"kills", n)`; the contract keeps the top 50 players.
+
+**Migration V1 → V2:** `migrate()` peeks the `version` field (first in every layout), converts the V1
+state (new maps start empty), loads V1 matches as V2 (player upgrades = base) and renames duplicate
+active names. Sandbox test `migrates_from_the_v1_contract` deploys the real V1 wasm
+(`tests/fixtures/royale_v1_eedaf34.wasm`), plays, upgrades and settles a V1 pending match under V2
+(deploy + migrate 28 Tgas).
+
+**Sponsorship review fixes (each with a unit test):**
+1. `storage_unregister` refuses while the account sponsors anything and removes its XP/history;
+   dividends go only to registered sponsors (`unregister_needs_closed_sponsorships_and_cleans_xp`).
+2. No front-running: `sponsor`/`unsponsor` are refused while the bot has entries in escrow, i.e. while
+   it's in an unsettled match (`no_sponsoring_or_withdrawing_while_the_bot_is_in_a_match`). Trade-off:
+   during busy periods a player may have to retry between matches.
+3. A retired bot's pool closes only after its last escrowed entry came back (refund or settlement),
+   so late refunds and prizes reach its sponsors; the closing uses the bankroll, which then equals the
+   wallet (`a_pool_closes_only_after_the_retired_bots_escrow_comes_back`).
+
+**Judge #2 fixes:** progressive bot entry (sim: ~1 retirement per 17 matches, tier 2 by match ~9; it
+barely changes wealth concentration — richest bot ≈ 19% of bot wealth either way; the bounty and the
+upgrade price ladder are the real brakes [simulated]); strict broke rule at `start_match`; unique names.
+
+## Signing in with a real NEAR account
+
+`signIn()` makes a key in the browser and redirects to the wallet's login page
+(`VITE_WALLET_URL`, default `https://testnet.mynearwallet.com/login/?public_key=…&contract_id=royale…&methodNames=start_match&…sponsor&…unsponsor`).
+One approval adds that **function-call key** (game contract only, no deposits); on return
+`createGameClient` finishes the sign-in, and `POST /api/register` (the relayer checks a signature by
+that key AND that the key is on the account) prepays the account's 0.02 NEAR storage. From then on it's
+gasless exactly like a guest. `signOut()` forgets the key locally (it can be deleted in the wallet).
+Zero new dependencies. For multi-wallet support (Meteor, HOT, Intear…) I propose
+`@hot-labs/near-connect` **0.12.0** (no runtime deps, 234 KB unpacked) — not added, awaiting the lead.
+The live run used a script in place of the wallet (it adds the same key), see the T3 txs above.
+
 ## Real players' first $BOUNTY (proposals, not implemented)
 
-Today a real account gets $BOUNTY only from `house_grant` (owner-only, ≤ 100 per call), transfers, or
-winning a paid match — which it can't enter without $BOUNTY. A real account that plays free can't win.
+Today a real account gets $BOUNTY only from `house_grant` (owner-only, ≤ 100 per call; testing only),
+transfers, or winning a paid match — which it can't enter without $BOUNTY. A real account that plays
+free can't win. The owner hasn't chosen yet; nothing below is implemented.
 
 1. **Welcome stake from the house (one-time, small).** On the first `storage_deposit` of a non-guest
    account, the house moves `ENTRY_FEE × 3` to it (only while the house is above its floor). The account
