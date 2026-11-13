@@ -80,37 +80,49 @@ const RECOLOR: Record<string, number> = {
   woodBarkDark: 0x8a5638,
 };
 
+const yieldTask = () => new Promise<void>((r) => setTimeout(r, 0));
+
+/**
+ * Fetch every model in parallel (network only), then parse them one at a time with a yield between
+ * each, so loading never makes a long main-thread task (cold-cache first load stays responsive).
+ */
 export async function loadAll(onProgress: (p: number) => void): Promise<void> {
   const loader = new GLTFLoader();
   const names = [...CHARS.map((c) => `chars/${c}`), ...Object.values(HUMAN_SKINS).map((c) => `chars/${c}`), ...Object.values(WEAPON_MODEL), ...NATURE, ...PROPS];
+  const buffers = names.map((n) => fetch(`${BASE}${n}.glb`).then((r) => {
+    if (!r.ok) throw new Error(`asset ${n}: HTTP ${r.status}`);
+    return r.arrayBuffer();
+  }));
   let done = 0;
-  await Promise.all(
-    names.map(async (n) => {
-      const g = await loader.loadAsync(`${BASE}${n}.glb`);
-      g.scene.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh) {
-          m.castShadow = true;
-          m.receiveShadow = true;
-          const mats = Array.isArray(m.material) ? m.material : [m.material];
-          for (const mat of mats) {
-            const sm = mat as THREE.MeshStandardMaterial;
-            if (sm.map) {
-              sm.map.colorSpace = THREE.SRGBColorSpace;
-              sm.map.anisotropy = 4;
-            }
-            const rc = RECOLOR[sm.name];
-            if (rc !== undefined && n.startsWith("nature/")) sm.color.setHex(rc);
-            sm.roughness = Math.max(0.65, sm.roughness ?? 1);
-            sm.metalness = 0;
+  for (let i = 0; i < names.length; i++) {
+    const n = names[i];
+    const buf = await buffers[i];
+    const dir = `${BASE}${n.slice(0, n.lastIndexOf("/") + 1)}`;
+    const g = await loader.parseAsync(buf, dir);
+    g.scene.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.castShadow = true;
+        m.receiveShadow = true;
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mat of mats) {
+          const sm = mat as THREE.MeshStandardMaterial;
+          if (sm.map) {
+            sm.map.colorSpace = THREE.SRGBColorSpace;
+            sm.map.anisotropy = 4;
           }
+          const rc = RECOLOR[sm.name];
+          if (rc !== undefined && n.startsWith("nature/")) sm.color.setHex(rc);
+          sm.roughness = Math.max(0.65, sm.roughness ?? 1);
+          sm.metalness = 0;
         }
-      });
-      cache.set(n, g);
-      done++;
-      onProgress(done / names.length);
-    }),
-  );
+      }
+    });
+    cache.set(n, g);
+    done++;
+    onProgress(done / names.length);
+    await yieldTask();
+  }
 }
 
 export function gltf(name: string): GLTF {

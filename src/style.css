@@ -277,9 +277,9 @@ kbd {
   box-shadow: 0 6px 0 #b85c00, 0 10px 24px rgba(20,17,43,.45), inset 0 2px 0 rgba(255,255,255,.7);
   transition: transform .08s, box-shadow .08s;
 }
-.btn-primary:hover:not(:disabled) { transform: translateY(-2px) scale(1.03); }
+.btn-primary:hover:not(:disabled):not([aria-disabled="true"]) { transform: translateY(-2px) scale(1.03); }
 .btn-primary:active:not(:disabled) { transform: translateY(4px); box-shadow: 0 2px 0 #b85c00, 0 4px 12px rgba(20,17,43,.4), inset 0 2px 0 rgba(255,255,255,.7); }
-.btn-primary:disabled { filter: grayscale(.6) brightness(.85); cursor: wait; }
+.btn-primary:disabled, .btn-primary[aria-disabled="true"] { filter: grayscale(.45) brightness(.9); cursor: progress; }
 .btn-ghost {
   min-height: 52px; padding: 0 24px; border-radius: 14px; border: 2px solid rgba(255,255,255,.6);
   background: rgba(21,17,43,.45); color: #fff; font: 900 18px/1 var(--display); letter-spacing: .08em;
