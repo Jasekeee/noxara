@@ -4,8 +4,10 @@
 //
 //   node --env-file=.env --import ./relayer/src/ts-resolve.ts scripts/e2e.ts [--relayer http://127.0.0.1:8788] [--matches 1]
 import { Session, view, matchConfigFromChain, type ChainConfig } from "../relayer/src/client.ts";
-import { Recorder, replayRecord } from "../src/sim/record.ts";
-import type { MatchRecord } from "../src/sim/types.ts";
+import { Recorder } from "../src/sim/record.ts";
+import { createMatch } from "../src/sim/match.ts";
+import { botInput } from "../src/sim/ai.ts";
+import { MATCH_TICKS, type MatchRecord } from "../src/sim/types.ts";
 
 const arg = (k: string, d: string) => {
   const i = process.argv.indexOf(`--${k}`);
@@ -27,11 +29,16 @@ for (let i = 0; i < n; i++) {
   const m = await s.startMatch();
   console.log(`match ${m.match_id}: seed ${m.seed}, bounty idx ${m.bounty_idx}, ${Math.round(performance.now() - t1)} ms (tx ${s.lastTx})`);
   const matchCfg = matchConfigFromChain(m, { name: "E2E" });
-  // the human idles; the shared sim decides the rest
+  // the "human" is played by the bot AI (like ?autoplay) and recorded the way the client does
+  const match = createMatch(matchCfg);
   const rec = new Recorder();
-  rec.push(0, 0, { mx: 0, my: 0, aim: 0, fire: false });
-  const r = replayRecord(matchCfg, rec.inputs);
-  const record: MatchRecord = { version: 1, cfg: matchCfg, inputs: rec.inputs, hash: r.hash, winner: r.winner, placements: r.placements };
+  while (!match.state.over && match.state.tick < MATCH_TICKS) {
+    const inp = botInput(match, 0);
+    rec.push(match.state.tick, 0, inp);
+    match.step(new Map([[0, inp]]));
+  }
+  const record: MatchRecord = { version: 1, cfg: matchCfg, inputs: rec.inputs, hash: match.hash(), winner: match.state.winner, placements: match.state.fighters.map((f) => f.placement) };
+  console.log(`  played: winner idx ${record.winner} (${record.winner === 0 ? "you" : matchCfg.fighters[record.winner ?? 0]?.name}), ${record.inputs.length} inputs`);
   const t2 = performance.now();
   const out = await s.settle(m.match_id, record);
   console.log(`settled in ${Math.round(performance.now() - t2)} ms (tx ${out.tx}):`, JSON.stringify(out.result));

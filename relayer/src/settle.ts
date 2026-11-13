@@ -36,7 +36,8 @@ export function checkInputs(inputs: unknown): string | null {
     const [tick, idx, mx, my, aim, fire] = row as number[];
     if (tick < 0 || tick > MATCH_TICKS || tick < last) return "input ticks out of order";
     if (idx !== 0) return "only the human fighter (idx 0) records inputs";
-    if (Math.abs(mx) > 1000 || Math.abs(my) > 1000 || aim < 0 || aim > 4095 || (fire !== 0 && fire !== 1)) return "input out of range";
+    // aim column = aim (0..4095) + 4096 * q, q = quantised grenade distance 0..401 (src/sim/record.ts)
+    if (Math.abs(mx) > 1000 || Math.abs(my) > 1000 || aim < 0 || aim >= 4096 * 402 || (fire !== 0 && fire !== 1)) return "input out of range";
     last = tick;
   }
   return null;
@@ -44,20 +45,25 @@ export function checkInputs(inputs: unknown): string | null {
 
 /**
  * Our own replay that also collects kills and the bounty killer from the simulation's events.
- * `variant` covers both readings of the recorder's tick (input applies at its tick / the next).
+ * Mirrors replayRecord in src/sim/record.ts (inputs apply from their tick; the aim column packs
+ * aimDist); the caller only trusts it when its hash equals replayRecord's.
  */
-export function detailedReplay(cfg: MatchConfig, inputs: MatchRecord["inputs"], variant: 0 | 1) {
+export function detailedReplay(cfg: MatchConfig, inputs: MatchRecord["inputs"]) {
   const m = createMatch(cfg);
-  const held = new Map<number, Input>();
-  let i = 0;
+  const rows = [...inputs].sort((a, b) => a[0] - b[0]);
+  const cur = new Map<number, Input>();
+  cfg.fighters.forEach((f, i) => f.human && cur.set(i, { mx: 0, my: 0, aim: 0, fire: false }));
+  let k = 0;
   let bountyKiller: number | null = null;
-  for (let guard = 0; !m.state.over && guard <= MATCH_TICKS; guard++) {
-    const t = m.state.tick + variant;
-    while (i < inputs.length && inputs[i][0] <= t) {
-      const [, idx, mx, my, aim, fire] = inputs[i++];
-      held.set(idx, { mx, my, aim, fire: fire === 1 });
+  while (!m.state.over && m.state.tick < MATCH_TICKS) {
+    while (k < rows.length && rows[k][0] <= m.state.tick) {
+      const [, idx, mx, my, packed, fire] = rows[k++];
+      const q = Math.floor(packed / 4096);
+      const inp: Input = { mx, my, aim: packed - q * 4096, fire: fire === 1 };
+      if (q > 0) inp.aimDist = (q - 1) * 100;
+      cur.set(idx, inp);
     }
-    for (const e of m.step(held)) if (e.t === "bounty") bountyKiller = e.by;
+    for (const e of m.step(cur)) if (e.t === "bounty") bountyKiller = e.by;
   }
   return { hash: m.hash(), kills: m.state.fighters.map((f) => f.kills), bountyKiller };
 }
@@ -91,14 +97,11 @@ export function judge(chain: ChainMatch, record: MatchRecord, replay: Replayer =
     bountyKiller = r.bountyKiller ?? null;
     killsFrom = "replay";
   } else {
-    for (const variant of [0, 1] as const) {
-      const d = detailedReplay(cfg, record.inputs, variant);
-      if (d.hash === r.hash) {
-        kills = d.kills;
-        bountyKiller = d.bountyKiller;
-        killsFrom = "detailed";
-        break;
-      }
+    const d = detailedReplay(cfg, record.inputs);
+    if (d.hash === r.hash) {
+      kills = d.kills;
+      bountyKiller = d.bountyKiller;
+      killsFrom = "detailed";
     }
   }
   const clamp = (x: number) => Math.max(0, Math.min(FIGHTERS, Math.trunc(x) || 0));
