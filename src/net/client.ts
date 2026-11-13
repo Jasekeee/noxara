@@ -18,13 +18,14 @@ const DEFAULTS = {
   contract: env.VITE_CONTRACT_ID ?? "royale.br-7e8492.testnet",
   explorer: env.VITE_EXPLORER ?? "https://testnet.nearblocks.io",
   wallet: env.VITE_WALLET_URL ?? "https://testnet.mynearwallet.com",
+  network: (env.VITE_NEAR_NETWORK ?? "testnet") as "testnet" | "mainnet",
 };
 const STORE = "bountyroyale.guest.v1";
 const STORE_REAL = "bountyroyale.account.v1";
 const STORE_PENDING = "bountyroyale.signin.v1";
 const STORE_XP = "bountyroyale.localxp.v1";
 /** methods the signed-in account's function-call key may call (the relayer allow-lists the same) */
-const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor"];
+const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
 const START_GAS = 100n * 10n ** 12n;
@@ -412,16 +413,46 @@ class Client implements GameClientT3 {
   // ------------------------------------------------------------ T3: real accounts
 
   /**
-   * Sign in with a NEAR wallet: makes a key here and sends the player to the wallet, which adds it as a
-   * function-call key for the game contract (one approval, no deposit, no gas). On return
-   * `createGameClient` finishes the sign-in and the relayer prepays the account's storage. The page
-   * navigates away, so this promise only settles if navigation is impossible.
+   * Sign in with a real NEAR account. A key is made here; the wallet adds it as a function-call key for
+   * the game contract during sign-in (ONE approval, no deposit, no gas), then everything is relayed and
+   * gasless like a guest. Uses @hot-labs/near-connect (HOT, Meteor, Intear, MyNearWallet, …; only wallets
+   * that can add the key at sign-in are offered). If the connector itself fails to load or run, falls
+   * back to MyNearWallet's login redirect (the page navigates away; `createGameClient` finishes it).
    */
   async signIn(): Promise<string> {
     if (this.realSaved) return this.realSaved.accountId;
     if (this._mode !== "chain") throw new Error("The NEAR network is unreachable right now: try again later.");
-    if (typeof location === "undefined") throw new Error("Sign-in needs a browser.");
+    if (typeof window === "undefined") throw new Error("Sign-in needs a browser.");
     const key = await generateKey();
+    let accountId: string | null = null;
+    try {
+      const { NearConnector } = await import("@hot-labs/near-connect");
+      this.connector ??= new NearConnector({ network: DEFAULTS.network, autoConnect: false });
+      const wallet = await this.connector.connect({
+        addFunctionCallKey: {
+          contractId: this.contract,
+          publicKey: key.publicKey,
+          allowMethods: { anyMethod: false, methodNames: REAL_METHODS },
+          gasAllowance: { kind: "limited", amount: "250000000000000000000000" },
+        },
+      });
+      accountId = (await wallet.getAccounts({ network: DEFAULTS.network }))[0]?.accountId ?? null;
+      if (!accountId) throw new Error("the wallet returned no account");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.lastError = msg;
+      // the player closed the wallet picker / rejected: no redirect, just say so
+      if (/reject|cancel|clos|denied|abort/i.test(msg)) throw new Error("Sign-in was cancelled.");
+      return this.redirectSignIn(key);
+    }
+    await this.completeSignIn(accountId, key);
+    if (!this.realSaved) throw new Error(this.lastError ?? "Sign-in failed: try again.");
+    return accountId;
+  }
+
+  /** Fallback: MyNearWallet's login page adds the key, then sends the player back here. */
+  private redirectSignIn(key: StoredKey): Promise<string> {
+    if (typeof location === "undefined") throw new Error("Sign-in needs a browser.");
     save(STORE_PENDING, { key, contract: this.contract });
     const back = location.href.split("#")[0];
     const u = new URL("/login/", DEFAULTS.wallet);
@@ -434,23 +465,36 @@ class Client implements GameClientT3 {
     return new Promise<string>(() => {});
   }
 
-  /** Called by createGameClient when the wallet sent the player back with `account_id`. */
+  /** Called by createGameClient when the wallet's redirect sent the player back with `account_id`. */
   async finishSignIn(accountId: string, publicKey: string): Promise<void> {
     const pending = load<{ key: StoredKey; contract: string }>(STORE_PENDING);
     save(STORE_PENDING, null);
     if (!pending || pending.key.publicKey !== publicKey || pending.contract !== this.contract) return;
-    const real: Saved = { accountId, key: pending.key, contract: this.contract };
-    // the relayer prepays storage (checks the key really is on the account first)
+    await this.completeSignIn(accountId, pending.key);
+  }
+
+  /** The key is on the account: the relayer prepays its storage (the contract adds the one-time welcome
+   *  stake), then this account becomes the active session. */
+  private async completeSignIn(accountId: string, key: StoredKey): Promise<void> {
+    const real: Saved = { accountId, key, contract: this.contract };
     const signer = await Signer.load(real.key);
     const signature = toBase64(await signer.sign(await sha256(`bountyroyale:register:${accountId}`)));
-    for (let i = 0; i < 8; i++) {
-      const r = await postJson<{ registered?: boolean; code?: string }>(`${this.relayer}/api/register`, { accountId, publicKey, signature }).catch(() => null);
-      if (r?.ok) break;
-      if (r && r.json.code !== "unknown_key") {
+    let ok = false;
+    for (let i = 0; i < 10 && !ok; i++) {
+      const r = await postJson<{ registered?: boolean; code?: string }>(`${this.relayer}/api/register`, { accountId, publicKey: key.publicKey, signature }).catch(() => null);
+      if (r?.ok) ok = true;
+      else if (r && r.json.code === "already_subsidised") {
+        // registered before and left: they need their own storage deposit (wallet tx), not ours
+        this.lastError = "This account left the game before: re-register it with your wallet (0.02 NEAR storage).";
+        return;
+      } else if (r && r.json.code !== "unknown_key") {
         this.lastError = r.json.error ?? "register failed";
         return;
-      }
-      await new Promise((res) => setTimeout(res, 750)); // the wallet's AddKey may still be landing
+      } else await new Promise((res) => setTimeout(res, 800)); // the wallet's AddKey may still be landing
+    }
+    if (!ok) {
+      this.lastError = "The wallet didn't add the game key: try signing in again.";
+      return;
     }
     this.realSaved = real;
     save(STORE_REAL, real);
@@ -463,6 +507,26 @@ class Client implements GameClientT3 {
     this.realSaved = null;
     save(STORE_REAL, null);
     this.use(this.guestSaved);
+    await this.connector?.disconnect().catch(() => {});
+  }
+
+  /** Welcome credit left (pays match entries only; not $BOUNTY). Proposed for GameClientT3. */
+  async welcomeCredit(): Promise<number> {
+    if (this._mode !== "chain" || !this.realSaved) return 0;
+    const v = await viewCall<string>(this.rpcUrl, this.contract, "get_welcome_credit", { account_id: this.realSaved.accountId }).catch(() => "0");
+    return toBounty(v);
+  }
+
+  /** If the day's welcome credits were gone at sign-in: claim it later (once). */
+  async claimWelcome(): Promise<number> {
+    if (!this.realSaved) throw new Error("Sign in with a NEAR account first.");
+    try {
+      const r = await this.relay<string>("claim_welcome", {}, true, 30n * 10n ** 12n);
+      return toBounty(r.value);
+    } catch (e) {
+      const m = e instanceof Error ? e.message : String(e);
+      throw new Error(/already got/.test(m) ? "You already got your welcome credit." : /gone/.test(m) ? "Today's welcome credits are gone: try again tomorrow." : m);
+    }
   }
 
   async balance(): Promise<number> {
@@ -491,6 +555,7 @@ class Client implements GameClientT3 {
   }
 
   private sponsorCutBps = 1000;
+  private connector: import("@hot-labs/near-connect").NearConnector | null = null;
 
   async mySponsorships(): Promise<Sponsorship[]> {
     if (this._mode !== "chain" || !this.realSaved) return [];
