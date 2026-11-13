@@ -50,3 +50,14 @@
   .sc-table td, .sc-table th { padding: 8px 6px; }
 }
 @media (prefers-reduced-motion: reduce) { .sc-banner { animation: none; } }
+
+/* daily rewards (check-in + quests) */
+.rw-box { margin: 0 0 16px; padding: 12px 14px; border: 1px solid rgba(255, 210, 90, 0.35); border-radius: 12px; background: rgba(20, 16, 40, 0.6); }
+.rw-title { margin: 0 0 4px; letter-spacing: 0.08em; }
+.rw-sub { margin: 10px 0 4px; font-size: 0.8rem; letter-spacing: 0.06em; opacity: 0.85; }
+.rw-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rw-row b { margin-left: auto; }
+.rw-quests { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rw-quests li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rw-quests li b { margin-left: auto; }
+.rw-quests li.done { opacity: 0.7; }

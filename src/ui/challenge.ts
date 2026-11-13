@@ -7,6 +7,7 @@ import { FIGHTERS, type MatchConfig, type MatchRecord } from "../sim/types";
 import type { StartResult } from "../net/api";
 import { h } from "./dom";
 import { countdown, mmss, renderDaily } from "./tournament";
+import { renderRewards } from "./rewards";
 import "./social.css";
 
 export interface SocialDeps {
@@ -379,6 +380,9 @@ export class Social {
       onRetry: () => void this.openDaily(),
       onSignIn: this.d.signIn && c && c.mode === "chain" ? () => void this.d.signIn!() : undefined,
     });
+    if (c && !c.isGuest() && "daily" in c) {
+      void renderRewards(this.bodyEl, c as unknown as import("../net/api").GameClientDaily, (m, err) => this.setStatus(m, !!err));
+    }
     if (info && timer) {
       clearInterval(this.tick);
       this.tick = window.setInterval(() => {
