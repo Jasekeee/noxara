@@ -30,3 +30,6 @@ tmp/
 .cache/
 .vercel/
 .lighthouseci/
+
+# relayer runtime data (records, challenges, daily boards, social secret)
+relayer/data/

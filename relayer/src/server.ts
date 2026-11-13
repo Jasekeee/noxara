@@ -22,6 +22,7 @@ import { registerMessage } from "./protocol.ts";
 import { Subsidies } from "./subsidies.ts";
 import { SpendBudget, RESERVE, near as nearToYocto, fmtNear } from "./budget.ts";
 import type { ChainMatch } from "./roster.ts";
+import { createSocial, writeReply } from "./social-http.ts";
 import type { MatchRecord } from "../../src/sim/types.ts";
 
 const env = (k: string, d?: string) => {
@@ -58,7 +59,7 @@ const GUEST_ALLOWANCE = env("GUEST_ALLOWANCE", "0.05 NEAR");
 let GUEST_STORAGE = process.env.GUEST_STORAGE ?? "";
 let REAL_STORAGE = process.env.REAL_STORAGE ?? "";
 const PORT = Number(env("PORT", "8788"));
-const DEV_PORTS = [5173, 5180, 5181, 5184];
+const DEV_PORTS = [5173, 5180, 5181, 5184, 5192];
 const ORIGINS = env("CORS_ORIGINS", DEV_PORTS.flatMap((p) => [`http://localhost:${p}`, `http://127.0.0.1:${p}`]).join(",")).split(",");
 const DATA_DIR = env("RECORDS_DIR", path.join(import.meta.dirname, "../data/records"));
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -77,6 +78,15 @@ const closedReply = (why: string) => ({ error: why === "daily_cap" ? "today's fr
 const subsidies = new Subsidies(path.join(DATA_DIR, "../subsidised.json"), Number(env("REGISTER_GLOBAL_PER_HOUR", "30")));
 const settlePerIp = new RateLimiter(Number(env("SETTLE_PER_IP_PER_MIN", "20")), 60_000);
 const settling = new Set<string>();
+// challenge a friend + daily tournament (docs/SOCIAL.md): replay-verified, no chain, no tokens
+const social = createSocial({
+  dataDir: path.join(DATA_DIR, ".."),
+  allowedOrigins: ORIGINS,
+  publicUrl: process.env.PUBLIC_URL,
+  gameUrl: process.env.GAME_URL,
+  guestParent: relayerId,
+  verifyOwner: (a, k) => owners.owns(a, k),
+});
 
 function send(res: http.ServerResponse, code: number, body: unknown, origin?: string) {
   const headers: Record<string, string> = { "content-type": "application/json", "cache-control": "no-store" };
@@ -158,6 +168,8 @@ const server = http.createServer(async (req, res) => {
   }
   const t0 = performance.now();
   try {
+    const soc = await social.handle(req, ipOf(req));
+    if (soc) return writeReply(res, soc, origin, ORIGINS);
     if (req.method === "GET" && req.url === "/api/health") {
       return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null, ...budget.status() }, origin);
     }

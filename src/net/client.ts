@@ -438,6 +438,17 @@ class Client implements GameClientT3, GameClientEcon {
     }
   }
 
+  /**
+   * Daily tournament: prove this run belongs to the current account (ed25519 by the account's function-call key
+   * over sha256("noxara:daily:<day>:<input log hash>")). The server checks the key against the account.
+   * null when offline or before a session exists (the run is then listed as a guest).
+   */
+  async signDaily(day: string, inputs: unknown): Promise<{ account: string; publicKey: string; signature: string } | null> {
+    if (this._mode !== "chain" || !this.saved || !this.signer) return null;
+    const msg = await sha256(`noxara:daily:${day}:${await inputLogHash(inputs)}`);
+    return { account: this.saved.accountId, publicKey: this.saved.key.publicKey, signature: toBase64(await this.signer.sign(msg)) };
+  }
+
   private describe(matchId: string, record: MatchRecord, tx: string, res: MatchResultJson, events: ChainEvent[]): SettleResult {
     const names = new Map<string, string>();
     for (const r of this.rosters.get(matchId) ?? []) names.set(r.account, r.name);
