@@ -101,7 +101,8 @@ live one; storm ground tint is an annulus (no full-screen overdraw inside the sa
 - `?mock` fills the T3 client API locally (sign-in, market, history, leaderboards) for screen work only.
 
 ## Screenshots (`docs/screens/`, JPEG q78, desktop 1440×900 + mobile 390×844, ~0.95 MB total)
-Refreshed after the NOXARA rename (2026-11-13):
+Refreshed after the NOXARA rename (2026-11-13) and the dusk lighting pass (2026-11-14; ledger-* and the
+fighters/sponsor-mobile overlays are from 11-13 — the ledger shows a verified testnet settlement):
 title-{desktop,mobile} (offline guest) · lobby-{desktop,mobile} (live wallets, NOX balances) · match-{desktop,mobile} ·
 ledger-{desktop,mobile} (testnet match, verified, NOX pot/bounty/house/burn) · fighters-{desktop,mobile} · sponsor-{desktop,mobile}.
-Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~109 KB).
+Social card: `public/og.png` (1200×630, title screen without the lobby, 256-colour PNG, ~99 KB, dusk lighting).
