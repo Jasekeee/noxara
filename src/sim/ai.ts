@@ -38,7 +38,7 @@ interface Params {
 /** vision ranges (u): short / normal / sniper */
 const V1 = 10, V2 = 11, V3 = 14;
 export const PERSONALITY: Record<Personality, Params> = {
-  aggressive: { engage: 140, pref: 45, lowHp: 25, jitter: 140, react: 8, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
+  aggressive: { engage: 140, pref: 45, lowHp: 30, jitter: 100, react: 6, vision: V2 * FP, passive: false, camp: false, lootUntil: 0 },
   camper: { engage: 100, pref: 70, lowHp: 40, jitter: 115, react: 10, vision: V1 * FP, passive: false, camp: true, lootUntil: 0 },
   sniper: { engage: 105, pref: 80, lowHp: 40, jitter: 100, react: 12, vision: 15 * FP, passive: false, camp: false, lootUntil: 0 },
   looter: { engage: 100, pref: 70, lowHp: 45, jitter: 135, react: 10, vision: V1 * FP, passive: false, camp: false, lootUntil: 1500 },
@@ -66,6 +66,11 @@ interface Brain {
   wanderY: number;
   wanderUntil: number;
   bush: number;
+  /** % chance to react to an incoming bullet */
+  dodge: number;
+  dodgeUntil: number;
+  dodgeA: number;
+  wanderBush: boolean;
   burstLeft: number;
   burstPause: number;
   /** awareness of each other fighter (ticks noticed) */
@@ -89,6 +94,10 @@ interface Mind {
 const minds = new WeakMap<Match, Mind>();
 /** campers hold still in their bush while the target is farther than this */
 const BUSH_HOLD = 2800;
+/** base % chance to dodge an incoming bullet (checked once per dodge window) */
+const DODGE: Record<Personality, number> = { aggressive: 30, camper: 25, sniper: 30, looter: 30, coward: 45, balanced: 35 };
+/** chance (%) that a roaming bot heads for a nearby bush and lurks there */
+const BUSH_PCT: Record<Personality, number> = { aggressive: 15, camper: 80, sniper: 50, looter: 35, coward: 80, balanced: 45 };
 const BURST_MIN = 2, BURST_MAX = 4, PAUSE_MIN = 10, PAUSE_MAX = 22;
 const sq = (v: number) => v * v;
 
@@ -124,6 +133,10 @@ function mind(match: Match): Mind {
           wanderY: 0,
           wanderUntil: 0,
           bush: -1,
+          dodge: DODGE[f.personality] + rng.range(-8, 8),
+          dodgeUntil: -1,
+          dodgeA: 0,
+          wanderBush: false,
           burstLeft: 3,
           burstPause: 0,
           aw: fs.map(() => 0),
@@ -436,28 +449,47 @@ export function botInput(match: Match, idx: number): Input {
   }
 
   if (mode === "roam") {
-    // wander inside the next safe circle; passive bots also keep away from visible enemies
-    if (t >= b.wanderUntil || dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(2 * FP) || dist2(b.wanderX, b.wanderY, st.cx, st.cy) > sq(st.r - 1500)) {
-      // local wander (a few units from here), pulled inside the next safe circle
-      const a = b.rng.below(4096);
-      const rr = b.rng.range(4 * FP, me.personality === "aggressive" ? 10 * FP : 7 * FP);
-      let wx = me.x + Math.trunc((icos(a) * rr) / 1024);
-      let wy = me.y + Math.trunc((isin(a) * rr) / 1024);
-      // roam anywhere inside the current safe circle while the storm waits; inside the next one once it moves
-      const shrinking = phase !== undefined && t >= phase.shrinkStart - 100;
-      const cx = shrinking ? st.tx : st.cx, cy = shrinking ? st.ty : st.cy;
-      const lim = Math.max(1000, Math.trunc(((shrinking ? st.targetR : st.r) * 8) / 10));
-      const dd = isqrt(dist2(wx, wy, cx, cy));
-      if (dd > lim) {
-        wx = cx + Math.trunc(((wx - cx) * lim) / dd);
-        wy = cy + Math.trunc(((wy - cy) * lim) / dd);
+    // Wander a few units at a time inside the safe area; often stop in a bush for a while (lurk).
+    const shrinking = phase !== undefined && t >= phase.shrinkStart - 100;
+    const cx = shrinking ? st.tx : st.cx, cy = shrinking ? st.ty : st.cy;
+    const lim = Math.max(1000, Math.trunc(((shrinking ? st.targetR : st.r) * 8) / 10));
+    const reached = dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(1200);
+    const outside = dist2(b.wanderX, b.wanderY, cx, cy) > sq(lim + 1500);
+    if (t >= b.wanderUntil || (reached && !b.wanderBush) || outside) {
+      b.wanderBush = false;
+      if (b.rng.chance(BUSH_PCT[me.personality])) {
+        const cands: number[] = [];
+        match.map.bushes.forEach((bu, i) => {
+          if (dist2(bu.x, bu.y, me.x, me.y) < sq(11 * FP) && dist2(bu.x, bu.y, cx, cy) < sq(lim) && dist2(bu.x, bu.y, me.x, me.y) > sq(2 * FP))
+            cands.push(i);
+        });
+        if (cands.length > 0) {
+          const bu = match.map.bushes[cands[b.rng.below(cands.length)]];
+          b.wanderX = bu.x;
+          b.wanderY = bu.y;
+          b.wanderBush = true;
+          b.wanderUntil = t + Math.trunc(isqrt(dist2(bu.x, bu.y, me.x, me.y)) / SPEED) + b.rng.range(60, 160);
+        }
       }
-      b.wanderX = wx;
-      b.wanderY = wy;
-      b.wanderUntil = t + b.rng.range(80, 200);
+      if (!b.wanderBush) {
+        const a = b.rng.below(4096);
+        const rr = b.rng.range(4 * FP, me.personality === "aggressive" ? 10 * FP : 7 * FP);
+        let wx = me.x + Math.trunc((icos(a) * rr) / 1024);
+        let wy = me.y + Math.trunc((isin(a) * rr) / 1024);
+        const dd = isqrt(dist2(wx, wy, cx, cy));
+        if (dd > lim) {
+          wx = cx + Math.trunc(((wx - cx) * lim) / dd);
+          wy = cy + Math.trunc(((wy - cy) * lim) / dd);
+        }
+        b.wanderX = wx;
+        b.wanderY = wy;
+        b.wanderUntil = t + b.rng.range(80, 200);
+      }
     }
-    goalA = angleTo(b.wanderX, b.wanderY);
-    if (dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(1500)) goalA = -1;
+    if (reached) {
+      goalA = -1;
+      mode = b.wanderBush ? "lurk" : "roam";
+    } else goalA = angleTo(b.wanderX, b.wanderY);
   }
 
   // Passive bots that are not fighting steer away from nearby visible enemies.
@@ -466,6 +498,34 @@ export function botInput(match: Match, idx: number): Input {
     const away = iatan2(me.y - n.y, me.x - n.x);
     goalA = goalA < 0 ? away : goalA + Math.trunc(angDiff(away, goalA) / 2);
     mode += "+avoid";
+  }
+
+  // Dodge: sidestep an incoming bullet that would hit within ~8 ticks (skill-based reaction).
+  if (!stormUrgent && b.dodgeUntil < t) {
+    for (const p of s.projectiles) {
+      if (p.owner === idx) continue;
+      if (p.weapon === "grenade") {
+        // run from where it will land (or from the grenade itself if it is close)
+        const lx = p.x + p.vx * p.ttl, ly = p.y + p.vy * p.ttl;
+        const nearLand = dist2(lx, ly, me.x, me.y) < sq(3500);
+        if (!nearLand && segHit(p.x, p.y, p.vx * p.ttl, p.vy * p.ttl, me.x, me.y, 1200) < 0) continue;
+        if (!b.rng.chance(b.dodge + 20)) break;
+        b.dodgeA = nearLand ? iatan2(me.y - ly, me.x - lx) : (iatan2(p.vy, p.vx) + ((me.x - p.x) * p.vy - (me.y - p.y) * p.vx > 0 ? -1024 : 1024)) & 4095;
+        b.dodgeUntil = t + 8;
+        break;
+      }
+      if (segHit(p.x, p.y, p.vx * 8, p.vy * 8, me.x, me.y, FIGHTER_R + 500) < 0) continue;
+      if (!b.rng.chance(b.dodge)) break;
+      // move perpendicular to the bullet, away from its line
+      const side = (me.x - p.x) * p.vy - (me.y - p.y) * p.vx > 0 ? -1 : 1;
+      b.dodgeA = (iatan2(p.vy, p.vx) + side * 1024) & 4095;
+      b.dodgeUntil = t + 6;
+      break;
+    }
+  }
+  if (t < b.dodgeUntil && !stormUrgent && goalA !== -2) {
+    goalA = b.dodgeA;
+    mode += "+dodge";
   }
 
   // ---- 3. Stuck detection -> detour sideways for a moment.
