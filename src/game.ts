@@ -282,7 +282,9 @@ async function refreshAccount() {
   // the sign-in entry is always offered to guests in chain mode (it explains itself if wallets aren't live yet)
   $("signin").classList.toggle("hidden", !c || c.mode !== "chain" || !guest);
   $("acct-chip").classList.toggle("hidden", !t3 || guest);
-  $("nav-sponsor").classList.toggle("hidden", !t3);
+  // economy v2: sponsorship is legacy (exit only) — the chip shows only for players who still hold an old position
+  $("nav-sponsor").classList.add("hidden");
+  if (t3 && !guest) void c.mySponsorships().then((v) => $("nav-sponsor").classList.toggle("hidden", v.length === 0)).catch(() => undefined);
   const wel = $("welcome");
   wel.classList.add("hidden");
   if (t3 && !guest) {

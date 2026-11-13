@@ -15,3 +15,12 @@ Each decision: options → reference → value / risk / time → choice. Owner f
 | 9 | Rookie protection | none / no bounty for rookies / reduced costs early | Brawl Stars matchmaking protects new players; our sim shows most rookies fail | **First 10 matches: no upkeep, never the bounty carrier, entry at the 4-NOX minimum. Re-run the sim and report share returns (median / top 10% / portfolio)** | Gives IPO buyers a fairer start; cheap; sim-checked |
 
 Guardrails kept: no mainnet commands, no public repo, no hosting deploys, no posts. Contract changes ship only after sim + full tests + a fresh security review.
+
+## Discretionary changes (owner addendum: found → changed → why → how to undo)
+
+| # | Found | Changed | Why | Undo |
+|---|---|---|---|---|
+| D1 | Fighter cards/profile still advertised the retired v1 *sponsorship* ("no sponsors yet", "BACK <name>"), which the v2 contract now refuses | Cards show shares (owned / holders / IPO open / "went to zero"); profile button "OWN <NAME> SHARES" opens ECONOMY; the "MY SPONSORSHIPS" chip shows only for players who still hold a legacy position (renamed "OLD SPONSORSHIPS") | A judge clicking "BACK" would hit a contract error; v2 shares are the real mechanic | revert the commit "UI: shares instead of legacy sponsorship" |
+| D2 | Audit #6 M-1: one wallet-paid match funded two check-ins; at m=1.5 idle sybils farmed the House | Check-in needs a wallet-paid match TODAY and ≥3 lifetime; dailies pay ×min(m,1) so a reward is always below the 4-NOX entry; rewards cut to 1,1,1,2,2,2,3 (check-in) and 1,1,2 (quests) after the sim showed the House slipping below target −30% with the bigger set | Closed-loop rewards must not be farmable | change `CHECKIN_REWARDS`/`QUESTS` in contracts/royale/src/daily.rs + scripts/econ-params.json together (the params test enforces it) |
+| D3 | Audit "PlayerDaily layout changed without migration" | No change: the intermediate layout was never deployed | Not exploitable | — |
+| D4 | Rookie protection didn't lift share returns in the sim (portfolio −8% → −14% with the House-paid dailies) | Kept protection (fairer start, never the bounty) and reported the numbers honestly in MORNING_REPORT | Honest reporting > tuning the metric | set `ROOKIE_PROTECTED_MATCHES` to 0 |

@@ -3,7 +3,7 @@
 import type { BotMarket, FighterInfo, GameClient, GameClientT3, LeaderRow, Sponsorship } from "../net/api";
 import { acctTag, isChainAcct } from "./acct";
 import { h, icon, ICON, PERSONALITY_COLOR, PERSONALITY_ICON, fmt } from "./dom";
-import { renderEconomy, renderNear } from "./econ";
+import { hasEcon, renderEconomy, renderNear } from "./econ";
 
 export interface PageDeps {
   client(): GameClient | null;
@@ -142,7 +142,7 @@ export class Pages {
       const all = this.d.fighters();
       const active = all.filter((f) => f.status === "active").sort((a, b) => b.balance - a.balance);
       const retired = all.filter((f) => f.status === "retired");
-      body.appendChild(h("p", "page-lede", "Nine AI fighters with their own NEAR wallets. They pay to enter, keep what they win, buy upgrades — and retire when they go broke. Pick one to read its story or back it with NOX."));
+      body.appendChild(h("p", "page-lede", "Nine AI fighters with their own NEAR wallets. They pay to enter, keep what they win, buy upgrades — and retire when they go broke. Pick one to read its story — or own its shares on the ECONOMY page."));
       const grid = h("div", "fgrid");
       for (const f of active) grid.appendChild(this.miniCard(f));
       body.appendChild(grid);
@@ -152,13 +152,20 @@ export class Pages {
         for (const f of retired) g2.appendChild(this.miniCard(f));
         body.appendChild(g2);
       }
-      void this.loadMarket().then(() => {
-        for (const el of body.querySelectorAll<HTMLElement>("[data-acct]")) {
-          const m = this.market.find((x) => x.bot === el.dataset.acct);
-          const s = el.querySelector(".mc-stake");
-          if (m && s) s.textContent = m.sponsors ? `${m.sponsors} sponsor${m.sponsors === 1 ? "" : "s"} · ${fmt(m.totalStake)} staked` : "no sponsors yet";
-        }
-      });
+      // economy v2: fans own SHARES (sponsorship is legacy); show shares sold / holders per fighter
+      const c = this.d.client();
+      if (hasEcon(c)) {
+        void c.sharesMarket().then((rows) => {
+          for (const el of body.querySelectorAll<HTMLElement>("[data-acct]")) {
+            const r = rows.find((x) => x.bot === el.dataset.acct);
+            const s = el.querySelector(".mc-stake");
+            if (!s) continue;
+            if (!r) s.textContent = "";
+            else if (r.status === "retired") s.textContent = "shares went to zero";
+            else s.textContent = r.sharesSold ? `${r.sharesSold}/1000 shares owned · ${r.holders} holder${r.holders === 1 ? "" : "s"}` : `IPO open: ${r.ipoLeft} shares at ${fmt(r.ipoPrice)} NOX`;
+          }
+        }).catch(() => undefined);
+      }
     };
     this.show("FIGHTERS", render);
   }
@@ -240,15 +247,15 @@ export class Pages {
 
       // sponsor box
       const sbox = h("div", "pf-sponsor");
-      const stakeLine = h("p", "pf-stake", m ? (m.sponsors ? `${m.sponsors} sponsor${m.sponsors === 1 ? "" : "s"} · ${fmt(m.totalStake)} NOX staked · sponsors share ${Math.round(m.sponsorCut * 100)}% of every prize` : `No sponsors yet · sponsors share ${Math.round(m.sponsorCut * 100)}% of every prize`) : "Sponsor market opens with NEAR sign-in.");
+      const stakeLine = h("p", "pf-stake", "Own shares of this fighter: IPO shares fund its bankroll; holders earn 20% of its profit; shares go to zero if it goes broke.");
       sbox.appendChild(stakeLine);
       if (fresh.status === "active") {
         if (isT3(c) && !c.isGuest()) {
-          const btn = h("button", "btn-primary small", `BACK ${fresh.name.toUpperCase()}`);
-          btn.addEventListener("click", () => this.sponsorModal(fresh));
+          const btn = h("button", "btn-primary small", `OWN ${fresh.name.toUpperCase()} SHARES`);
+          btn.addEventListener("click", () => this.economy());
           sbox.appendChild(btn);
         } else {
-          const btn = h("button", "btn-near", "Sign in with NEAR to sponsor");
+          const btn = h("button", "btn-near", "Sign in with NEAR to own shares");
           btn.addEventListener("click", async () => {
             await this.d.signIn();
             render();
