@@ -149,7 +149,11 @@ console.log(`keys for ${relay}${onRoot ? " (also the match server)" : ` and ${se
 
 const near = new Near({ network, rpcUrl, keyStore: new InMemoryKeyStore({ [root]: rootKey, [contract]: rootKey }) });
 const txs: Record<string, string> = {};
-const initArgs = { owner, server, guest_parent: relay, teardown_beneficiary: beneficiary };
+// --teardown-after-ms only has an effect with a wasm built with the `teardown-override` feature
+// (testnet rehearsals); release builds always lock teardown until 2026-11-25 00:00 UTC
+const teardownAfter = process.argv.includes("--teardown-after-ms") ? arg("teardown-after-ms") : undefined;
+if (teardownAfter && network === "mainnet") throw new Error("--teardown-after-ms is for testnet rehearsals only");
+const initArgs = { owner, server, guest_parent: relay, teardown_beneficiary: beneficiary, ...(teardownAfter ? { teardown_after_ms: teardownAfter } : {}) };
 const rpcq = async (params: Record<string, unknown>) =>
   (await (await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { finality: "final", ...params } }) })).json()) as { result?: Record<string, unknown> };
 
