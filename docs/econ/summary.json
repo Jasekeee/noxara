@@ -1,5 +1,11 @@
 {
-  "generatedAt": "2026-11-13T20:46:09.834Z",
+  "shareReturns": {
+    "medianSingleIpo": -0.5737389124563789,
+    "top10pctSingleIpo": 0.8737150162480067,
+    "shareOfIposInProfit": 0.22681247468610774,
+    "portfolio": -0.14342923105247163
+  },
+  "generatedAt": "2026-11-13T21:55:24.363Z",
   "matches": 10000,
   "runs": 20,
   "seed": 1,
@@ -59,7 +65,29 @@
     "WELCOME_CREDIT": 30,
     "SEASON_MS": 172800000,
     "SEASON_EPOCH_MS": 1794614400000,
-    "EMA_DIV": 16
+    "EMA_DIV": 16,
+    "CHECKIN_REWARDS": [
+      1,
+      1,
+      1,
+      2,
+      2,
+      2,
+      3
+    ],
+    "QUEST_REWARDS": [
+      1,
+      1,
+      2
+    ],
+    "QUEST_GOALS": [
+      3,
+      1,
+      1
+    ],
+    "ROOKIE_PROTECTED_MATCHES": 10,
+    "CHECKIN_DAILY_CAP": 100,
+    "QUEST_DAILY_CAP": 300
   },
   "assumptions": {
     "HUMAN_WIN": 0.08,
@@ -91,17 +119,17 @@
     {
       "name": "house median within target ±30%",
       "ok": true,
-      "value": "median 725 vs target 1000"
+      "value": "median 714 vs target 1000"
     },
     {
       "name": "reward multiplier within 0–1.5, smooth",
       "ok": true,
-      "value": "range 0.13–1.21, max step 0.036"
+      "value": "range 0.13–0.94, max step 0.036"
     },
     {
       "name": "median bot life 30–150 matches",
       "ok": true,
-      "value": "median 55 (n=17282)"
+      "value": "median 56 (n=18561)"
     },
     {
       "name": "≥25% of the top-3 at 20% fall out by 40%",
@@ -111,17 +139,17 @@
     {
       "name": "≥20% of rookies reach the top-3 within 300 matches",
       "ok": true,
-      "value": "86%"
+      "value": "85%"
     },
     {
       "name": "Gini of bot wealth 0.20–0.50 (2nd half)",
       "ok": true,
-      "value": "0.244"
+      "value": "0.242"
     },
     {
       "name": "share portfolio ROI (every IPO bought) −30%…+40%",
       "ok": true,
-      "value": "-8% (median single IPO -59%: most rookies fail, a few pay off)"
+      "value": "-14% (median single IPO -57%: most rookies fail, a few pay off)"
     }
   ],
   "pass": true

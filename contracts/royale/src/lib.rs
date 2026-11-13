@@ -34,6 +34,7 @@ use near_sdk::json_types::{U128, U64};
 use near_sdk::store::{LazyOption, LookupMap};
 use near_sdk::{env, near, require, AccountId, BorshStorageKey, Gas, NearToken, PanicOnDefault, Promise};
 
+pub mod daily;
 pub mod econ;
 mod market;
 pub mod progression;
@@ -183,6 +184,8 @@ enum Key {
     ListingsOf,
     DailyWins,
     Cosmetics,
+    // daily check-in + quests (daily.rs)
+    PlayerDaily,
 }
 
 #[near(serializers = [borsh, json])]
@@ -720,7 +723,8 @@ impl Contract {
             }
             // progressive entry: rich bots pay more
             let bal = self.balance(&f.account);
-            let paid = entry_fee_for(bal).min(bal);
+            // rookie protection: a rookie's first matches cost the minimum entry
+            let paid = if daily::is_protected_rookie(f.generation, f.record.matches) { ENTRY_FEE.min(bal) } else { entry_fee_for(bal).min(bal) };
             if paid > 0 {
                 self.move_quiet(&f.account, &me, paid);
                 entries.push((f.account.clone(), paid));
@@ -910,6 +914,11 @@ impl Contract {
                 earned += bounty_amount;
             }
             if i == 0 {
+                // daily quests/check-in count only matches paid from the player's own wallet
+                if m.player_paid.0 > 0 && !m.guest && !near_sdk::store::LookupSet::<u64>::new(Key::CreditMatches).contains(&match_id.0) {
+                    let who = m.player.clone();
+                    self.record_daily(&who, placements[0], bounty_killer == Some(0) && bounty_to.is_some());
+                }
                 let mut p = self.load_player(&m.player).expect("player record");
                 p.matches += 1;
                 p.wins += won as u32;
@@ -1364,6 +1373,9 @@ impl Contract {
     pub(crate) fn save_player(&mut self, id: &AccountId, p: PlayerV2) {
         self.players.insert(id.clone(), VPlayer::V2(p));
     }
+    pub(crate) fn move_tokens_pub(&mut self, from: &AccountId, to: &AccountId, amount: u128, memo: &str) {
+        self.move_tokens(from, to, amount, memo);
+    }
     pub(crate) fn load_fighter_pub(&self, id: &AccountId) -> Option<FighterV1> {
         self.load_fighter(id)
     }
@@ -1419,6 +1431,11 @@ impl Contract {
         let mut best: Option<(usize, u128)> = None;
         for s in 0..BOTS {
             let b = self.balance(&self.slots[s]);
+            // rookie protection: a rookie in its first matches never carries the bounty
+            let f = self.slot_fighter(s);
+            if daily::is_protected_rookie(f.generation, f.record.matches) {
+                continue;
+            }
             if b > 0 && best.is_none_or(|(_, bb)| b > bb) {
                 best = Some((s, b));
             }

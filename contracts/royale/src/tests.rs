@@ -1719,6 +1719,16 @@ fn econ_params_match_the_simulator() {
     assert_eq!(n("WELCOME_CREDIT") * ONE, WELCOME_STAKE);
     assert_eq!(n("SEASON_MS") as u64, econ::SEASON_MS);
     assert_eq!(n("SEASON_EPOCH_MS") as u64, econ::SEASON_EPOCH_MS);
+    for (i, r) in p["CHECKIN_REWARDS"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(r.as_u64().unwrap() as u128 * ONE, daily::CHECKIN_REWARDS[i]);
+    }
+    for (i, r) in p["QUEST_REWARDS"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(r.as_u64().unwrap() as u128 * ONE, daily::QUESTS[i].2);
+        assert_eq!(p["QUEST_GOALS"][i].as_u64().unwrap() as u32, daily::QUESTS[i].1);
+    }
+    assert_eq!(n("ROOKIE_PROTECTED_MATCHES") as u32, daily::ROOKIE_PROTECTED_MATCHES);
+    assert_eq!(n("CHECKIN_DAILY_CAP") as u32, daily::CHECKIN_DAILY_CAP);
+    assert_eq!(n("QUEST_DAILY_CAP") as u32, daily::QUEST_DAILY_CAP);
 }
 
 #[test]
@@ -2291,4 +2301,130 @@ fn audit5_holders_can_still_leave_after_teardown_cleared_the_bots() {
     testing_env!(b.build());
     assert!(c.storage_unregister(Some(true)), "unregister works after the bots were cleared");
     assert!(c.get_holdings(acc(ALICE)).is_empty());
+}
+
+// ============================================================ daily check-in, quests, rookie protection
+
+fn day_ms(d: u64) -> u64 {
+    d * 86_400_000 + 3_600_000
+}
+
+/// a wallet-paid ALICE match at day `d` (she wins with 1 kill of the bounty carrier when `bounty`)
+fn alice_paid_match(c: &mut Contract, d: u64, h: u64, place_first: bool, bounty: bool) -> MatchResult {
+    let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+    last.remove(&acc(ALICE));
+    last.flush();
+    ctx_ts(ALICE, h, day_ms(d), NearToken::from_yoctonear(0));
+    let _ = c.start_match();
+    let id = c.next_match_id - 1;
+    ctx_ts(ME, h + 1, day_ms(d), NearToken::from_yoctonear(0));
+    let s = c.resolve_start(U64(id));
+    ctx_ts(SERVER, h + 2, day_ms(d), NearToken::from_yoctonear(0));
+    let winner = if place_first { 0 } else { 5 };
+    let bk = if bounty { Some(0u8) } else { None };
+    let _ = s;
+    c.settle_match(U64(id), places(winner), vec![0; FIGHTERS], bk, "ab".repeat(32), None)
+}
+
+#[test]
+fn check_in_needs_a_wallet_paid_match_and_pays_a_growing_streak_from_the_house() {
+    let mut c = setup();
+    ctx_ts(ALICE, 150, day_ms(20_000), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "no paid match yet");
+    grant(&mut c, ALICE, 100 * ONE);
+    alice_paid_match(&mut c, 20_000, 200, false, false);
+    let minted0 = c.total_minted;
+    let mut got = vec![];
+    for d in 0..8u64 {
+        if d > 0 {
+            alice_paid_match(&mut c, 20_000 + d, 300 + d * 10, false, false); // stays active
+        }
+        ctx_ts(ALICE, 305 + d * 10, day_ms(20_000 + d), NearToken::from_yoctonear(0));
+        got.push(c.check_in().0);
+        ctx_ts(ALICE, 306 + d * 10, day_ms(20_000 + d), NearToken::from_yoctonear(0));
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "once a day");
+    }
+    let m = m_now(&c);
+    assert_eq!(got[0], daily::CHECKIN_REWARDS[0] * m / 10_000);
+    assert!(got[6] > got[0], "the streak grows: {got:?}");
+    assert_eq!(got[7], got[6], "day 8+ keeps the top reward");
+    assert_eq!(c.total_minted, minted0, "paid by the House, never minted");
+    assert_eq!(c.get_daily(acc(ALICE)).streak, 8);
+    // a missed day resets the streak
+    alice_paid_match(&mut c, 20_009, 500, false, false);
+    ctx_ts(ALICE, 505, day_ms(20_009), NearToken::from_yoctonear(0));
+    c.check_in();
+    assert_eq!(c.get_daily(acc(ALICE)).streak, 1);
+    // guests can't
+    ctx_ts(GUEST, 510, day_ms(20_009), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err());
+}
+
+#[test]
+fn welcome_credit_matches_do_not_count_for_check_in_or_quests() {
+    let mut c = setup();
+    c.set_welcome_credit(&acc(ALICE), WELCOME_STAKE);
+    for k in 0..3 {
+        alice_paid_match(&mut c, 20_000, 200 + k * 10, true, false);
+    }
+    let v = c.get_daily(acc(ALICE));
+    assert!(!v.can_check_in && v.quests.iter().all(|q| q.progress == 0), "credit-paid matches don't count (sybil cost)");
+}
+
+#[test]
+fn daily_quests_are_verified_from_settled_matches_and_claimed_once() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 200 * ONE);
+    alice_paid_match(&mut c, 20_000, 200, true, false); // a win (top 3)
+    alice_paid_match(&mut c, 20_000, 210, false, true); // bounty kill
+    ctx_ts(ALICE, 215, day_ms(20_000), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.claim_quest(0); })).is_err(), "2 of 3 matches");
+    alice_paid_match(&mut c, 20_000, 220, false, false);
+    let b0 = bal(&c, ALICE);
+    let mut paid = 0;
+    for q in 0..3u8 {
+        ctx_ts(ALICE, 230 + q as u64, day_ms(20_000), NearToken::from_yoctonear(0));
+        paid += c.claim_quest(q).0;
+        ctx_ts(ALICE, 240 + q as u64, day_ms(20_000), NearToken::from_yoctonear(0));
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.claim_quest(q); })).is_err(), "once a day");
+    }
+    assert_eq!(bal(&c, ALICE), b0 + paid);
+    assert!(paid > 0);
+    // the next day the quests reset
+    let v = c.get_daily(acc(ALICE));
+    let _ = v;
+    ctx_ts(ALICE, 300, day_ms(20_001), NearToken::from_yoctonear(0));
+    assert!(c.get_daily(acc(ALICE)).quests.iter().all(|q| q.progress == 0 && !q.claimed));
+    // unregister + register can't re-claim today's quests
+    ctx_ts(ALICE, 301, day_ms(20_000), NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    register(&mut c, ALICE);
+    ctx_ts(ALICE, 302, day_ms(20_000), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.claim_quest(1); })).is_err(), "claims survive re-registering");
+}
+
+#[test]
+fn rookies_are_protected_in_their_first_matches() {
+    let mut c = setup();
+    // make slot 0 a rich rookie (test only)
+    let mut f = c.slot_fighter(0);
+    f.generation = 1;
+    c.save_fighter(f);
+    let b = c.slots[0].clone();
+    c.mint(&b, 900 * ONE, "test: rich rookie");
+    let s = start(&mut c, GUEST, 200);
+    assert_eq!(s.roster[0].paid.0, ENTRY_FEE, "minimum entry");
+    assert_ne!(s.bounty_idx, Some(1), "never the bounty carrier");
+    let before = c.balance(&b);
+    settle(&mut c, s.match_id, 5, None, 210);
+    // no upkeep (it may still buy an upgrade: compare against the upgrade spend)
+    let f = c.slot_fighter(0);
+    let spent_upgrades: u128 = (f.upgrades.weapon_tier > 0) as u128 * WEAPON_PRICES[0];
+    assert_eq!(c.balance(&b), before - spent_upgrades, "no upkeep for a protected rookie");
+    // after 10 matches the protection ends
+    let mut f = c.slot_fighter(0);
+    f.record.matches = daily::ROOKIE_PROTECTED_MATCHES;
+    c.save_fighter(f);
+    let s = start(&mut c, GUEST, 300);
+    assert!(s.roster[0].paid.0 > ENTRY_FEE);
 }
