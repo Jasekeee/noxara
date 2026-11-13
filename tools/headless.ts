@@ -40,11 +40,18 @@ for (const f of roster) if (!per.has(f.personality)) per.set(f.personality, { sl
 
 let finished = 0, byClock = 0, deaths = 0, stormDeaths = 0, lengthTicks = 0, noWinner = 0;
 const unfinished: number[] = [];
+const crashed: string[] = [];
 const t0 = performance.now();
 for (let k = 0; k < N; k++) {
   const seed = from + k;
   const cfg = { seed, fighters: botRoster(sim, p0) };
-  const run = runMatch(sim.createMatch(cfg), { humans: [] });
+  let run;
+  try {
+    run = runMatch(sim.createMatch(cfg), { humans: [] });
+  } catch (e) {
+    crashed.push(`seed ${seed}: ${(e as Error).message}`);
+    continue;
+  }
   cfg.fighters.forEach((f, i) => {
     const p = per.get(f.personality)!;
     p.slots++;
@@ -65,6 +72,15 @@ for (let k = 0; k < N; k++) {
 }
 const secs = (performance.now() - t0) / 1000;
 
+// determinism spot-check: the first seed again must give the same final hash
+let deterministic: boolean | null = null;
+try {
+  const again = () => runMatch(sim.createMatch({ seed: from, fighters: botRoster(sim, p0) }), { humans: [] }).hash;
+  deterministic = again() === again();
+} catch {
+  /* reported as a crash above */
+}
+
 const pct = (a: number, b: number) => (b > 0 ? (100 * a) / b : 0);
 const rows = [...per.entries()].map(([personality, s]) => ({
   personality,
@@ -76,6 +92,9 @@ const rows = [...per.entries()].map(([personality, s]) => ({
 }));
 
 const fails: string[] = [];
+for (const c of crashed.slice(0, 5)) fails.push(`match crashed — ${c}`);
+if (crashed.length > 5) fails.push(`… ${crashed.length - 5} more crashed matches`);
+if (deterministic === false) fails.push(`seed ${from} gave two different hashes when run twice (nondeterminism)`);
 for (const r of rows)
   if (r.winShare > MAX_WIN_SHARE * 100)
     fails.push(`personality "${r.personality}" wins ${r.winShare.toFixed(1)}% of matches (limit ${MAX_WIN_SHARE * 100}%)`);
@@ -93,6 +112,8 @@ const summary = {
   stormDeathsPct: pct(stormDeaths, deaths),
   endedByClockPct: pct(byClock, finished),
   noWinner,
+  crashed: crashed.length,
+  deterministic,
   matchesPerSecond: N / secs,
   perPersonality: rows,
   fails,
@@ -108,6 +129,7 @@ console.log(`finished             ${finished}/${N}`);
 console.log(`avg match length     ${summary.avgMatchSeconds === null ? "n/a" : summary.avgMatchSeconds.toFixed(1) + " s"}`);
 console.log(`storm deaths         ${summary.stormDeathsPct.toFixed(1)}% of ${deaths} deaths`);
 console.log(`ended by clock       ${summary.endedByClockPct.toFixed(1)}% of finished matches`);
+console.log(`determinism check    ${deterministic === null ? "n/a" : deterministic ? "same hash twice (seed " + from + ")" : "MISMATCH"}`);
 console.log(`speed                ${summary.matchesPerSecond.toFixed(1)} matches/s (${secs.toFixed(1)} s total)`);
 if (finished === 0)
   console.log("NOTE: no match finished — src/sim/match.ts is probably still the stub (it never sets state.over).");
