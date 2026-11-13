@@ -7,6 +7,8 @@ export interface MenuDeps {
   canOpen(): boolean;
   /** offline practice: the game really stops while the menu is open */
   offline(): boolean;
+  /** the training island is running (offline, easy bots) */
+  training?(): boolean;
   muted(): boolean;
   toggleMute(): void;
   aimAssist(): boolean;
@@ -121,7 +123,7 @@ export class PauseMenu {
     c.textContent = "";
     const title = h("h2", "", this.d.offline() ? "PAUSED" : "MENU");
     title.id = "pause-title";
-    const note = h("p", "pause-note", this.d.offline() ? "Practice match: the game is paused." : "The match continues while this menu is open.");
+    const note = h("p", "pause-note", this.d.training?.() ? "Training island: the game is paused." : this.d.offline() ? "Practice match: the game is paused." : "The match continues while this menu is open.");
     const resume = this.btnEl("RESUME", "btn-primary", () => this.hide());
     const toggle = (label: string, on: () => boolean, fn: () => void) => {
       const b = h("button", "btn-ghost pause-toggle") as HTMLButtonElement;

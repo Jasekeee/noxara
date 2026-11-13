@@ -799,7 +799,8 @@ function stepSim() {
     phase = "over";
     {
       const me = st.fighters[0];
-      const gained = xpForMatch(me.placement || 1, me.kills, iClaimedBounty);
+      // training island: no rewards of any kind (no XP either)
+      const gained = inTraining ? 0 : xpForMatch(me.placement || 1, me.kills, iClaimedBounty);
       xpBefore = myXp;
       xpAfter = myXp + gained;
       myXp = xpAfter;
@@ -840,7 +841,7 @@ function drawLedger() {
     el.textContent = "";
     const n = document.createElement("p");
     n.className = "lg-note";
-    n.textContent = `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
+    n.textContent = inTraining ? `${st.alive} still fighting — training island: nothing is paid or recorded. Spectate to watch it end.` : `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
     el.appendChild(n);
     return;
   }
@@ -883,7 +884,10 @@ function showEnd(force: boolean) {
   $("end-kills").textContent = String(me.kills);
   // a fast early exit in a real match: offer the training island
   const fast = !won && !inTraining && me.placement >= 7 && (match.state.tick < 70 * 20 || me.kills === 0);
-  $("again-training").classList.toggle("hidden", !fast);
+  $("again-training").classList.toggle("hidden", !fast && !inTraining);
+  // after training: the main button is a real match; the secondary one trains again
+  $("again").textContent = inTraining ? "PLAY REAL MATCH" : "PLAY AGAIN";
+  $("again-training").textContent = inTraining ? "TRAIN AGAIN" : "TRY THE TRAINING ISLAND";
   $("end-dmg").textContent = String(Math.round(me.damageDealt));
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
@@ -892,7 +896,7 @@ function showEnd(force: boolean) {
   social.endShown(st.over);
   drawLedger();
   const xb = $("xp-box");
-  xb.classList.toggle("hidden", !st.over || SEED_PARAM !== null && AUTOPLAY);
+  xb.classList.toggle("hidden", !st.over || inTraining || (SEED_PARAM !== null && AUTOPLAY));
   if (st.over) {
     renderXp(xb, xpBefore, xpAfter, (lvl, unlocks) => {
       sfx.levelUp();
@@ -961,6 +965,7 @@ let menuPaused = false;
 const menu = new PauseMenu({
   canOpen: () => phase === "playing" && !!match && !match.state.over && !spectating && !endOpen && !starting && !AUTOPLAY && $("page").classList.contains("hidden"),
   offline: () => !client || client.mode !== "chain" || !!current?.matchId.startsWith("local-"),
+  training: () => inTraining,
   muted: () => sfx.muted,
   toggleMute: () => toggleMute(),
   aimAssist: () => controls.aimAssist,
@@ -968,7 +973,7 @@ const menu = new PauseMenu({
   exit: () => {
     const chain = !current?.matchId.startsWith("local-") && !!client && client.mode === "chain";
     toLobby();
-    toast(chain ? "You left — the match counts as a loss" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
+    toast(chain ? "You left — the match counts as a loss" : inTraining ? "You left the training island" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
   },
   onChange: (open) => {
     controls.blocked = open;
