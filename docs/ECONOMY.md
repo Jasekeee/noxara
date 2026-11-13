@@ -37,7 +37,7 @@ burn_bps  = 100 +   300 × below             burned share of every pot:     1% a
 
 - **Treasury above target:** rewards and bounties go up, up to 1.5×.
 - **Treasury below target:** rewards go down, and the House keeps more and burns more.
-- `get_economy` returns `r`, `m`, `house_bps`, `burn_bps`, the brake `s` and every constant.
+- `get_economy` returns the treasury and its moving average, the floor and target, `m`, `house_bps`, `burn_bps`, the brake, the current top-up, season totals and the last 64 settle snapshots. The constants are in the contract source and in `scripts/econ-params.json`; a test checks that the two match.
 
 **Deflation brake.** A closed loop with no minting would burn itself to zero, so every burn is multiplied by
 `s = clamp((supply − 2,300) / (2,900 − 2,300), 0, 1)`. The unburnt part `(1 − s)` goes to the House. Supply
@@ -46,7 +46,7 @@ therefore levels off at about 2,300 NOX instead of spiralling down.
 ## 3. Sinks
 | Sink | Formula | Where it goes |
 |---|---|---|
-| Entry burn | 10% of every entry fee, at `start_match` | burned × s, the rest to the House |
+| Entry burn | 10% of every entry fee, taken when the match settles (a refunded match burns nothing) | burned × s, the rest to the House |
 | Pot | `burn_bps` (above) | burned × s, the rest to the House |
 | Bot upgrades | weapon 60 / 120, armor 90 / 180 (power is capped at tier 2) | 50% burned × s, 50% to the House |
 | Cosmetics | bot skin 150; players `buy_cosmetic`: 50 / 100 / 200 (looks only, no power) | 100% burned × s |
@@ -66,13 +66,17 @@ Entry fees are progressive for bots **and** players: `4 + 2%` of the wallet abov
   - costs: entries, upkeep, upgrades, cosmetics;
   - plus season points: 10 per win, 2 per kill.
 - **Seasons** last 2 days, counted from 2026-11-14 00:00 UTC. Points and P&L reset lazily: a bot's record carries its season id, so no loops are needed. Career history and shares are kept. The last 8 seasons are stored as standings.
-- **Bankruptcy:** when a bot can't pay its entry, it retires. Its shares go to zero, whatever is left in its wallet goes to the House, and the House funds a rookie in that slot.
+- **Bankruptcy:** when a bot can't pay its entry, it retires and its shares go to zero. Whatever is left in its wallet goes to the House through `close_retired`, which anyone may call once none of its entries are in a match. The House funds a rookie in that slot. A bot that retires mid-season is left out of that season's archived standings.
 
 ## 6. Bot shares (NEP-245, inside the game contract)
 - Each bot has 1,000 shares; `token_id` = the bot's account.
 - **IPO:** a rookie floats 300 shares at 0.1 NOX each (`buy_ipo`). The NOX goes into the bot's own wallet, so investors fund its bankroll. Shares not yet sold stay with the bot.
-- **Dividends come only from profit.** When a settle leaves the bot's wallet above its high-water mark, holders receive 20% of the gain, pro rata to the shares they own out of 1,000. After that the mark resets; spending and losses lower it. The payout uses an accumulator (`acc_per_share` plus each holder's debt), so it costs O(1) gas and writes one log line. Holders call `claim_dividends`; a transfer settles what is owed first.
+- **Dividends come only from profit.** When a settle leaves the bot's bankroll (its wallet plus its entries in other pending matches, so refunds never count as profit) above its high-water mark, holders receive 20% of the gain, pro rata to the shares they own out of 1,000. After that the mark resets; spending and losses lower it. The payout uses an accumulator (`acc_per_share` plus each holder's debt), so it costs O(1) gas and writes one log line. Holders call `claim_dividends`; a transfer settles what is owed first.
+- **Signatures:** listing and buying listed shares need a full wallet signature (1 yoctoNEAR), so a leaked in-game key can't sell your shares to an accomplice. Buying IPO shares, claiming dividends and buying cosmetics stay gasless: with those, NOX only goes into a bot, back to you or into the burn, never to another player.
+- **Leaving:** a player who unregisters must hold no shares and have no dividends owed. With `force`, owed dividends are paid first, the shares go back to their bots and every row is deleted.
 - **Trading:** `mt_transfer` between registered **real** accounts only. Guests and game wallets can't hold shares. A fixed-price market (`list_shares`, `buy_listing`, `cancel_listing`) charges a 2% tax that is burned. The last trade sets the share price.
+- **Order book:** each listing offers at least 10 shares and expires after 48 h. A bot holds at most 20 open listings; when its book is full, a cheaper offer replaces the most expensive one. Anyone can prune expired listings, and listings of bankrupt bots or of sellers who left.
+- **Timing:** the player who submits a match record decides when it settles, so they could buy IPO shares of a bot they see winning. That gains at most about 6% of the prize, in play-money.
 - **Not implemented, on purpose:** `mt_transfer_call`. Shares never leave the game contract, which closes off a whole class of callback attacks. NEP-245 support is therefore partial: views, transfers and NEP-297 events.
 
 ## 7. Anti-sybil

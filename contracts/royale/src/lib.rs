@@ -1121,6 +1121,7 @@ impl Contract {
             };
             for a in ids {
                 if self.fighters.remove(&a).is_some() {
+                    self.clear_bot_econ(&a);
                     self.history.remove(&a);
                     self.sponsors.remove(&a);
                     self.token.accounts.remove(&a);
@@ -1142,6 +1143,7 @@ impl Contract {
             welcomed.remove(a);
             credits.remove(a);
             last.remove(a);
+            self.clear_player_econ(a);
         }
         credits.flush();
         last.flush();
@@ -1149,6 +1151,7 @@ impl Contract {
         if done {
             self.retired.set(Some(vec![]));
             self.leaderboard.set(Some(vec![]));
+            self.clear_econ_globals();
         }
         ClearProgress { done, matches_left: self.next_match_id.saturating_sub(cursor), rookie_generations_left: (self.rookies + 1).saturating_sub(gen), storage_usage: U64(env::storage_usage()) }
     }

@@ -2099,6 +2099,7 @@ fn listings_expire_and_dead_ones_are_pruned_and_claims_write_nothing() {
     assert!(c.get_listings(None).is_empty());
     assert_eq!(c.get_holdings(acc(ALICE))[0].locked, 0, "its shares are unlocked again");
     // claiming on a bot you don't hold / a non-fighter writes nothing
+    register(&mut c, BOB);
     ctx(BOB, 170, NearToken::from_yoctonear(0));
     let used = env::storage_usage(); // (measured in the same mocked context as the call)
     assert_eq!(c.claim_dividends(c.slots[5].clone()).0, 0);
@@ -2135,4 +2136,96 @@ fn a_full_order_book_takes_a_cheaper_offer() {
     let locked: u32 = (0..10).map(|i| c.get_holdings(acc(&format!("seller{i}.test")))[0].locked).sum();
     assert_eq!(locked, 190, "the displaced listing's shares are unlocked");
     assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
+}
+
+// ============================================================ audit #4 PoCs: the exploits no longer work
+
+#[test]
+fn audit4_refunded_entries_never_count_as_profit() {
+    // H-1: entries refunded from swept matches used to raise the wallet above the high-water mark
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 3, econ::IPO_SHARES, 150); // idx 4
+    let mut pend = vec![];
+    for i in 0..6 {
+        let g = guest_n(&mut c, 700 + i);
+        pend.push(start(&mut c, &g, 200 + i as u64).match_id);
+    }
+    let s = start(&mut c, GUEST, 210);
+    settle(&mut c, s.match_id, 6, None, 212); // idx 4 loses
+    for id in &pend {
+        ctx(BOB, 800, NearToken::from_yoctonear(0));
+        assert!(c.sweep_match(*id));
+    }
+    let s = start(&mut c, GUEST, 810);
+    settle(&mut c, s.match_id, 6, None, 812); // idx 4 loses again
+    assert_eq!(c.get_holdings(acc(ALICE))[0].claimable.0, 0, "no phantom dividend from refunds");
+    assert_eq!(c.get_bot_econ(bot).dividends_paid.0, 0);
+    assert_supply(&c);
+}
+
+#[test]
+fn audit4_unregister_releases_shares_and_leaves_no_rows() {
+    // M-1: unregister used to orphan holding/listing rows the contract then paid for
+    let mut c = setup();
+    register(&mut c, BOB);
+    grant(&mut c, BOB, 2 * ONE);
+    let bot = c.slots[2].clone();
+    ctx(BOB, 150, NearToken::from_yoctonear(0));
+    c.buy_ipo(bot.clone(), 20);
+    ctx(BOB, 151, NearToken::from_yoctonear(1));
+    let lid = c.list_shares(bot.clone(), 10, U128(ONE));
+    ctx(BOB, 153, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.storage_unregister(None); })).is_err(), "shares held: refused without force");
+    ctx(BOB, 154, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    assert!(c.get_holdings(acc(BOB)).is_empty(), "no holding rows left");
+    assert!(c.get_listings(None).is_empty(), "its listing is gone");
+    assert!(c.get_cosmetics(acc(BOB)).is_empty());
+    assert_eq!(c.get_bot_econ(bot.clone()).sold, 0, "its shares went back to the bot");
+    assert_eq!(c.get_bot_econ(bot.clone()).holders, 0);
+    grant(&mut c, ALICE, 20 * ONE);
+    ctx(ALICE, 160, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_listing(lid); })).is_err(), "the listing is gone");
+    assert!(!c.token.accounts.contains_key(&acc(BOB)), "no FT account re-created at the contract's expense");
+}
+
+#[test]
+fn audit4_teardown_clear_removes_the_economy_state() {
+    // M-2: teardown_clear used to leave the v2 keys and maps (account deletion fails above ~10 KB)
+    let mut c = setup();
+    grant(&mut c, ALICE, 400 * ONE);
+    let bot = ipo(&mut c, ALICE, 2, 100, 150);
+    ctx(ALICE, 151, NearToken::from_yoctonear(0));
+    c.buy_cosmetic(2);
+    ctx(ALICE, 152, NearToken::from_yoctonear(1));
+    c.list_shares(bot.clone(), 10, U128(ONE));
+    let mut h = 200u64;
+    for i in 0..30u64 {
+        let ms = econ::SEASON_EPOCH_MS + i * (econ::SEASON_MS / 10) + 1;
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        last.remove(&acc(GUEST));
+        last.flush();
+        ctx_ts(GUEST, h, ms, NearToken::from_yoctonear(0));
+        let _ = c.start_match();
+        let id = c.next_match_id - 1;
+        ctx_ts(ME, h + 1, ms, NearToken::from_yoctonear(0));
+        c.resolve_start(U64(id));
+        ctx_ts(SERVER, h + 2, ms, NearToken::from_yoctonear(0));
+        let w = [3, 5, 1, 7, 2, 9, 4, 6, 8][(i % 9) as usize];
+        c.settle_match(U64(id), places(w), vec![0; FIGHTERS], None, "ab".repeat(32), None);
+        h += 10;
+    }
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    loop {
+        let p = c.teardown_clear(vec![acc(GUEST), acc(ALICE)], Some(200), Some(20));
+        if p.done {
+            break;
+        }
+    }
+    assert!(env::storage_read(b"econ_v2").is_none() && env::storage_read(b"econ_seasons").is_none(), "global v2 keys removed");
+    assert!(c.get_holdings(acc(ALICE)).is_empty() && c.get_cosmetics(acc(ALICE)).is_empty());
+    assert!(near_sdk::store::LookupMap::<AccountId, econ::BotEcon>::new(Key::BotEcon).get(&bot).is_none(), "bot rows removed");
 }

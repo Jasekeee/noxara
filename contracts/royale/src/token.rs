@@ -115,6 +115,7 @@ impl StorageManagement for Contract {
             self.close_all_sponsorships(&id);
         }
         require!(self.sponsoring.get(&id).is_none_or(|v| v.is_empty()), "withdraw your sponsorships first (from the season's end: wait until your bots are out of their match)");
+        self.release_player_econ(&id, force.unwrap_or(false));
         let bal = self.balance(&id);
         require!(bal == 0 || force.unwrap_or(false), "non-zero $NOX balance: pass force=true to burn it");
         self.burn(&id, bal, "unregistered");

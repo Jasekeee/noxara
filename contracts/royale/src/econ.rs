@@ -294,7 +294,7 @@ impl Contract {
     /// current season.
     pub(crate) fn bot_econ(&self, bot: &AccountId) -> BotEcon {
         let season = season_of(env::block_timestamp_ms());
-        let mut b = bot_map().get(bot).cloned().unwrap_or_else(|| BotEcon { hwm: U128(self.balance(bot)), ipo_left: IPO_SHARES, season, ..Default::default() });
+        let mut b = bot_map().get(bot).cloned().unwrap_or_else(|| BotEcon { hwm: U128(self.bankroll(bot)), ipo_left: IPO_SHARES, season, ..Default::default() });
         if b.season != season {
             b.season = season;
             b.income = U128(0);
@@ -378,9 +378,11 @@ impl Contract {
     /// `run_economy`; afterwards `lower_hwm` drops the mark to the wallet (spending/losses lower it).
     pub(crate) fn settle_bot_econ(&mut self, bot: &AccountId, e: &mut EconState) {
         let mut b = self.bot_econ(bot);
-        let bal = self.balance(bot);
+        // audit #4 H-1: profit is measured on the BANKROLL (wallet + entries in other pending matches), so
+        // refunds of abandoned/expired matches never count as profit; the payout comes from the wallet
+        let bal = self.bankroll(bot);
         if bal > b.hwm.0 && b.sold > 0 && !b.bankrupt {
-            let per_share = (bal - b.hwm.0) * DIVIDEND_BPS / 10_000 / SHARES_PER_BOT as u128;
+            let per_share = ((bal - b.hwm.0) * DIVIDEND_BPS / 10_000).min(self.balance(bot)) / SHARES_PER_BOT as u128;
             let total = per_share * b.sold as u128;
             if total > 0 {
                 let d = self.dividends_account();
@@ -392,7 +394,7 @@ impl Contract {
                 b.costs = U128(b.costs.0 + total);
             }
         }
-        b.hwm = U128(b.hwm.0.max(self.balance(bot)));
+        b.hwm = U128(b.hwm.0.max(self.bankroll(bot)));
         self.save_bot_econ(bot, b);
         let u = upkeep(self.balance(bot));
         if u > 0 {
@@ -407,7 +409,7 @@ impl Contract {
 
     pub(crate) fn lower_hwm(&mut self, bot: &AccountId) {
         let mut b = self.bot_econ(bot);
-        b.hwm = U128(b.hwm.0.min(self.balance(bot)));
+        b.hwm = U128(b.hwm.0.min(self.bankroll(bot)));
         self.save_bot_econ(bot, b);
     }
 
@@ -417,9 +419,7 @@ impl Contract {
         if b.bankrupt {
             return;
         }
-        if b.sold > 0 {
-            mt_event("mt_burn", near_sdk::serde_json::json!({ "owner_id": "holders", "token_ids": [bot], "amounts": [b.sold.to_string()], "memo": "bankrupt: shares go to zero" }));
-        }
+        mt_event("mt_burn", near_sdk::serde_json::json!({ "owner_id": bot, "token_ids": [bot], "amounts": [SHARES_PER_BOT.to_string()], "memo": "bankrupt: every share goes to zero (holders included)" }));
         b.bankrupt = true;
         b.ipo_left = 0;
         self.save_bot_econ(bot, b);
@@ -505,7 +505,7 @@ impl Contract {
         let before = h.shares;
         h.shares += shares;
         self.put_holding(&me, &bot, before, h);
-        mt_event("mt_mint", near_sdk::serde_json::json!({ "owner_id": me, "token_ids": [bot], "amounts": [shares.to_string()], "memo": "IPO" }));
+        mt_event("mt_transfer", near_sdk::serde_json::json!({ "old_owner_id": bot, "new_owner_id": me, "token_ids": [bot], "amounts": [shares.to_string()], "memo": "IPO" }));
         event("ipo", &near_sdk::serde_json::json!({ "buyer": me, "bot": bot, "shares": shares, "cost": U128(cost) }));
         U128(cost)
     }
@@ -514,6 +514,7 @@ impl Contract {
     pub fn claim_dividends(&mut self, bot: AccountId) -> U128 {
         let me = env::predecessor_account_id();
         require!(self.load_fighter_pub(&bot).is_some(), "not a fighter");
+        require!(self.load_player(&me).is_some(), "register first (storage_deposit)");
         if holding_map().get(&(me.clone(), bot.clone())).is_none() {
             return U128(0); // nothing held: write nothing
         }
@@ -587,7 +588,7 @@ impl Contract {
             .listings
             .iter()
             .filter_map(|i| lm.get(i).cloned())
-            .filter(|l| now >= l.expires_ms.0 || self.bot_econ(&l.bot).bankrupt || self.load_fighter_pub(&l.bot).is_none_or(|f| !f.active))
+            .filter(|l| now >= l.expires_ms.0 || self.bot_econ(&l.bot).bankrupt || self.load_fighter_pub(&l.bot).is_none_or(|f| !f.active) || self.load_player(&l.seller).is_none())
             .take(max.unwrap_or(20).min(50) as usize)
             .collect();
         for l in &dead {
@@ -614,6 +615,7 @@ impl Contract {
         let l = listing_map().get(&id.0).cloned().unwrap_or_else(|| env::panic_str("no such listing"));
         require!(env::block_timestamp_ms() < l.expires_ms.0, "this listing has expired");
         require!(l.seller != me, "that's your own listing");
+        require!(self.load_player(&l.seller).is_some(), "the seller has left: this listing is void (anyone can prune it)");
         let mut b = self.active_bot(&l.bot);
         let cost = l.shares as u128 * l.price_per_share.0;
         require!(self.balance(&me) >= cost, "not enough NOX");
@@ -671,7 +673,7 @@ impl Contract {
         self.save_bot_econ(&token_id, b);
         mt_event("mt_transfer", near_sdk::serde_json::json!({ "old_owner_id": me, "new_owner_id": receiver_id, "token_ids": [token_id], "amounts": [(n - tax).to_string()], "memo": memo }));
         if tax > 0 {
-            mt_event("mt_burn", near_sdk::serde_json::json!({ "owner_id": me, "token_ids": [token_id], "amounts": [tax.to_string()], "memo": "transfer tax" }));
+            mt_event("mt_transfer", near_sdk::serde_json::json!({ "old_owner_id": me, "new_owner_id": token_id, "token_ids": [token_id], "amounts": [tax.to_string()], "memo": "transfer tax (shares return to the bot)" }));
         }
     }
 
@@ -832,10 +834,101 @@ impl Contract {
         }
         of.flush();
         let b = self.bot_econ(&l.bot);
+        // `before` = the STORED shares (settle_holding zeroes a bankrupt bot's shares; audit #4)
+        let before = holding_map().get(&(l.seller.clone(), l.bot.clone())).map(|x| x.shares).unwrap_or(0);
         let mut h = self.settle_holding(&l.seller, &l.bot, &b);
-        let before = h.shares;
         h.locked = h.locked.saturating_sub(l.shares);
         self.put_holding(&l.seller, &l.bot, before, h);
+    }
+
+    /// Before an account unregisters (audit #4 M-1): with `force`, owed dividends are paid to it (then burned
+    /// with the rest of its NOX by the caller), its shares go back to their bots and every v2 row it owns is
+    /// deleted; without `force`, it must hold no shares and have nothing to claim.
+    pub(crate) fn release_player_econ(&mut self, id: &AccountId, force: bool) {
+        let bots = holdings_of_map().get(id).cloned().unwrap_or_default();
+        for l in listings_of_map().get(id).cloned().unwrap_or_default() {
+            if let Some(v) = listing_map().get(&l).cloned() {
+                self.drop_listing(&v);
+            }
+        }
+        for bot in bots {
+            let mut b = self.bot_econ(&bot);
+            let h = self.settle_holding(id, &bot, &b);
+            require!(force || (h.shares == 0 && h.claimable.0 == 0), "sell or transfer your bot shares and claim your dividends first (or pass force=true to give them up)");
+            if h.claimable.0 > 0 {
+                let d = self.dividends_account();
+                self.move_tokens(&d, id, h.claimable.0, "dividends");
+            }
+            if h.shares > 0 && !b.bankrupt {
+                b.sold -= h.shares;
+                mt_event("mt_transfer", near_sdk::serde_json::json!({ "old_owner_id": id, "new_owner_id": bot, "token_ids": [bot], "amounts": [h.shares.to_string()], "memo": "unregistered" }));
+            }
+            let stored = holding_map().get(&(id.clone(), bot.clone())).map(|x| x.shares).unwrap_or(0);
+            if stored > 0 {
+                b.holders = b.holders.saturating_sub(1);
+            }
+            self.save_bot_econ(&bot, b);
+            let mut hm = holding_map();
+            hm.remove(&(id.clone(), bot.clone()));
+            hm.flush();
+        }
+        let mut of = holdings_of_map();
+        of.remove(id);
+        of.flush();
+        let mut lo = listings_of_map();
+        lo.remove(id);
+        lo.flush();
+        let mut dm = daily_map();
+        dm.remove(id);
+        dm.flush();
+        let mut cm = cosmetics_map();
+        cm.remove(id);
+        cm.flush();
+    }
+
+    /// teardown_clear (audit #4 M-2): a fighter's v2 row
+    pub(crate) fn clear_bot_econ(&mut self, a: &AccountId) {
+        let mut m = bot_map();
+        m.remove(a);
+        m.flush();
+    }
+
+    /// teardown_clear: every v2 row of a player, and once everything else is cleared the global v2 keys
+    pub(crate) fn clear_player_econ(&mut self, a: &AccountId) {
+        let mut hm = holding_map();
+        for bot in holdings_of_map().get(a).cloned().unwrap_or_default() {
+            hm.remove(&(a.clone(), bot));
+        }
+        hm.flush();
+        let mut lm = listing_map();
+        for id in listings_of_map().get(a).cloned().unwrap_or_default() {
+            lm.remove(&id);
+        }
+        lm.flush();
+        let mut of = holdings_of_map();
+        of.remove(a);
+        of.flush();
+        let mut lo = listings_of_map();
+        lo.remove(a);
+        lo.flush();
+        let mut dm = daily_map();
+        dm.remove(a);
+        dm.flush();
+        let mut cm = cosmetics_map();
+        cm.remove(a);
+        cm.flush();
+    }
+
+    pub(crate) fn clear_econ_globals(&mut self) {
+        let mut lm = listing_map();
+        for id in self.econ().listings {
+            lm.remove(&id);
+        }
+        lm.flush();
+        env::storage_remove(ECON_KEY);
+        env::storage_remove(SEASONS_KEY);
+        let d = self.dividends_account();
+        self.token.accounts.remove(&d);
     }
 
     /// Season bookkeeping at a settle: when the season changed, archive the finished season's standings
