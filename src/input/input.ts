@@ -18,6 +18,9 @@ export class Controls {
   private stickL = { id: -1, ox: 0, oy: 0, dx: 0, dy: 0 };
   private stickR = { id: -1, ox: 0, oy: 0, dx: 0, dy: 0 };
   private lastAim = 0;
+  private lastDist = 9000;
+  /** world units a full right-stick deflection maps to (set per weapon by the game) */
+  touchRange = 9;
   /** what the player has done so far (for the teach-by-playing hints) */
   readonly used = { move: false, aim: false, fire: false };
   enabled = false;
@@ -130,6 +133,7 @@ export class Controls {
     if (k.has("KeyS") || k.has("ArrowDown")) my += 1000;
     let fire = this.mouseDown || k.has("Space");
     let aim = this.lastAim;
+    let aimDist = this.lastDist;
 
     if (this.touchMode) {
       if (this.stickL.id !== -1 && Math.hypot(this.stickL.dx, this.stickL.dy) > 0.15) {
@@ -140,6 +144,7 @@ export class Controls {
       const rl = Math.hypot(r.dx, r.dy);
       if (r.id !== -1 && rl > 0.25) {
         aim = Math.round((Math.atan2(r.dy, r.dx) / TAU) * 4096) & 4095;
+        aimDist = Math.round(Math.min(1, rl) * this.touchRange * 1000);
         fire = true;
         this.used.aim = this.used.fire = true;
       } else if (mx !== 0 || my !== 0) {
@@ -151,10 +156,13 @@ export class Controls {
         this.aimWorld.copy(g);
         const dx = g.x - px, dz = g.z - pz;
         if (dx * dx + dz * dz > 0.04) aim = Math.round((Math.atan2(dz, dx) / TAU) * 4096) & 4095;
+        aimDist = Math.round(Math.hypot(dx, dz) * 1000);
       }
     }
     if (mx !== 0 || my !== 0) this.used.move = true;
     this.lastAim = aim;
+    this.lastDist = aimDist;
+    out.aimDist = aimDist;
     out.mx = Math.max(-1000, Math.min(1000, mx));
     out.my = Math.max(-1000, Math.min(1000, my));
     out.aim = aim;

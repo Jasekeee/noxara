@@ -5,6 +5,7 @@ import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
+import { WEAPONS } from "./sim/rules";
 import { loadAll } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
@@ -27,8 +28,48 @@ const $ = (id: string) => document.getElementById(id)!;
 
 // ------------------------------------------------------------------ renderer + scene
 const canvas = $("view") as HTMLCanvasElement;
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: "high-performance" });
-renderer.setPixelRatio(Math.min(2, devicePixelRatio || 1));
+// Software rasterizers (SwiftShader / llvmpipe, e.g. headless CI or blocklisted GPUs) start in low quality.
+const SOFTWARE_GL = (() => {
+  try {
+    const gl = document.createElement("canvas").getContext("webgl2") as WebGL2RenderingContext | null;
+    if (!gl) return false;
+    const ext = gl.getExtension("WEBGL_debug_renderer_info");
+    const name = String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
+    return /swiftshader|llvmpipe|software|softpipe/i.test(name);
+  } catch {
+    return false;
+  }
+})();
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: !SOFTWARE_GL, powerPreference: "high-performance" });
+const FORCED_Q = params.has("q") ? Math.max(0, Math.min(4, Number(params.get("q")) || 0)) : -1;
+const BASE_DPR = Math.min(2, devicePixelRatio || 1);
+renderer.setPixelRatio(BASE_DPR);
+// Auto quality: if the frame rate stays low, render fewer pixels / drop shadows (never raises above BASE_DPR).
+let quality = 0;
+let qT = 0, qFrames = 0, qGrace = 1.2;
+function setQuality(q: number) {
+  quality = q;
+  const scale = [1, 0.8, 0.65, 0.55, 0.45][q];
+  renderer.setPixelRatio(Math.max(0.4, BASE_DPR * scale));
+  if (q >= 2 && renderer.shadowMap.enabled) {
+    renderer.shadowMap.enabled = false;
+    sun.castShadow = false;
+  }
+  resize();
+}
+function autoQuality(rdt: number) {
+  if (FORCED_Q >= 0) return;
+  if (qGrace > 0) { qGrace -= rdt; return; }
+  qT += rdt; qFrames++;
+  if (qT < 0.75) return;
+  const fps = qFrames / qT;
+  qT = 0; qFrames = 0;
+  if (fps < 48 && quality < 4) {
+    setQuality(quality + 1);
+    qGrace = 0.25;
+  }
+}
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.NeutralToneMapping;
@@ -65,6 +106,8 @@ function resize() {
 }
 addEventListener("resize", resize);
 resize();
+if (FORCED_Q > 0) setQuality(FORCED_Q);
+else if (SOFTWARE_GL) setQuality(3);
 
 // ------------------------------------------------------------------ game state
 type Phase = "title" | "playing" | "over";
@@ -328,6 +371,7 @@ function stepSim() {
     const b = botInput(match, 0);
     humanInput.mx = b.mx; humanInput.my = b.my; humanInput.aim = b.aim; humanInput.fire = b.fire;
   } else if (me.alive && controls.enabled) {
+    controls.touchRange = WEAPONS[me.weapon].range / 1000;
     controls.read(views[0].pos.x, views[0].pos.z, humanInput);
   } else {
     humanInput.mx = 0; humanInput.my = 0; humanInput.fire = false;
@@ -406,9 +450,13 @@ let fpsVal = 0;
 let miniT = 0;
 const shakeOff = new THREE.Vector3();
 const visibleNow = (i: number) => canSeeNow(i);
+const rustlers: THREE.Vector3[] = [];
+const meBush = { x: 0, z: 0, inBush: false };
 
+let cpuMs = 0, gpuMs = 0;
 function frame(now: number) {
   requestAnimationFrame(frame);
+  const t0 = performance.now();
   let rdt = (now - last) / 1000;
   last = now;
   if (rdt > 0.25) rdt = 0.25;
@@ -425,6 +473,7 @@ function frame(now: number) {
   }
   const dt = rdt * timeScale;
   time += rdt;
+  autoQuality(rdt);
 
   if (introT > 0) {
     introT -= rdt;
@@ -457,13 +506,13 @@ function frame(now: number) {
     if (meDeadAt >= 0 && !endShown && time - meDeadAt > 1.8 && !AUTOPLAY) showEnd(false);
 
     // fighters
-    const rustlers: { x: number; z: number }[] = [];
+    rustlers.length = 0;
     for (const f of st.fighters) {
       const v = views[f.idx];
       v.update(dt, alpha, f);
       const vis = f.idx === 0 || !f.alive || canSeeNow(f.idx) || v.dead;
       v.root.visible = vis && !(v.dead && v.deadT > 1.9);
-      if (!vis && f.alive && v.speed > 0.5) rustlers.push({ x: v.pos.x, z: v.pos.z });
+      if (!vis && f.alive && v.speed > 0.5) rustlers.push(v.pos);
       // footstep dust
       if (vis && f.alive && v.speed > 1.5) {
         v.dustT -= dt;
@@ -478,7 +527,8 @@ function frame(now: number) {
     // off-screen bounty marker
     updateBountyArrow(st.fighters.find((f) => f.bounty && f.alive && f.idx !== watch) ?? null);
     // local player in bush: semi-transparent self too
-    world.update(dt, time, me.alive ? { x: views[0].pos.x, z: views[0].pos.z, inBush: me.inBush } : null, rustlers);
+    meBush.x = views[0].pos.x; meBush.z = views[0].pos.z; meBush.inBush = me.inBush;
+    world.update(dt, time, me.alive ? meBush : null, rustlers);
 
     // storm effects for the local player
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
@@ -535,7 +585,11 @@ function frame(now: number) {
   water.uniforms.uTime.value = time;
   fx.update(dt, alpha, time);
   hud.updateFloaters(rdt, project);
+  const t1 = performance.now();
   renderer.render(scene, camera);
+  const t2 = performance.now();
+  cpuMs += (t1 - t0 - cpuMs) * 0.05;
+  gpuMs += (t2 - t1 - gpuMs) * 0.05;
 }
 
 const bountyEl = $("bounty-arrow");
@@ -551,9 +605,16 @@ function updateBountyArrow(f: { idx: number } | null) {
       show = true;
       let x = _p.x, y = _p.y;
       if (_p.z > 1) { x = -x; y = -y; }
-      const m = Math.max(Math.abs(x) / 0.88, Math.abs(y) / 0.8, 1e-3);
-      x /= m; y /= m;
-      const sx = (x * 0.5 + 0.5) * innerWidth, sy = (-y * 0.5 + 0.5) * innerHeight;
+      const W = innerWidth, H = innerHeight, mob = W < 720;
+      const cx = W / 2, cy = H / 2;
+      const dx = x * cx, dy = -y * cy;
+      const left = 34, right = W - (mob ? 34 : 34), top = mob ? 150 : 80, bot = H - (mob ? 210 : 110);
+      let t = 1e9;
+      if (dx > 0) t = Math.min(t, (right - cx) / dx);
+      if (dx < 0) t = Math.min(t, (left - cx) / dx);
+      if (dy > 0) t = Math.min(t, (bot - cy) / dy);
+      if (dy < 0) t = Math.min(t, (top - cy) / dy);
+      const sx = cx + dx * t, sy = cy + dy * t;
       bountyEl.style.transform = `translate(${sx.toFixed(1)}px, ${sy.toFixed(1)}px)`;
       const ang = Math.atan2(x, y);
       bountyTip.style.transform = `translate(-50%, -100%) rotate(${ang.toFixed(3)}rad) translateY(-22px)`;
@@ -593,6 +654,21 @@ if (E2E) {
     record: () => record,
     /** debug only: the live match object */
     match: () => match,
+    /** debug only: draw calls / triangles of the last frame + auto-quality level */
+    gl: () => ({ ...renderer.info.render, quality, updateMs: +cpuMs.toFixed(2), renderMs: +gpuMs.toFixed(2) }),
+    tris: () => {
+      const out: Record<string, number> = {};
+      scene.traverseVisible((o) => {
+        const m = o as THREE.Mesh;
+        if (!m.isMesh || !m.geometry) return;
+        const g = m.geometry;
+        const n = (g.index ? g.index.count : g.attributes.position.count) / 3;
+        const k = (m as THREE.InstancedMesh).isInstancedMesh ? (m as THREE.InstancedMesh).count : 1;
+        const key = (m.parent?.name || m.name || m.type).slice(0, 24) + (m.castShadow ? "*" : "");
+        out[key] = (out[key] ?? 0) + Math.round(n * k);
+      });
+      return Object.entries(out).sort((a, b) => b[1] - a[1]).slice(0, 15);
+    },
   };
 }
 

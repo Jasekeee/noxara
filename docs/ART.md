@@ -57,3 +57,13 @@ popper / blaster / shotgun / sniper / grenade throw · hit (yours: pitched tick,
 arpeggio) · poof · chest open (arpeggio + sparkle) · pickup · heal · explosion (noise + sub drop) · storm tick (outside
 the zone, 1/s) · storm warning · victory / defeat stingers · UI click. Distance attenuation from the camera target;
 voice cap 28. Starts only after a user gesture; **M** toggles mute.
+
+## Performance / quality
+DPR capped at 2. Auto quality: if the frame rate stays under 48 FPS, the renderer steps down
+(DPR × 0.8 → 0.65 + no shadows → 0.55 → 0.45). Software rasterizers (SwiftShader / llvmpipe, i.e. headless CI)
+start at level 3 without MSAA. Each bush is one merged mesh; decor is instanced; particles draw only up to the last
+live one; storm ground tint is an annulus (no full-screen overdraw inside the safe zone).
+
+## Dev URL params (in addition to ?e2e / ?autoplay / ?seed=N / ?bots=1)
+`?speed=N` sim speed multiplier · `?cam=N` camera distance · `?q=0..4` force a quality level ·
+`?debugcol` draw sim collision circles. With `?e2e`, `__br.match()`, `__br.gl()` and `__br.tris()` are debug extras.

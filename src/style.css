@@ -118,6 +118,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
   background: var(--storm); padding: 7px 12px; border-radius: 8px;
   animation: blink .6s steps(2) infinite;
 }
+.spec { font: 800 12px/1 var(--font); letter-spacing: .12em; background: rgba(21,17,43,.78); padding: 7px 12px; border-radius: 8px; }
+.spec b { color: var(--gold); }
 @keyframes blink { 50% { opacity: .55; } }
 
 .hud-tr { position: absolute; right: 16px; top: calc(14px + var(--safe-t)); }

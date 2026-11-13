@@ -106,6 +106,14 @@ export class Hud {
     });
 
     const w = watching;
+    this.set("spec", w.idx === me.idx ? "" : w.name, () => {
+      const el = document.getElementById("spec")!;
+      el.classList.toggle("hidden", w.idx === me.idx);
+      el.textContent = "SPECTATING ";
+      const b = document.createElement("b");
+      b.textContent = w.name.toUpperCase();
+      el.appendChild(b);
+    });
     this.set("wname", w.weapon, () => {
       this.wName.textContent = WEAPON_LABEL[w.weapon];
       const ic = this.icons[w.weapon];
@@ -245,7 +253,7 @@ export class Hud {
     c.fill();
     if (st.storm.targetR < st.storm.r) {
       c.strokeStyle = "#fff"; c.lineWidth = 1.5; c.setLineDash([3, 3]);
-      c.beginPath(); c.arc(st.storm.cx * s, st.storm.cy * s, st.storm.targetR * s, 0, Math.PI * 2); c.stroke();
+      c.beginPath(); c.arc((st.storm.tx ?? st.storm.cx) * s, (st.storm.ty ?? st.storm.cy) * s, st.storm.targetR * s, 0, Math.PI * 2); c.stroke();
       c.setLineDash([]);
     }
     for (const ch of st.chests) if (!ch.open) { c.fillStyle = "#ffc93c"; c.fillRect(ch.x * s - 2.5, ch.y * s - 2.5, 5, 5); }

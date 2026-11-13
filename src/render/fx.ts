@@ -66,8 +66,10 @@ export class Particles {
   }
 
   update(dt: number) {
+    let top = 0;
     for (let i = 0; i < MAX_P; i++) {
       if (this.life[i] <= 0) continue;
+      top = i + 1;
       this.life[i] -= dt;
       if (this.life[i] <= 0) {
         _m.makeScale(0, 0, 0);
@@ -85,6 +87,7 @@ export class Particles {
       _m.compose(_v.set(this.px[i], this.py[i], this.pz[i]), _q, _s.set(s, s, s));
       this.mesh.setMatrixAt(i, _m);
     }
+    this.mesh.count = top; // draw only up to the last live particle
     this.mesh.instanceMatrix.needsUpdate = true;
   }
 }

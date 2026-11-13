@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#7fd3e6" />
     <meta name="description" content="Bounty Royale — a 3-minute, 10-fighter island battle royale. Play instantly in your browser." />
     <title>Bounty Royale</title>
@@ -36,6 +36,7 @@
             <span class="storm-dot"></span><span id="storm-text">STORM 1</span><b id="match-time">3:00</b>
           </div>
           <div id="storm-warn" class="storm-warn hidden">OUTSIDE THE SAFE ZONE</div>
+          <div id="spec" class="spec hidden"></div>
         </div>
         <div class="hud-tr">
           <ol id="feed" aria-live="polite"></ol>
@@ -57,7 +58,7 @@
         <div id="hint" class="hint hidden"></div>
         <div id="popup" class="popup"></div>
         <div id="banner" class="banner"></div>
-        <button id="mute" class="icon-btn" aria-label="Mute sound (M)" title="Mute (M)">
+        <button id="mute" class="icon-btn" aria-label="Mute sound (M)" aria-pressed="false" title="Mute (M)">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke-width="2" stroke-linecap="round" /></svg>
         </button>
         <div id="hitmarker" aria-hidden="true"></div>

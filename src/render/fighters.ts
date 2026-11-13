@@ -4,6 +4,7 @@ import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import type { FighterState, WeaponKind } from "../sim/types";
 import { CHARS, WEAPON_MODEL, gltf, model } from "./assets";
 import { FIGHTER_COLORS, PAL } from "./palette";
+import { WEAPONS } from "../sim/rules";
 
 export const CHAR_SCALE = 2.8;
 
@@ -49,9 +50,9 @@ const crownMat = new THREE.MeshStandardMaterial({ color: PAL.gold, emissive: 0xb
 const gemGeo = new THREE.OctahedronGeometry(0.09, 0);
 const gemMat = new THREE.MeshBasicMaterial({ color: 0xff3d6e });
 const aimGeo = (() => {
-  const g = new THREE.PlaneGeometry(0.18, 1, 1, 1);
+  const g = new THREE.PlaneGeometry(0.22, 1, 1, 1);
   g.translate(0, 0.5, 0);
-  g.rotateX(-Math.PI / 2);
+  g.rotateX(Math.PI / 2); // extends along +Z (character forward)
   return g;
 })();
 
@@ -146,7 +147,7 @@ export class FighterView {
     this.root.add(fill);
 
     if (idx === 0) {
-      const aim = new THREE.Mesh(aimGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22, depthWrite: false }));
+      const aim = new THREE.Mesh(aimGeo, new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }));
       aim.position.y = 0.14;
       aim.renderOrder = 3;
       this.root.add(aim);
@@ -299,7 +300,11 @@ export class FighterView {
     while (dy < -Math.PI) dy += Math.PI * 2;
     if (!this.dead) this.yaw += dy * Math.min(1, dt * 22);
     this.body.rotation.y = this.yaw;
-    if (this.aimLine) this.aimLine.rotation.y = this.yaw;
+    if (this.aimLine) {
+      this.aimLine.rotation.y = this.yaw;
+      this.aimLine.scale.z = Math.max(0, WEAPONS[f.weapon].range / 1000 - 0.7);
+      this.aimLine.position.set(Math.sin(this.yaw) * 0.7, 0.14, Math.cos(this.yaw) * 0.7);
+    }
 
     if (!this.dead) {
       this.setLoco(this.speed < 0.4 ? "idle" : this.speed < 5.2 ? "walk" : "sprint");

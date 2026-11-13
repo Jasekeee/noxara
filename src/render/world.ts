@@ -4,6 +4,7 @@ import type { Match, MapData } from "../sim/types";
 import { FP } from "../sim/fixed";
 import { PAL } from "./palette";
 import { bounds, gltf, model } from "./assets";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 const U = 1 / FP; // sim FP -> world units
 
@@ -20,7 +21,7 @@ function rng(seed: number) {
 // ------------------------------------------------------------------ water (persistent)
 
 export function makeWater(): { mesh: THREE.Mesh; uniforms: Record<string, THREE.IUniform> } {
-  const geo = new THREE.PlaneGeometry(420, 420, 140, 140);
+  const geo = new THREE.PlaneGeometry(420, 420, 84, 84);
   geo.rotateX(-Math.PI / 2);
   const uniforms = THREE.UniformsUtils.merge([
     THREE.UniformsLib.fog,
@@ -236,7 +237,8 @@ export class World {
     this.stormWall.renderOrder = 5;
     this.group.add(this.stormWall);
 
-    const gGeo = new THREE.PlaneGeometry(400, 400, 1, 1);
+    // annulus from the safe radius outward (scaled per frame): no full-screen overdraw inside the zone
+    const gGeo = new THREE.RingGeometry(0.98, 40, 96, 1);
     gGeo.rotateX(-Math.PI / 2);
     const gMat = new THREE.ShaderMaterial({
       uniforms: this.stormU,
@@ -368,38 +370,44 @@ export class World {
 
   private buildBushes(map: MapData, seed: number) {
     const rand = rng(seed ^ 0xb055);
+    // One merged mesh per bush (one draw call), own material so it can fade when you hide in it.
     const src = gltf("nature/plant_bushLarge").scene;
-    const src2 = gltf("nature/plant_bushDetailed").scene;
+    src.updateMatrixWorld(true);
+    const parts: { geo: THREE.BufferGeometry; mat: THREE.MeshStandardMaterial; local: THREE.Matrix4 }[] = [];
+    src.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) parts.push({ geo: m.geometry, mat: m.material as THREE.MeshStandardMaterial, local: m.matrixWorld.clone() });
+    });
+    const tmpM = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
     for (const b of map.bushes) {
       const r = b.r * U;
       const group = new THREE.Group();
       group.position.set(b.x * U, 0, b.y * U);
       const mats: THREE.MeshStandardMaterial[] = [];
-      const matMap = new Map<THREE.Material, THREE.MeshStandardMaterial>();
       const n = Math.max(3, Math.round(r * r * 1.6));
-      for (let k = 0; k < n; k++) {
-        const piece = (k % 3 === 2 ? src2 : src).clone(true);
-        piece.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (!m.isMesh) return;
-          const base = m.material as THREE.MeshStandardMaterial;
-          let c = matMap.get(base);
-          if (!c) {
-            c = base.clone();
-            c.color.offsetHSL(0.0, 0.04, -0.04);
-            matMap.set(base, c);
-            mats.push(c);
-          }
-          m.material = c;
-          m.castShadow = true;
-        });
-        const a = (k / n) * Math.PI * 2 + rand() * 0.6;
-        const d = k === 0 ? 0 : r * (0.3 + rand() * 0.3);
-        const pr = r * (0.5 + rand() * 0.15);
-        piece.scale.setScalar(fitScale("nature/plant_bushLarge", pr) * (0.9 + rand() * 0.3));
-        piece.position.set(Math.cos(a) * d, 0, Math.sin(a) * d);
-        piece.rotation.y = rand() * Math.PI * 2;
-        group.add(piece);
+      for (const part of parts) {
+        const geos: THREE.BufferGeometry[] = [];
+        const r2 = rng(seed ^ 0xb055 ^ Math.round(b.x));
+        for (let k = 0; k < n; k++) {
+          const a = (k / n) * Math.PI * 2 + r2() * 0.6;
+          const d = k === 0 ? 0 : r * (0.3 + r2() * 0.3);
+          const pr = r * (0.5 + r2() * 0.15);
+          const s = fitScale("nature/plant_bushLarge", pr) * (0.9 + r2() * 0.3);
+          q.setFromAxisAngle(up, r2() * Math.PI * 2);
+          tmpM.compose(v.set(Math.cos(a) * d, 0, Math.sin(a) * d), q, sc.set(s, s * (0.85 + r2() * 0.3), s)).multiply(part.local);
+          geos.push(part.geo.clone().applyMatrix4(tmpM));
+        }
+        const merged = mergeGeometries(geos, false);
+        for (const g of geos) g.dispose();
+        if (!merged) continue;
+        const mat = part.mat.clone();
+        mat.color.offsetHSL(0.0, 0.04, -0.04 - rand() * 0.03);
+        mats.push(mat);
+        const mesh = new THREE.Mesh(merged, mat);
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+        this.owned.push(merged);
       }
       this.group.add(group);
       this.bushes.push({ x: b.x * U, z: b.y * U, r, group, mats, rustle: 0, fade: 0, phase: rand() * 10 });
@@ -530,12 +538,14 @@ export class World {
     this.stormU.uR.value = R;
     (this.stormU.uC.value as THREE.Vector2).set(st.storm.cx * U, st.storm.cy * U);
     this.stormWall.scale.set(R, 1, R);
+    this.stormGround.scale.set(R, 1, R);
+    this.stormGround.position.set(st.storm.cx * U, 0.11, st.storm.cy * U);
     this.stormWall.position.set(st.storm.cx * U, 0, st.storm.cy * U);
     this.stormWall.visible = R < this.radius - 0.3;
     const tR = st.storm.targetR * U;
     this.nextRing.visible = tR < R - 0.05;
     this.nextRing.scale.set(tR, 1, tR);
-    this.nextRing.position.set(st.storm.cx * U, 0.08, st.storm.cy * U);
+    this.nextRing.position.set((st.storm.tx ?? st.storm.cx) * U, 0.14, (st.storm.ty ?? st.storm.cy) * U);
     (this.nextRing.material as THREE.MeshBasicMaterial).opacity = 0.45 + Math.sin(time * 5) * 0.25;
 
     // bushes
