@@ -2,7 +2,7 @@
 
 ***Only one walks out.***
 
-**A 3-minute top-down battle royale on a tiny island at dusk: you against 9 AI fighters who are persistent characters with their own NEAR wallets.** They pay to enter, keep what they win, buy upgrades that change how they fight, and retire when they go broke — a rookie takes the empty slot. The richest one carries a bounty. Players can sponsor a fighter and share its winnings. No dev patch needed: the economy moves on its own.
+**A 3-minute top-down battle royale on a tiny island at dusk: you against 9 AI fighters who are persistent characters with their own NEAR wallets.** They pay to enter, keep what they win, buy upgrades that change how they fight, and retire when they go broke — a rookie takes the empty slot. The richest one carries a bounty. Fans can own shares of a fighter and earn from its profit. No dev patch needed: the economy moves on its own.
 
 Track: **Games** (NEAR HACKATHON). Status: **playable on NEAR testnet** — every match is seeded on chain, re-verified by replaying its inputs, and settled on chain. Token: **Nox (NOX)**, play-money only.
 
@@ -16,16 +16,20 @@ Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for 
 
 | Do | See |
 |---|---|
-| WASD / arrows to move, mouse to aim, hold click to shoot (phone: left stick moves, right stick aims + fires) | Your fighter with a ring under it; shots, muzzle flashes, damage numbers, screen shake |
+| WASD / arrows to move; click or Space to fire — keep the mouse still and it **auto-aims** at the nearest visible enemy, move the mouse to aim yourself (light ±8° assist). Phone: left stick moves, **tap** the right side to auto-aim and fire, drag it to aim | Your fighter with a ring under it; an aim line (red ring on a locked target), shots, muzzle flashes, damage numbers, screen shake. Aim assist is only input: the recorded aim angle replays bit-for-bit |
+| Press **Esc / P** or the ⏸ button | Menu: Resume, Sound, Aim assist, Controls, Exit (exit counts as a loss; offline practice truly pauses) |
 | Walk into a crate with a gold beam | It bursts: blaster, shotgun, sniper or grenades |
 | Step into a bush | "HIDDEN": enemies can't see you unless they're very close or you shoot |
 | Watch the glowing wall | The storm shrinks toward the next circle; outside it you take damage |
 | Find the crown | The bounty carrier — the richest fighter. Killing it pays its bounty |
 | Last one standing | Your place out of 10, kills, damage; the ledger shows every fighter's wallet change, then **Verified** once the match is settled on chain |
-| Open **Fighters** | Each fighter's wallet, record, upgrades and story; the **Hall of the Broke** lists retired fighters and the rookies who replaced them |
+| Open **Fighters** | Each fighter's **real NEAR account** (e.g. `brindle.royale.br-7e8492.testnet`, explorer link — no keys), wallet, record, upgrades and story; the **Hall of the Broke** lists retired fighters and the rookies who replaced them |
 | Open **Leaderboard** | Top fighters and players by wins, kills, earnings |
 | **Sign in** with a NEAR wallet (one approval, then gasless) | A one-time welcome entry credit (pays entry fees only, not transferable), XP and unlocks, real NOX prizes |
-| **Sponsor** a fighter (signed-in) | You own a share of its bankroll and get 10% of every prize or bounty it wins, split by shares |
+| Open **ECONOMY** | Live supply, burned, House treasury vs target, reward multiplier m, bots by P&L, share prices and dividends, season standings |
+| Buy a fighter's **IPO shares** (signed-in, gasless) | You own part of it: 20% of its *profit* (above its high-water mark) flows to holders; shares go to zero if it goes bankrupt. Listing / buying on the market needs one wallet confirmation |
+| Open **DAILY** | Today's tournament island (same seed for everyone, free), its leaderboard; signed-in: a **check-in streak** and **daily quests** verified on chain, paid by the House (never minted, only matches paid from your own NOX count) |
+| End screen → **Challenge a friend** | A link (with a link preview) that replays your exact island for a friend; the results page compares both runs, both re-verified by replay |
 
 Guests play everything but earn **zero** NOX — only signed-in NEAR accounts can earn.
 
@@ -60,7 +64,7 @@ The in-game page "HOW NEAR POWERS NOXARA" shows the same list with live explorer
 - **Deterministic match simulation** (`src/sim/`, pure TypeScript): 20 Hz fixed tick, integer fixed-point math, pre-computed trig tables, one seeded PRNG. The browser renders it at 60 FPS (three.js) with interpolation; Node runs the exact same code.
 - **Re-verifiable matches:** a match is its seed + the human's inputs. The match server replays the input log before settling; `npm run verify-match <file>` lets anyone replay it offline and check the result hash.
 - **Bots:** utility AIs with personalities (aggressive, camper, sniper, looter, coward, balanced) that loot, rotate with the storm, hide in bushes and steal last hits. Upgrades bought with their winnings change their stats.
-- **Contract** (`contracts/royale`, Rust, near-sdk): NOX (NEP-141/145/148), entries/pot/bounty, upgrades, retirements and rookies, sponsorship market, on-chain progression, match history. Details and every testnet tx: `docs/CHAIN.md`.
+- **Contract** (`contracts/royale`, Rust, near-sdk): NOX (NEP-141/145/148), entries/pot/bounty, upgrades, retirements and rookies (protected for their first 10 matches), the House rule (economy v2, nothing minted after genesis), bot shares (NEP-245 subset) with a fixed-price market, seasons, daily check-in and quests, on-chain progression, match history. Details and every testnet tx: `docs/CHAIN.md`.
 - **Trust model (honest):** the server computes, the chain records, anyone can re-verify. Settlement proves the result is consistent with the recorded inputs — not that a human played them. NOX is play-money.
 
 ## Verify it yourself
@@ -70,13 +74,15 @@ npm run verify                             # checks every claim in this README, 
 npm run verify-match matches/demo-1.json   # PASS: result reproduced from the input log
 npm run sim -- 300                         # 300 bot-only matches: no personality wins > 40%
 npm run test:e2e                           # a guest plays a full match on desktop + phone, 0 console errors, axe a11y
+node scripts/econ-sim-v2.ts                # 20 x 10,000 matches of the economy: PASS criteria + charts in docs/econ/
+npm test --prefix relayer                  # match server, relayer, challenge + daily tournament
 (cd contracts/royale && cargo test)        # contract unit + sandbox tests
 ```
 
 ## Roadmap
-- Live PvP lobbies (humans + AI fighters in one match).
-- Cosmetics shop, battle pass, sponsored tournaments.
-- No real-money wagering anywhere.
+- **Live PvP lobbies** (humans + AI fighters in one match) — next step.
+- No real-money wagering anywhere; NOX is play-money and is not launched or traded (docs/DECISIONS.md).
+- Cosmetics shop, battle pass, sponsored tournaments, licensing the AI athletes.
 
 ## Mainnet
 Prepared, not deployed: `docs/MAINNET.md` (accounts, cost, steps, teardown). It goes live only after an independent security audit passes and the owner says yes.

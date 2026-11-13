@@ -81,6 +81,13 @@ await check(`Balance: ${BALANCE_N} bot-only matches, no personality wins >40%, a
     : ["FAIL", fails.join("; ") || lastLines(r.out)];
 });
 
+await check("Economy v2: simulated matches pass every criterion (no minting after genesis, solvent House, rich bots fall, rookies rise)", () => {
+  const r = run(process.execPath, [join(ROOT, "scripts", "econ-sim-v2.ts"), "--runs", "6", "--out", join(ROOT, "node_modules", ".cache", "noxara-econ-verify")]);
+  const out = plain(r.out);
+  const fails = out.split("\n").filter((l) => l.startsWith("FAIL ")).length;
+  return [r.ok ? "PASS" : "FAIL", r.ok ? "econ-sim-v2: 6 runs x 10,000 matches, all checks PASS (README/ECONOMY.md figures use 20 runs)" : `econ-sim-v2: ${fails} check(s) FAIL`];
+});
+
 await check("Match server: signature checks, replay judge, relay policy (relayer node tests)", () => {
   if (!existsSync(join(ROOT, "relayer", "node_modules")))
     return ["FAIL", "relayer dependencies missing: run `cd relayer && npm ci` first"];
@@ -122,7 +129,7 @@ try {
 }
 const CHAIN_CLAIMS = [
   `Contract ${CONTRACT} is deployed on testnet`,
-  "Every bot fighter account has 0 access keys (only the contract's rules move its $BOUNTY)",
+  "Every bot fighter account has 0 access keys (only the contract's rules move its NOX)",
   "The latest settled match is recorded on chain with its input-log hash",
 ];
 if (!online) {
