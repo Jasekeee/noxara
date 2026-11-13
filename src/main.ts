@@ -6,7 +6,7 @@ import { botInput } from "./sim/ai";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
 import { WEAPONS } from "./sim/rules";
-import { loadAll } from "./render/assets";
+import { HUMAN_SKIN_IDS, charFor, loadAll } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
 import { Fx } from "./render/fx";
@@ -16,7 +16,11 @@ import { Controls } from "./input/input";
 import { Hud } from "./ui/hud";
 import { sfx } from "./audio/sfx";
 import { createGameClient } from "./net/client";
-import type { FighterInfo, GameClient, SettleResult, StartResult } from "./net/api";
+import type { FighterInfo, GameClient, GameClientT3, SettleResult, StartResult } from "./net/api";
+import { withMock } from "./ui/mock";
+import { Pages } from "./ui/pages";
+import { levelBadge, localXp, renderXp, setLocalXp } from "./ui/progress";
+import { levelProgress, upgradesForLevel, xpForMatch } from "./sim/progression";
 import type { MatchConfig } from "./sim/types";
 import { lobbySkeleton, renderLobby } from "./ui/lobby";
 import { renderLedger } from "./ui/ledger";
@@ -29,6 +33,7 @@ const E2E = params.has("e2e");
 const AUTOPLAY = params.has("autoplay");
 const SKIP_TITLE = params.get("bots") === "1";
 const CAM_DIST = Number(params.get("cam") ?? 0) || 0;
+const MOCK = params.has("mock");
 const SPEED = Math.max(0.25, Math.min(16, Number(params.get("speed") ?? 1) || 1));
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -173,12 +178,21 @@ function localSeed(): number {
 let client: GameClient | null = null;
 // ?seed=N is a deterministic local match (tests / replays): no network at all.
 const clientP: Promise<GameClient | null> =
-  SEED_PARAM !== null ? Promise.resolve(null) : createGameClient().then((c) => (client = c)).catch(() => null);
+  SEED_PARAM !== null
+    ? Promise.resolve(null)
+    : createGameClient()
+        .then((c) => (client = MOCK ? withMock(c) : c))
+        .catch(() => null);
+const isT3 = (c: GameClient | null): c is GameClientT3 => !!c && "signIn" in c;
 let fighters: FighterInfo[] = [];
 let portraits: string[] = [];
+let skinPortraits: string[] = [];
 let current: StartResult | null = null;
 let settleState: SettleResult | "pending" | null = null;
 let starting = false;
+let iClaimedBounty = false;
+let xpBefore = 0;
+let xpAfter = 0;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
@@ -204,10 +218,85 @@ async function refreshLobby() {
   mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) renderLobby($("roster"), fighters, portraits);
+  await refreshAccount();
 }
+
+// ------------------------------------------------------------------ account / level
+let myXp = localXp();
+async function refreshAccount() {
+  const c = client;
+  const t3 = isT3(c) && c.mode === "chain";
+  const guest = !c || c.isGuest();
+  $("signin").classList.toggle("hidden", !t3 || !guest);
+  $("acct-chip").classList.toggle("hidden", !t3 || guest);
+  $("nav-sponsor").classList.toggle("hidden", !t3);
+  if (t3 && !guest) {
+    $("acct-name").textContent = await c.account().catch(() => "");
+    const b = await c.balance().catch(() => 0);
+    $("acct-bal").textContent = `${fmt(b)} $BOUNTY`;
+    const p = await c.progress().catch(() => null);
+    if (p) myXp = p.xp;
+  } else myXp = localXp();
+  levelBadge($("lv-badge"), myXp);
+  levelBadge($("lv-chip"), myXp);
+}
+async function signIn() {
+  const c = client;
+  if (!isT3(c)) return;
+  const btn = $("signin") as HTMLButtonElement;
+  btn.disabled = true;
+  try {
+    await c.signIn();
+    sfx.chest();
+    toast("Signed in — your matches now earn $BOUNTY");
+  } catch {
+    toast("Sign-in was cancelled");
+  }
+  btn.disabled = false;
+  await refreshLobby();
+}
+let toastT = 0;
+function toast(text: string) {
+  const el = $("toast");
+  el.textContent = text;
+  el.classList.remove("show");
+  void el.offsetWidth;
+  el.classList.add("show");
+  clearTimeout(toastT);
+  toastT = window.setTimeout(() => el.classList.remove("show"), 3200);
+}
+const pages = new Pages({
+  client: () => client,
+  fighters: () => fighters,
+  portrait: (f) => portraits[f.slot + 1] ?? "",
+  refresh: refreshLobby,
+  signIn,
+  toast,
+  sfx: (k) => (k === "coin" ? sfx.heal() : sfx.ui()),
+});
+$("signin").addEventListener("click", () => void signIn());
+$("signout").addEventListener("click", async () => {
+  if (isT3(client)) await client.signOut().catch(() => {});
+  await refreshLobby();
+});
+$("nav-fighters").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.fighters(); });
+$("nav-board").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.leaderboard(); });
+$("nav-sponsor").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.sponsorships(); });
+$("roster").addEventListener("click", (e) => {
+  const li = (e.target as HTMLElement).closest<HTMLElement>("[data-acct]");
+  const f = li && fighters.find((x) => x.account === li.dataset.acct);
+  if (f) { sfx.ui(); pages.profile(f); }
+});
+$("roster").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const li = (e.target as HTMLElement).closest<HTMLElement>("[data-acct]");
+  const f = li && fighters.find((x) => x.account === li.dataset.acct);
+  if (f) { e.preventDefault(); pages.profile(f); }
+});
 
 function localStart(): StartResult {
   const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
+  if (SEED_PARAM === null) cfg.fighters[0].upgrades = upgradesForLevel(levelProgress(myXp).level); // your level's gear (offline)
   const b = cfg.fighters.findIndex((f) => f.bounty);
   return { matchId: `local-${cfg.seed}`, cfg, pot: 0, bountyIdx: b >= 0 ? b : null, bountyValue: 0, playerPaid: 0, tx: null };
 }
@@ -224,7 +313,7 @@ function buildMatch(cfg: MatchConfig) {
   const tags = $("tags");
   const bv = current?.bountyValue ?? 0;
   views = match.state.fighters.map((f, i) => {
-    const v = new FighterView(i, f, tags);
+    const v = new FighterView(i, f, tags, cfg.fighters[i].upgrades.skin);
     if (f.bounty) v.setBountyValue(bv);
     scene.add(v.root);
     return v;
@@ -246,6 +335,7 @@ async function startMatch() {
   if (starting) return;
   starting = true;
   endOpen = false;
+  iClaimedBounty = false;
   phase = "playing"; // the drop-in is part of the match flow (tick stays 0 until the island is built)
   sfx.start();
   sfx.ui();
@@ -404,6 +494,7 @@ function onEvents(evs: SimEvent[]) {
         break;
       }
       case "bounty": {
+        if (e.by === 0) iClaimedBounty = true;
         const val = current && current.bountyValue > 0 ? `THE ${fmt(current.bountyValue)} $BOUNTY BOUNTY` : "THE BOUNTY";
         hud.banner(`${nameOf(e.by)!.toUpperCase()} CLAIMED ${val} ON ${nameOf(e.who)!.toUpperCase()}!`, "gold");
         hud.feedBounty(nameOf(e.by)!, nameOf(e.who)!, current?.bountyValue ?? 0, e.by === 0);
@@ -506,6 +597,14 @@ function stepSim() {
       placements: st.fighters.map((f) => f.placement),
     };
     phase = "over";
+    {
+      const me = st.fighters[0];
+      const gained = xpForMatch(me.placement || 1, me.kills, iClaimedBounty);
+      xpBefore = myXp;
+      xpAfter = myXp + gained;
+      myXp = xpAfter;
+      if (!(isT3(client) && client.mode === "chain" && !client.isGuest())) setLocalXp(xpAfter);
+    }
     const rec = record;
     const cur = current;
     if (client && cur && !cur.matchId.startsWith("local-")) {
@@ -583,6 +682,21 @@ function showEnd(force: boolean) {
   $("spectate").classList.toggle("hidden", st.over);
   $("to-lobby").classList.toggle("hidden", !st.over);
   drawLedger();
+  const xb = $("xp-box");
+  xb.classList.toggle("hidden", !st.over || SEED_PARAM !== null && AUTOPLAY);
+  if (st.over) {
+    renderXp(xb, xpBefore, xpAfter, (lvl, unlocks) => {
+      sfx.levelUp();
+      const lu = $("levelup");
+      lu.textContent = `LEVEL ${lvl}!`;
+      lu.classList.remove("show");
+      void lu.offsetWidth;
+      lu.classList.add("show");
+      if (unlocks.length) toast(`Unlocked: ${unlocks[0]}`);
+    });
+    levelBadge($("lv-badge"), xpAfter);
+    levelBadge($("lv-chip"), xpAfter);
+  }
   $("hud").classList.add("hidden");
   el.classList.remove("hidden");
   endOpen = true;
@@ -828,8 +942,9 @@ async function boot() {
   void clientP.then(() => refreshLobby());
   const fill = $("loadfill");
   await loadAll((p) => (fill.style.width = `${Math.round(p * 100)}%`));
-  hud.icons = makeWeaponIcons(renderer);
-  portraits = makePortraits(renderer);
+  hud.icons = await makeWeaponIcons(renderer);
+  portraits = await makePortraits(renderer);
+  skinPortraits = await makePortraits(renderer, HUMAN_SKIN_IDS.map((id) => charFor(0, id)));
   hud.portraits = portraits;
   if (fighters.length) renderLobby($("roster"), fighters, portraits);
   buildMatch(localStart().cfg);

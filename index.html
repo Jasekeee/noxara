@@ -32,6 +32,7 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 3l7 7-2 2-7-7zM20 3l-7 7 2 2 7-7zM6.5 13.5l4 4-2.5 2.5-1.5-1.5-2 2-1.5-1.5 2-2L3.5 15.5zM17.5 13.5l-4 4 2.5 2.5 1.5-1.5 2 2 1.5-1.5-2-2 1.5-1.5z" /></svg>
             <b id="kills">0</b><span>kills</span>
           </div>
+          <div class="chip lv" id="lv-chip" title="Your level"></div>
           <div class="chip pot hidden" id="pot-chip" title="Prize pot ($BOUNTY) — paid to the winner">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10" /></svg>
             <b id="pot">0</b><span>$BOUNTY pot</span>
@@ -85,6 +86,11 @@
 
       <!-- title -->
       <section id="title" class="screen" aria-labelledby="logo">
+        <div class="acct-bar">
+          <span id="lv-badge" class="lv-badge"></span>
+          <button id="signin" class="btn-near hidden">Sign in with NEAR <small>earn $BOUNTY</small></button>
+          <div id="acct-chip" class="acct-chip hidden"><span id="acct-name"></span><b id="acct-bal"></b><button id="signout" class="link-btn">Sign out</button></div>
+        </div>
         <div class="title-inner">
           <h1 id="logo" class="logo"><span class="l1">BOUNTY</span><span class="l2">ROYALE</span></h1>
           <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the pot.</p>
@@ -96,11 +102,27 @@
           <div class="lobby-head">
             <h2 id="lobby-title">TONIGHT'S FIGHTERS</h2>
             <span id="net-mode" class="net-mode">connecting…</span>
+            <span class="lobby-nav">
+              <button id="nav-fighters" class="btn-chip">FIGHTERS</button>
+              <button id="nav-board" class="btn-chip">LEADERBOARD</button>
+              <button id="nav-sponsor" class="btn-chip hidden">MY SPONSORSHIPS</button>
+            </span>
           </div>
           <ol id="roster" class="roster" tabindex="0" aria-label="AI fighters and their wallets"></ol>
         </div>
       </section>
 
+      <section id="page" class="page hidden" role="dialog" aria-modal="true" aria-labelledby="page-title">
+        <header class="page-head">
+          <button id="page-back" class="btn-chip" aria-label="Back">← BACK</button>
+          <h2 id="page-title">FIGHTERS</h2>
+          <div id="page-tabs" class="tabs" role="tablist"></div>
+        </header>
+        <div id="page-body" class="page-body"></div>
+      </section>
+      <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="modal-card" id="modal-card"></div></div>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
       <div id="dropping" class="dropping hidden" role="status" aria-live="polite">
         <div class="drop-inner"><div class="drop-spin" aria-hidden="true"></div><b>DROPPING IN</b><span id="drop-sub">sealing the match seed on NEAR…</span></div>
       </div>
@@ -116,6 +138,8 @@
             <div><b id="end-dmg">0</b><span>damage</span></div>
             <div><b id="end-time">0:00</b><span>survived</span></div>
           </div>
+          <div id="xp-box" class="xpbox hidden" aria-live="polite"></div>
+          <div id="levelup" class="levelup" aria-hidden="true">LEVEL UP!</div>
           <div id="ledger" class="ledger"></div>
           <div class="end-btns">
             <button id="again" class="btn-primary">PLAY AGAIN</button>

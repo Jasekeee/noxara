@@ -4,7 +4,7 @@ import type { WeaponKind } from "../sim/types";
 import * as SkeletonUtils from "three/examples/jsm/utils/SkeletonUtils.js";
 import { CHARS, WEAPON_MODEL, gltf, model } from "./assets";
 
-export function makeWeaponIcons(renderer: THREE.WebGLRenderer): Record<WeaponKind, string> {
+export async function makeWeaponIcons(renderer: THREE.WebGLRenderer): Promise<Record<WeaponKind, string>> {
   const W = 192, H = 96;
   const rt = new THREE.WebGLRenderTarget(W, H, { colorSpace: THREE.SRGBColorSpace });
   const scene = new THREE.Scene();
@@ -43,7 +43,7 @@ export function makeWeaponIcons(renderer: THREE.WebGLRenderer): Record<WeaponKin
     renderer.setRenderTarget(rt);
     renderer.clear();
     renderer.render(scene, cam);
-    renderer.readRenderTargetPixels(rt, 0, 0, W, H, px);
+    await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H, px); // async PBO readback: no GPU stall
     const img = ctx.createImageData(W, H);
     for (let y = 0; y < H; y++) img.data.set(px.subarray((H - 1 - y) * W * 4, (H - y) * W * 4), y * W * 4);
     ctx.putImageData(img, 0, 0);
@@ -57,7 +57,7 @@ export function makeWeaponIcons(renderer: THREE.WebGLRenderer): Record<WeaponKin
 }
 
 /** Head-and-shoulders portrait of every character (idle pose), as PNG data URLs, indexed like CHARS. */
-export function makePortraits(renderer: THREE.WebGLRenderer): string[] {
+export async function makePortraits(renderer: THREE.WebGLRenderer, names: string[] = CHARS): Promise<string[]> {
   const S = 160;
   const rt = new THREE.WebGLRenderTarget(S, S, { colorSpace: THREE.SRGBColorSpace });
   const scene = new THREE.Scene();
@@ -76,7 +76,7 @@ export function makePortraits(renderer: THREE.WebGLRenderer): string[] {
   const prevTarget = renderer.getRenderTarget();
   const prevAlpha = renderer.getClearAlpha();
   renderer.setClearColor(0x000000, 0);
-  for (const c of CHARS) {
+  for (const c of names) {
     const g = gltf(`chars/${c}`);
     const body = SkeletonUtils.clone(g.scene);
     body.rotation.y = -0.35;
@@ -90,7 +90,7 @@ export function makePortraits(renderer: THREE.WebGLRenderer): string[] {
     renderer.setRenderTarget(rt);
     renderer.clear();
     renderer.render(scene, cam);
-    renderer.readRenderTargetPixels(rt, 0, 0, S, S, px);
+    await renderer.readRenderTargetPixelsAsync(rt, 0, 0, S, S, px);
     const img = ctx.createImageData(S, S);
     for (let y = 0; y < S; y++) img.data.set(px.subarray((S - 1 - y) * S * 4, (S - y) * S * 4), y * S * 4);
     ctx.putImageData(img, 0, 0);

@@ -15,6 +15,10 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
   for (const f of active) {
     const idx = f.slot + 1;
     const li = h("li", "fcard" + (f.bounty ? " bounty" : "") + (f.generation > 0 ? " rookie" : ""));
+    li.dataset.acct = f.account;
+    const open = h("button", "fc-open");
+    open.setAttribute("aria-label", `${f.name}: open profile`);
+    li.appendChild(open);
     li.style.setProperty("--pc", PERSONALITY_COLOR[f.personality] ?? "#fff");
     const img = h("img", "fc-face");
     img.alt = "";
