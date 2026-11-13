@@ -55,12 +55,74 @@ test("settle signing matches the server's protocol", async () => {
   assert.equal(settleSignatureOk(srvSettleMessage("12", srvLogHash(inputs)), k.publicKey, sig), true);
 });
 
-test("offline fallback: unreachable relayer -> local play, unverified settle", async () => {
-  const c = await createGameClient({ relayer: "http://127.0.0.1:9", contract: "royale.t" });
+import http from "node:http";
+import { SIM_VERSION } from "../../src/sim/types.ts";
+
+/** A fake relayer that only answers /api/health. */
+async function fakeHealth(body: Record<string, unknown>): Promise<{ url: string; close: () => void }> {
+  const srv = http.createServer((_req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify(body));
+  });
+  await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+  const port = (srv.address() as { port: number }).port;
+  return { url: `http://127.0.0.1:${port}`, close: () => srv.close() };
+}
+
+/** Run `f` and fail if it writes anything to console.warn / console.error / console.log. */
+async function silently<T>(f: () => Promise<T>): Promise<T> {
+  const calls: unknown[] = [];
+  const orig = { warn: console.warn, error: console.error, log: console.log };
+  console.warn = console.error = console.log = (...a: unknown[]) => void calls.push(a);
+  try {
+    return await f();
+  } finally {
+    Object.assign(console, orig);
+    assert.deepEqual(calls, [], "no console output");
+  }
+}
+
+test("version guard: a server with another sim version -> offline with a reason", async () => {
+  const h = await fakeHealth({ ok: true, game: "royale.t", simVersion: "r0-old" });
+  try {
+    const c = await silently(() => createGameClient({ relayer: h.url, contract: "royale.t" }));
+    assert.equal(c.mode, "offline");
+    assert.equal(c.offlineReason, "sim_version_mismatch");
+  } finally {
+    h.close();
+  }
+});
+
+test("version guard: an old server without simVersion is a mismatch too; wrong contract has its own reason", async () => {
+  const a = await fakeHealth({ ok: true, game: "royale.t" });
+  const b = await fakeHealth({ ok: true, game: "other.t", simVersion: SIM_VERSION });
+  try {
+    assert.equal((await createGameClient({ relayer: a.url, contract: "royale.t" })).offlineReason, "sim_version_mismatch");
+    assert.equal((await createGameClient({ relayer: b.url, contract: "royale.t" })).offlineReason, "wrong_contract");
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+test("a matching server -> chain mode, no offline reason", async () => {
+  const h = await fakeHealth({ ok: true, game: "royale.t", simVersion: SIM_VERSION });
+  try {
+    const c = await silently(() => createGameClient({ relayer: h.url, contract: "royale.t" }));
+    assert.equal(c.mode, "chain");
+    assert.equal(c.offlineReason, undefined);
+  } finally {
+    h.close();
+  }
+});
+
+test("offline fallback: unreachable relayer -> local play, unverified settle, no console noise", async () => {
+  const c = await silently(() => createGameClient({ relayer: "http://127.0.0.1:9", contract: "royale.t" }));
   assert.equal(c.mode, "offline");
+  assert.equal(c.offlineReason, "relayer_unreachable");
   assert.equal(await c.account(), "you");
   assert.equal(c.isGuest(), true);
-  const fs = await c.fighters();
+  const fs = await silently(() => c.fighters());
   assert.equal(fs.length, 9);
   assert.equal(fs.filter((f) => f.bounty).length, 1);
   const s = await c.startMatch();
@@ -68,7 +130,7 @@ test("offline fallback: unreachable relayer -> local play, unverified settle", a
   assert.equal(s.cfg.fighters.length, 10);
   assert.ok(s.cfg.seed > 0);
   assert.equal(s.tx, null);
-  const r = await c.settle(s.matchId, { version: 1, cfg: s.cfg, inputs: [], hash: "x", winner: 3, placements: [] });
+  const r = await silently(() => c.settle(s.matchId, { version: 1, cfg: s.cfg, inputs: [], hash: "x", winner: 3, placements: [] }));
   assert.deepEqual(r, { tx: null, verified: false, winner: 3, payouts: [], retired: [], rookies: [], upgrades: [] });
   assert.match(c.explorerTx("abc"), /txns\/abc$/);
 });
