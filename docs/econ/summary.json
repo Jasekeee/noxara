@@ -1,0 +1,129 @@
+{
+  "generatedAt": "2026-11-13T20:01:25.898Z",
+  "matches": 10000,
+  "runs": 20,
+  "seed": 1,
+  "params": {
+    "_doc": "Economy v2 parameters. Read by scripts/econ-sim-v2.ts AND asserted equal to the contract constants by contracts/royale tests (econ_params_match_the_simulator). NOX amounts are whole NOX; bps = 1/10000.",
+    "ENTRY": 4,
+    "WEALTH_BPS": 200,
+    "MAX_ENTRY": 16,
+    "RESERVE": 50,
+    "ENTRY_BURN_BPS": 1000,
+    "BASE_TOP_UP": 25,
+    "BASE_BURN_BPS": 100,
+    "MAX_BURN_BPS": 400,
+    "BASE_HOUSE_BPS": 500,
+    "MAX_HOUSE_BPS": 1500,
+    "BOUNTY_BPS": 1500,
+    "BOUNTY_BONUS": 5,
+    "M_MIN_BPS": 5000,
+    "M_MAX_BPS": 15000,
+    "HOUSE_TARGET": 1000,
+    "HOUSE_FLOOR": 500,
+    "HOUSE_GENESIS": 2000,
+    "STARTER": 100,
+    "S_TARGET": 2900,
+    "S_MIN": 2300,
+    "UPKEEP": [
+      [
+        150,
+        100
+      ],
+      [
+        300,
+        200
+      ],
+      [
+        600,
+        400
+      ]
+    ],
+    "UPKEEP_HOUSE_BPS": 5000,
+    "WEAPON": [
+      60,
+      120
+    ],
+    "ARMOR": [
+      90,
+      180
+    ],
+    "SKIN": 150,
+    "UPGRADE_BURN_BPS": 5000,
+    "SHARES_PER_BOT": 1000,
+    "IPO_SHARES": 300,
+    "IPO_PRICE_PER_SHARE_MILLI": 100,
+    "DIVIDEND_BPS": 2000,
+    "TRADE_TAX_BPS": 200,
+    "DAILY_FULL_WINS": 3,
+    "DAILY_HALF_WINS": 3,
+    "WELCOME_CREDIT": 30,
+    "SEASON_MS": 172800000,
+    "SEASON_EPOCH_MS": 1794614400000,
+    "EMA_DIV": 16
+  },
+  "assumptions": {
+    "HUMAN_WIN": 0.08,
+    "EDGE": 0.12,
+    "BOUNTY_KILL_P": 0.75,
+    "GUEST_P": 0.7,
+    "PLAYERS": 60,
+    "MATCHES_PER_DAY": 300,
+    "IPO_BUY_P": 0.6,
+    "TRADE_P": 0.05,
+    "COSMETIC_P": 0.02
+  },
+  "checks": [
+    {
+      "name": "no minting after genesis",
+      "ok": true,
+      "value": "0 minted"
+    },
+    {
+      "name": "supply falls ≤25% and plateaus",
+      "ok": true,
+      "value": "min 79.4% of genesis, last-10% drift -0.00%"
+    },
+    {
+      "name": "house never below floor >200 matches in a row",
+      "ok": true,
+      "value": "worst streak 0"
+    },
+    {
+      "name": "house median within target ±30%",
+      "ok": true,
+      "value": "median 725 vs target 1000"
+    },
+    {
+      "name": "reward multiplier within 0–1.5, smooth",
+      "ok": true,
+      "value": "range 0.13–1.21, max step 0.036"
+    },
+    {
+      "name": "median bot life 30–150 matches",
+      "ok": true,
+      "value": "median 55 (n=17282)"
+    },
+    {
+      "name": "≥25% of the top-3 at 20% fall out by 40%",
+      "ok": true,
+      "value": "100%"
+    },
+    {
+      "name": "≥20% of rookies reach the top-3 within 300 matches",
+      "ok": true,
+      "value": "86%"
+    },
+    {
+      "name": "Gini of bot wealth 0.20–0.50 (2nd half)",
+      "ok": true,
+      "value": "0.244"
+    },
+    {
+      "name": "share portfolio ROI (every IPO bought) −30%…+40%",
+      "ok": true,
+      "value": "-8% (median single IPO -59%: most rookies fail, a few pay off)"
+    }
+  ],
+  "pass": true
+}
