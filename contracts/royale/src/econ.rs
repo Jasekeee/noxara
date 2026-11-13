@@ -382,7 +382,11 @@ impl Contract {
         // refunds of abandoned/expired matches never count as profit; the payout comes from the wallet
         let bal = self.bankroll(bot);
         if bal > b.hwm.0 && b.sold > 0 && !b.bankrupt {
-            let per_share = ((bal - b.hwm.0) * DIVIDEND_BPS / 10_000).min(self.balance(bot)) / SHARES_PER_BOT as u128;
+            // the cut is paid from the wallet; if the wallet can't cover it now (most of the bankroll sits in
+            // other matches), the mark only moves by the profit actually distributed, so holders get the
+            // rest at a later settle (review: no profit is skipped)
+            let full = (bal - b.hwm.0) * DIVIDEND_BPS / 10_000;
+            let per_share = full.min(self.balance(bot)) / SHARES_PER_BOT as u128;
             let total = per_share * b.sold as u128;
             if total > 0 {
                 let d = self.dividends_account();
@@ -393,8 +397,11 @@ impl Contract {
                 b.dividends_paid = U128(b.dividends_paid.0 + total);
                 b.costs = U128(b.costs.0 + total);
             }
+            let distributed_profit = per_share * SHARES_PER_BOT as u128 * 10_000 / DIVIDEND_BPS;
+            b.hwm = U128(if per_share * (SHARES_PER_BOT as u128) < full { b.hwm.0 + distributed_profit } else { b.hwm.0.max(self.bankroll(bot)) });
+        } else {
+            b.hwm = U128(b.hwm.0.max(self.bankroll(bot)));
         }
-        b.hwm = U128(b.hwm.0.max(self.bankroll(bot)));
         self.save_bot_econ(bot, b);
         let u = upkeep(self.balance(bot));
         if u > 0 {
@@ -878,9 +885,8 @@ impl Contract {
         let mut lo = listings_of_map();
         lo.remove(id);
         lo.flush();
-        let mut dm = daily_map();
-        dm.remove(id);
-        dm.flush();
+        // the daily-wins counter is kept (tiny, fixed-size): unregister + register must not reset the
+        // diminishing-rewards day (review); teardown_clear removes it
         let mut cm = cosmetics_map();
         cm.remove(id);
         cm.flush();

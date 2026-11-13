@@ -2229,3 +2229,47 @@ fn audit4_teardown_clear_removes_the_economy_state() {
     assert!(c.get_holdings(acc(ALICE)).is_empty() && c.get_cosmetics(acc(ALICE)).is_empty());
     assert!(near_sdk::store::LookupMap::<AccountId, econ::BotEcon>::new(Key::BotEcon).get(&bot).is_none(), "bot rows removed");
 }
+
+#[test]
+fn profit_the_wallet_cannot_pay_now_is_paid_later() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 3, econ::IPO_SHARES, 150);
+    // fake a big profit while the wallet is nearly empty (test only): most of the bankroll "in escrow"
+    let mut f = c.load_fighter_pub(&bot).unwrap();
+    let hwm0 = c.get_bot_econ(bot.clone()).hwm.0;
+    let wallet = c.balance(&bot);
+    f.escrowed = U128(500 * ONE);
+    c.save_fighter(f);
+    let me = acc(ME);
+    c.mint(&me, 500 * ONE, "test: the escrowed entries");
+    let drain = wallet - ONE / 100; // leave 0.01 NOX in the wallet
+    c.move_tokens(&bot, &me, drain, "test");
+    let mut e = c.econ();
+    c.settle_bot_econ(&bot, &mut e);
+    let b = c.get_bot_econ(bot.clone());
+    let profit = (wallet - drain + 500 * ONE).saturating_sub(hwm0);
+    assert!(b.hwm.0 < hwm0 + profit, "the mark didn't jump past undistributed profit");
+    // the money comes back to the wallet: the rest of the cut is paid
+    let mut f = c.load_fighter_pub(&bot).unwrap();
+    f.escrowed = U128(0);
+    c.save_fighter(f);
+    c.move_tokens(&me, &bot, 500 * ONE + drain, "test");
+    let mut e = c.econ();
+    c.settle_bot_econ(&bot, &mut e);
+    let paid = c.get_bot_econ(bot.clone()).dividends_paid.0;
+    let want = profit * econ::DIVIDEND_BPS / 10_000 * econ::IPO_SHARES as u128 / econ::SHARES_PER_BOT as u128;
+    assert!(paid + ONE / 1000 >= want, "paid {paid} of {want}");
+}
+
+#[test]
+fn unregister_does_not_reset_the_daily_wins() {
+    let mut c = setup();
+    let _ = c.player_prize_bps(&acc(ALICE));
+    let _ = c.player_prize_bps(&acc(ALICE));
+    let _ = c.player_prize_bps(&acc(ALICE));
+    ctx(ALICE, 300, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    register(&mut c, ALICE);
+    assert_eq!(c.player_prize_bps(&acc(ALICE)), 5_000, "the 4th win of the day still pays half");
+}
