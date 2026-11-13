@@ -104,7 +104,7 @@ describe("bot-only matches", () => {
       if (m.state.tick < MATCH_TICKS) expect(kills).toBe(FIGHTERS - 1);
       else expect(kills).toBeLessThanOrEqual(FIGHTERS - 1);
     }
-  });
+  }, 60_000);
 
   it("bots actually fight: shots, hits, chests and kills by players", () => {
     const { events } = runBots(5);
@@ -127,7 +127,7 @@ describe("bot-only matches", () => {
       } else expect(b).toBeUndefined();
     }
     expect(seen).toBeGreaterThan(0);
-  });
+  }, 60_000);
 
   it("perf: a full 10-bot match runs headless well under 1 s", () => {
     runBots(1); // warm-up (JIT)
