@@ -406,3 +406,44 @@ describe("rules", () => {
     expect(b.hp).toBe(100);
   });
 });
+
+describe("training island (cfg.training, r6)", () => {
+  /** the human is played by the bot AI; returns its placement and damage taken */
+  const play = (seed: number, training: boolean) => {
+    const cfg: MatchConfig = { seed, fighters: t1Roster(), ...(training ? { training: true } : {}) };
+    const m = createMatch(cfg);
+    const rec = new Recorder();
+    let hurt = 0;
+    while (!m.state.over) {
+      const inp = botInput(m, 0);
+      rec.push(m.state.tick, 0, inp);
+      for (const e of m.step(new Map([[0, inp]]))) if (e.t === "hit" && e.who === 0) hurt += e.dmg;
+    }
+    return { cfg, rec, m, placement: m.state.fighters[0].placement, hurt };
+  };
+
+  it("bots go easy on the human: better average placement and less damage taken over 40 seeds", () => {
+    let pn = 0, pt = 0, hn = 0, ht = 0;
+    for (let s = 1; s <= 40; s++) {
+      const n = play(5000 + s, false), t = play(5000 + s, true);
+      pn += n.placement; pt += t.placement; hn += n.hurt; ht += t.hurt;
+    }
+    expect(pt).toBeLessThan(pn); // lower placement number = survived longer
+    expect(ht).toBeLessThan(hn);
+  }, 120_000);
+
+  it("a training match is deterministic and replays from its record (cfg carries the flag)", () => {
+    const r = play(4242, true);
+    const rep = replayRecord(r.cfg, r.rec.inputs);
+    expect(rep.hash).toBe(r.m.hash());
+    // the same inputs WITHOUT the flag don't reproduce it (a training run can't pass as a real one)
+    const plain = replayRecord({ seed: r.cfg.seed, fighters: r.cfg.fighters }, r.rec.inputs);
+    expect(plain.hash).not.toBe(r.m.hash());
+  });
+
+  it("without the flag nothing changes: the committed demo record still replays", async () => {
+    const fs = await import("node:fs");
+    const demo = JSON.parse(fs.readFileSync(new URL("../../matches/demo-1.json", import.meta.url).pathname, "utf8"));
+    expect(replayRecord(demo.cfg, demo.inputs).hash).toBe(demo.hash);
+  });
+});

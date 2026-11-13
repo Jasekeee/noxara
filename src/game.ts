@@ -436,6 +436,10 @@ function localFighters(): FighterInfo[] {
     }));
 }
 
+/** set by the TRAINING ISLAND buttons: the next match is offline with easy bots (cfg.training) */
+let wantTraining = false;
+let inTraining = false;
+
 function localStart(): StartResult {
   const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
   // offline fallback after a chain failure: tonight's real roster from the lobby, not the stale default one
@@ -492,6 +496,14 @@ async function startMatch() {
   $("end").classList.add("hidden");
   // ?seed=N (tests, replays) always plays the local deterministic roster
   let start: StartResult | null = await social.forcedStart(); // challenge / daily: fixed config, no chain
+  inTraining = false;
+  if (start === null && wantTraining) {
+    // training island: offline, easy bots against you, nothing recorded or settled
+    start = localStart();
+    start.cfg.training = true;
+    inTraining = true;
+  }
+  wantTraining = false;
   const forced = start !== null;
   const c = start === null && SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
   // "chain_error" = a transient failure last time: the client tries the chain again (and says so if it still fails)
@@ -514,12 +526,13 @@ async function startMatch() {
   myKillTimes = [];
   lastAmmo = -1;
   if (fellBack) toast("Couldn't reach the NEAR island — playing offline practice (not recorded)");
+  if (inTraining) toast("Training island: the bots go easy on you. Nothing is recorded.");
   coach.startMatch(!AUTOPLAY);
   gotChest = false;
   meBushSeen = false;
   const st = current;
   if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
-  else hud.banner("READY…", "gold");
+  else hud.banner(inTraining ? "TRAINING ISLAND" : "READY…", "gold");
   $("title").classList.add("hidden");
   $("hud").classList.remove("hidden");
   $("pot-chip").classList.toggle("hidden", !(current.pot > 0));
@@ -868,6 +881,9 @@ function showEnd(force: boolean) {
   const winnerLine = st.over ? (st.winner === null ? "no winner" : won ? "" : `${nameOf(st.winner)} won`) : `${st.alive} still fighting`;
   $("end-sub").textContent = [`of ${FIGHTERS}`, how, winnerLine].filter(Boolean).join(" — ");
   $("end-kills").textContent = String(me.kills);
+  // a fast early exit in a real match: offer the training island
+  const fast = !won && !inTraining && me.placement >= 7 && (match.state.tick < 70 * 20 || me.kills === 0);
+  $("again-training").classList.toggle("hidden", !fast);
   $("end-dmg").textContent = String(Math.round(me.damageDealt));
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
@@ -926,6 +942,19 @@ $("play").addEventListener("click", () => {
     return;
   }
   void startMatch();
+});
+const startTraining = () => {
+  wantTraining = true;
+  if (!bootDone) {
+    wantPlay = true;
+    return;
+  }
+  void startMatch();
+};
+$("training").addEventListener("click", startTraining);
+$("again-training").addEventListener("click", () => {
+  $("end").classList.add("hidden");
+  startTraining();
 });
 const muteBtn = $("mute");
 let menuPaused = false;

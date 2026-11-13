@@ -159,7 +159,8 @@ export class Social {
 
   /** Called by showEnd. */
   endShown(over: boolean) {
-    this.challengeBtn.classList.toggle("sc-hidden", !over || !this.d.getRecord());
+    // a training-island run (easy bots) can't be a challenge: the server replays challenges without the flag
+    this.challengeBtn.classList.toggle("sc-hidden", !over || !this.d.getRecord() || this.d.getRecord()?.cfg.training === true);
   }
 
   // ------------------------------------------------------------------ helpers
