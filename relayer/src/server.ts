@@ -38,7 +38,7 @@ const serverId = process.env.SERVER_ACCOUNT_ID;
 const serverKey = process.env.SERVER_PRIVATE_KEY;
 const rpcUrl = env("NEAR_RPC", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 // methods anyone may have relayed / that a guest's function-call key may call
-const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match,sponsor,unsponsor,claim_welcome").split(",");
+const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match,sponsor,unsponsor,claim_welcome,buy_ipo,claim_dividends,cancel_listing,buy_cosmetic,prune_listings").split(",");
 const GUEST_METHODS = env("GUEST_METHODS", "start_match,sweep_match").split(",");
 const TGAS = 1_000_000_000_000n;
 const policy: RelayPolicy = {

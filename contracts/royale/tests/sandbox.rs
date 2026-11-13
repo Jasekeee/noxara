@@ -144,7 +144,17 @@ async fn guest_match_end_to_end() -> anyhow::Result<()> {
     println!("settle_match (guest won): {gas_settle} Tgas");
     assert_eq!(r["prize_to"], house.as_str(), "a guest's pot goes to the house");
     assert_eq!(ft(c, g.id().as_str()).await?, 0, "guests earn zero");
-    assert_eq!(ft(c, house.as_str()).await?, house0 + (9 * entry_fee_for(STARTER) + T) * 98 / 100 - T, "the house paid the top-up and got the pot");
+    // economy v2: the House paid the top-up (25 x m, from its own NOX) and got the guest's pot; nothing minted
+    let econ: Value = c.view("get_economy").await?.json()?;
+    let m: u128 = econ["m_bps"].as_u64().unwrap() as u128;
+    let top_up = 25 * ONE * m / 10_000;
+    let prize: u128 = r["prize"].as_str().unwrap().parse()?;
+    let cut: u128 = r["house_cut"].as_str().unwrap().parse()?;
+    let h1 = ft(c, house.as_str()).await?;
+    let low = house0 - top_up + prize + cut;
+    assert!(h1 >= low && h1 - low < ONE, "house {h1} vs {low} (+ the deflation brake's unburnt part)");
+    assert_eq!(econ["minted"], econ["genesis"], "nothing minted after genesis");
+    let _ = T;
     let p: Value = c.view("get_player").args_json(json!({"account_id": g.id()})).await?.json()?;
     assert_eq!(p["wins"], 1);
     assert_eq!(p["pending"], Value::Null);
@@ -184,9 +194,10 @@ async fn bounty_retirement_and_rookies() -> anyhow::Result<()> {
     let (r, gas) = settle(&wd.server, c, &s["match_id"], 5, Some(2)).await?;
     let r = r.map_err(anyhow::Error::msg)?;
     println!("settle_match with bounty: {gas} Tgas");
-    let bounty = before * BOUNTY_BPS / 10_000;
-    assert_eq!(r["bounty_amount"], bounty.to_string());
-    assert_eq!(ft(c, &carrier).await?, before - bounty);
+    let taken = before * BOUNTY_BPS / 10_000;
+    let bounty: u128 = r["bounty_amount"].as_str().unwrap().parse()?;
+    assert!(bounty > taken, "the carrier's 15% + the House rule's bonus");
+    assert_eq!(ft(c, &carrier).await?, before - taken);
     let k = STARTER - entry_fee_for(STARTER) + bounty;
     let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
     assert_eq!(ft(c, &killer).await?, k, "the killer may spend its windfall on a weapon right away");
@@ -323,7 +334,7 @@ async fn registered_real(wd: &World, name: &str, grant: u128) -> anyhow::Result<
 }
 
 #[tokio::test]
-async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result<()> {
+async fn shares_profit_from_winners_and_go_to_zero_on_retirement() -> anyhow::Result<()> {
     let wd = world().await?;
     let c = &wd.c;
     let g = guest(&wd, "g-5p0n").await?;
@@ -333,15 +344,16 @@ async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result
     let winner = fs[1]["account"].as_str().unwrap().to_string(); // idx 2 wins every match
     let loser = fs[4]["account"].as_str().unwrap().to_string(); // idx 5 never wins
     for (who, bot) in [(&alice, &winner), (&bob, &loser)] {
-        let r = who.call(c.id(), "sponsor").args_json(json!({"bot": bot, "amount": (25 * ONE).to_string()})).gas(Gas::from_tgas(50)).transact().await?;
-        println!("sponsor: {} Tgas", r.total_gas_burnt.as_tgas());
+        let r = who.call(c.id(), "buy_ipo").args_json(json!({"bot": bot, "shares": 300})).gas(Gas::from_tgas(50)).transact().await?;
+        println!("buy_ipo: {} Tgas", r.total_gas_burnt.as_tgas());
         r.into_result()?;
     }
-    // a guest can't
-    let r = g.call(c.id(), "sponsor").args_json(json!({"bot": winner, "amount": (10 * ONE).to_string()})).transact().await?;
+    // a guest can't hold shares
+    let r = g.call(c.id(), "buy_ipo").args_json(json!({"bot": winner, "shares": 1})).transact().await?;
     assert!(r.into_result().is_err());
-    let market: Vec<Value> = c.view("get_market").await?.json()?;
-    assert_eq!(market[1]["sponsors"], 1);
+    let market: Vec<Value> = c.view("get_shares_market").await?.json()?;
+    assert_eq!(market[1]["sold"], 300);
+    assert_eq!(market[1]["holders"], 1);
     // play until the loser retires broke
     let mut n = 0;
     loop {
@@ -353,24 +365,21 @@ async fn sponsors_profit_from_winners_and_lose_to_retirement() -> anyhow::Result
         }
     }
     println!("loser retired after {n} matches");
-    // alice: dividends from every win, then withdraws after the cooldown
-    let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": alice.id()})).await?.json()?;
-    let earned: u128 = sp[0]["earned"].as_str().unwrap().parse()?;
-    assert!(earned > 0, "dividends paid");
-    assert_eq!(sp[0]["cooldown_left"], 0);
-    let r = alice.call(c.id(), "unsponsor").args_json(json!({"bot": winner})).gas(Gas::from_tgas(50)).transact().await?;
-    let back: String = r.into_result()?.json()?;
-    let alice_end = ft(c, alice.id().as_str()).await?;
-    println!("alice staked 25, earned {}, got back {} -> {} total", earned / ONE, back.parse::<u128>()? / ONE, alice_end / ONE);
-    assert!(alice_end > 100 * ONE, "backing a winner paid off (the welcome is a credit, not $BOUNTY)");
-    // bob: the bot retired broke -> anyone settles it with close_retired (separate, bounded)
+    // alice: dividends from the winner's profit
+    let h: Vec<Value> = c.view("get_holdings").args_json(json!({"account_id": alice.id()})).await?.json()?;
+    let owed: u128 = h[0]["claimable"].as_str().unwrap().parse()?;
+    assert!(owed > 0, "dividends from profit");
+    let a0 = ft(c, alice.id().as_str()).await?;
+    let r = alice.call(c.id(), "claim_dividends").args_json(json!({"bot": winner})).gas(Gas::from_tgas(50)).transact().await?;
+    println!("claim_dividends: {} Tgas", r.total_gas_burnt.as_tgas());
+    r.into_result()?;
+    assert_eq!(ft(c, alice.id().as_str()).await?, a0 + owed);
+    // bob: the bot went bankrupt -> shares are worth zero; leftovers go to the House via close_retired
+    let bal: String = c.view("mt_balance_of").args_json(json!({"account_id": bob.id(), "token_id": loser})).await?.json()?;
+    assert_eq!(bal, "0", "shares of a bankrupt bot go to zero");
     let r = g.call(c.id(), "close_retired").args_json(json!({"bot": loser})).gas(Gas::from_tgas(50)).transact().await?;
     println!("close_retired: {} Tgas", r.total_gas_burnt.as_tgas());
     r.into_result()?;
-    let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": bob.id()})).await?.json()?;
-    assert!(sp.is_empty());
-    let bob_end = ft(c, bob.id().as_str()).await?;
-    assert!(bob_end < 100 * ONE, "bob lost his stake: {}", bob_end / ONE);
     let hist: Vec<Value> = c.view("get_history").args_json(json!({"account_id": loser})).await?.json()?;
     assert_eq!(hist[0]["kind"], "retired");
     // progression: the guest earned XP every match
@@ -549,7 +558,7 @@ async fn audit2_sponsor_drain_via_transfer_call_fails() -> anyhow::Result<()> {
     for _ in 0..3 {
         wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": a.id(), "amount": (100 * ONE).to_string()})).transact().await?.into_result()?;
     }
-    a.call(c.id(), "sponsor").args_json(json!({"bot": bot, "amount": (30 * ONE).to_string()})).gas(Gas::from_tgas(50)).transact().await?.into_result()?;
+    a.call(c.id(), "buy_ipo").args_json(json!({"bot": bot, "shares": 300})).gas(Gas::from_tgas(50)).transact().await?.into_result()?;
     let g = guest(&wd, "g-0d1a").await?;
     for _ in 0..5 {
         let (s, _) = start(&g, c).await?;
@@ -560,15 +569,15 @@ async fn audit2_sponsor_drain_via_transfer_call_fails() -> anyhow::Result<()> {
     let r = a
         .batch(c.id())
         .call(near_workspaces::operations::Function::new("ft_transfer_call").args_json(json!({"receiver_id": bot, "amount": a0.to_string(), "msg": ""})).deposit(NearToken::from_yoctonear(1)).gas(Gas::from_tgas(100)))
-        .call(near_workspaces::operations::Function::new("unsponsor").args_json(json!({"bot": bot})).gas(Gas::from_tgas(50)))
+        .call(near_workspaces::operations::Function::new("claim_dividends").args_json(json!({"bot": bot})).gas(Gas::from_tgas(50)))
         .transact()
         .await?;
     let e = format!("{:?}", r.into_result().unwrap_err());
     assert!(e.contains("game wallets only receive"), "{e}");
     assert_eq!(ft(c, a.id().as_str()).await?, a0, "nothing moved");
     assert_eq!(ft(c, &bot).await?, bot0);
-    let sp: Vec<Value> = c.view("get_sponsorships").args_json(json!({"account_id": a.id()})).await?.json()?;
-    assert_eq!(sp.len(), 1, "the sponsorship is untouched");
+    let h: Vec<Value> = c.view("get_holdings").args_json(json!({"account_id": a.id()})).await?.json()?;
+    assert_eq!(h[0]["shares"], 300, "the shares are untouched");
     // the house too
     let house = format!("house.{}", c.id());
     let r = a.call(c.id(), "ft_transfer_call").args_json(json!({"receiver_id": house, "amount": ONE.to_string(), "msg": ""})).deposit(NearToken::from_yoctonear(1)).gas(Gas::from_tgas(100)).transact().await?;
@@ -592,7 +601,7 @@ async fn audit2_settle_with_double_dividends_fits_the_log_limit() -> anyhow::Res
         let s = top.create_subaccount(&name).initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
         wd.relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": s.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
         wd.owner.call(c.id(), "house_grant").args_json(json!({"account_id": s.id(), "amount": (10 * ONE).to_string()})).transact().await?.into_result()?;
-        s.call(c.id(), "sponsor").args_json(json!({"bot": quillon, "amount": (10 * ONE).to_string()})).gas(Gas::from_tgas(50)).transact().await?.into_result()?;
+        s.call(c.id(), "buy_ipo").args_json(json!({"bot": quillon, "shares": 75})).gas(Gas::from_tgas(50)).transact().await?.into_result()?;
     }
     let g = guest(&wd, "g-d1v1").await?;
     let (s, _) = start(&g, c).await?;

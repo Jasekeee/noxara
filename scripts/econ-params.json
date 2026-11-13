@@ -1,0 +1,58 @@
+{
+  "_doc": "Economy v2 parameters. Read by scripts/econ-sim-v2.ts AND asserted equal to the contract constants by contracts/royale tests (econ_params_match_the_simulator). NOX amounts are whole NOX; bps = 1/10000.",
+  "ENTRY": 4,
+  "WEALTH_BPS": 200,
+  "MAX_ENTRY": 16,
+  "RESERVE": 50,
+  "ENTRY_BURN_BPS": 1000,
+  "BASE_TOP_UP": 25,
+  "BASE_BURN_BPS": 100,
+  "MAX_BURN_BPS": 400,
+  "BASE_HOUSE_BPS": 500,
+  "MAX_HOUSE_BPS": 1500,
+  "BOUNTY_BPS": 1500,
+  "BOUNTY_BONUS": 5,
+  "M_MAX_BPS": 15000,
+  "HOUSE_TARGET": 1000,
+  "HOUSE_FLOOR": 500,
+  "HOUSE_GENESIS": 2000,
+  "STARTER": 100,
+  "S_TARGET": 2900,
+  "S_MIN": 2300,
+  "UPKEEP": [
+    [
+      150,
+      100
+    ],
+    [
+      300,
+      200
+    ],
+    [
+      600,
+      400
+    ]
+  ],
+  "UPKEEP_HOUSE_BPS": 5000,
+  "WEAPON": [
+    60,
+    120
+  ],
+  "ARMOR": [
+    90,
+    180
+  ],
+  "SKIN": 150,
+  "UPGRADE_BURN_BPS": 5000,
+  "SHARES_PER_BOT": 1000,
+  "IPO_SHARES": 300,
+  "IPO_PRICE_PER_SHARE_MILLI": 100,
+  "DIVIDEND_BPS": 2000,
+  "TRADE_TAX_BPS": 200,
+  "DAILY_FULL_WINS": 3,
+  "DAILY_HALF_WINS": 3,
+  "WELCOME_CREDIT": 30,
+  "SEASON_MS": 172800000,
+  "SEASON_EPOCH_MS": 1794614400000,
+  "EMA_DIV": 16
+}

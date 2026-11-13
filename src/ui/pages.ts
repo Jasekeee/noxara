@@ -2,6 +2,7 @@
 // Uses the T3 client API only when present (`"signIn" in client`), otherwise shows what the T2 data allows.
 import type { BotMarket, FighterInfo, GameClient, GameClientT3, LeaderRow, Sponsorship } from "../net/api";
 import { h, icon, ICON, PERSONALITY_COLOR, PERSONALITY_ICON, fmt } from "./dom";
+import { renderEconomy, renderNear } from "./econ";
 
 export interface PageDeps {
   client(): GameClient | null;
@@ -359,6 +360,38 @@ export class Pages {
   }
   closeModal() {
     $("modal").classList.add("hidden");
+  }
+
+  // ---------------------------------------------------------------- ECONOMY (economy v2 report)
+  economy() {
+    const render = () => {
+      $("page-title").textContent = "ECONOMY";
+      $("page-tabs").textContent = "";
+      const body = $("page-body");
+      void renderEconomy(body, {
+        d: this.d,
+        rerender: () => this.stack[this.stack.length - 1] === render && render(),
+        modal: (build) => {
+          const card = $("modal-card");
+          card.textContent = "";
+          build(card);
+          $("modal").classList.remove("hidden");
+        },
+        closeModal: () => this.closeModal(),
+        openNear: () => this.near(),
+      });
+    };
+    this.show("ECONOMY", render);
+  }
+
+  // ---------------------------------------------------------------- HOW NEAR POWERS NOXARA
+  near() {
+    const render = () => {
+      $("page-title").textContent = "HOW NEAR POWERS NOXARA";
+      $("page-tabs").textContent = "";
+      renderNear($("page-body"), this.d, () => this.economy());
+    };
+    this.show("HOW NEAR POWERS NOXARA", render);
   }
 
   // ---------------------------------------------------------------- LEADERBOARD

@@ -9,6 +9,11 @@ const SERVER: &str = "server.test";
 const RELAY: &str = "relay.test";
 const GUEST: &str = "g-ab12.relay.test";
 const ALICE: &str = "alice.test";
+const BOB: &str = "bob.test";
+
+fn m_now(c: &Contract) -> u128 {
+    c.get_economy().m_bps as u128
+}
 
 /// entry a genesis bot pays on its first match (progressive fee)
 fn e0() -> u128 {
@@ -100,7 +105,7 @@ fn assert_supply(c: &Contract) {
 
 /// `seen` accumulates every bot ever in a slot (retired bots keep their dust).
 fn assert_supply_seen(c: &Contract, seen: &mut std::collections::BTreeSet<AccountId>) {
-    let mut sum = bal(c, ME) + c.balance(&c.house) + bal(c, GUEST) + bal(c, ALICE);
+    let mut sum = bal(c, ME) + c.balance(&c.house) + bal(c, GUEST) + bal(c, ALICE) + bal(c, BOB) + c.balance(&c.dividends_account());
     seen.extend(c.slots.iter().cloned());
     seen.extend(c.get_retired().into_iter().map(|f| f.fighter.account));
     for a in seen.iter() {
@@ -192,11 +197,14 @@ fn guest_win_goes_to_the_house() {
     assert_eq!(r.winner, Some(0));
     assert_eq!(r.prize_to, c.house);
     assert_eq!(bal(&c, GUEST), 0, "guests earn zero");
-    let pot = 9 * e0() + POT_TOP_UP;
-    assert_eq!(r.prize.0 + r.burned.0 + r.house_cut.0, pot);
-    // the house (above its floor) paid the top-up itself: nothing minted
+    // economy v2: entries + the House's top-up == entry burn + pot burn + house cut + prize; nothing minted
+    // (the deflation brake sends the unburnt part of each burn to the House: supply is just below genesis)
+    let top_up = econ::BASE_TOP_UP * m_now(&c) / 10_000;
+    let total = 9 * e0() + top_up;
+    let accounted = r.prize.0 + r.burned.0 + r.house_cut.0;
+    assert!(accounted <= total && total - accounted < total / 100, "{accounted} vs {total}");
     assert_eq!(r.minted.0, 0);
-    assert_eq!(c.balance(&c.house), house0 + pot - r.burned.0 - POT_TOP_UP);
+    assert_eq!(c.balance(&c.house), house0 - top_up + r.house_cut.0 + r.prize.0 + (total - accounted));
     let p = c.get_player(acc(GUEST)).unwrap();
     assert_eq!((p.matches, p.wins, p.kills, p.earnings.0, p.pending), (1, 1, 3, 0, None));
     assert_eq!(c.get_leaderboard().players[0].account.as_str(), GUEST, "guests still get leaderboards");
@@ -212,8 +220,9 @@ fn bot_win_pays_the_bot_wallet() {
     let r = settle(&mut c, s.match_id, 4, None, 210);
     let winner = slot_acc(&c, 3);
     assert_eq!(r.prize_to.as_str(), winner);
-    // the winner immediately buys weapon tier 1 (paid to the house)
-    assert_eq!(bal(&c, &winner), STARTER - e0() + r.prize.0 - WEAPON_PRICES[0]);
+    // upkeep on the windfall, then the winner buys weapon tier 1 (half burned, half to the House)
+    let w = STARTER - e0() + r.prize.0;
+    assert_eq!(bal(&c, &winner), w - econ::upkeep(w) - WEAPON_PRICES[0]);
     let f = c.get_fighter(acc(&winner)).unwrap();
     assert_eq!(f.fighter.upgrades.weapon_tier, 1);
     assert_eq!((f.fighter.record.wins, f.fighter.record.kills, f.fighter.record.matches), (1, 3, 1));
@@ -257,9 +266,11 @@ fn bounty_is_paid_to_the_killer() {
     let killer = slot_acc(&c, 1); // idx 2
     let before = bal(&c, &carrier);
     let r = settle(&mut c, s.match_id, 5, Some(2), 210);
-    assert_eq!(r.bounty_amount.0, before * BOUNTY_BPS / 10_000);
+    let taken = before * BOUNTY_BPS / 10_000;
+    let bonus = econ::BOUNTY_BONUS * m_now(&c) / 10_000;
+    assert_eq!(r.bounty_amount.0, taken + bonus, "the carrier's 15% + the House rule's bonus");
     assert_eq!(r.bounty_to.as_ref().map(|a| a.as_str()), Some(killer.as_str()));
-    assert_eq!(bal(&c, &carrier), before - r.bounty_amount.0);
+    assert_eq!(bal(&c, &carrier), before - taken);
     // the killer may immediately spend its windfall on its first upgrade
     let k = STARTER - e0() + r.bounty_amount.0;
     let k = if k >= WEAPON_PRICES[0] + RESERVE { k - WEAPON_PRICES[0] } else { k };
@@ -273,12 +284,21 @@ fn guest_bounty_kill_feeds_the_house_not_the_guest() {
     let mut c = setup();
     let s = start(&mut c, GUEST, 200);
     let house0 = c.balance(&c.house);
+    let carrier0 = bal(&c, &slot_acc(&c, 0));
     let r = settle(&mut c, s.match_id, 5, Some(0), 210);
     assert!(r.bounty_amount.0 > 0);
     assert_eq!(r.bounty_to.as_ref(), Some(&c.house));
     assert_eq!(bal(&c, GUEST), 0);
-    // + the winner's first upgrade
-    assert_eq!(c.balance(&c.house), house0 + r.house_cut.0 + r.bounty_amount.0 + WEAPON_PRICES[0] - POT_TOP_UP);
+    // no House bonus for a guest's kill; + half the winner's upkeep and half its first upgrade
+    let w = STARTER - e0() + r.prize.0;
+    let up = econ::upkeep(w);
+    let upkeep_house = up * econ::UPKEEP_HOUSE_BPS / 10_000;
+    let bought = w - up >= WEAPON_PRICES[0] + RESERVE;
+    let upgrade_house = if bought { WEAPON_PRICES[0] - WEAPON_PRICES[0] * econ::UPGRADE_BURN_BPS / 10_000 } else { 0 };
+    assert_eq!(r.bounty_amount.0, carrier0 * BOUNTY_BPS / 10_000, "a guest's kill: the carrier's 15% only");
+    let floor = house0 - econ::BASE_TOP_UP * m_now(&c) / 10_000 + r.house_cut.0 + r.bounty_amount.0 + upkeep_house + upgrade_house;
+    let h = c.balance(&c.house);
+    assert!(h >= floor && h - floor < ONE, "house {h} vs {floor} (+ the brake's unburnt parts)");
     assert_supply(&c);
 }
 
@@ -592,22 +612,23 @@ fn long_run_economy_keeps_supply_consistent() {
 }
 
 #[test]
-fn the_house_reinvests_above_its_floor_and_mints_below_it() {
+fn v2_nothing_is_minted_even_below_the_floor() {
     let mut c = setup();
-    let supply0 = c.token.total_supply;
+    let minted0 = c.total_minted;
     let s = start(&mut c, GUEST, 200);
     let r = settle(&mut c, s.match_id, 4, None, 210);
-    assert_eq!(r.minted.0, 0, "healthy house pays the top-up");
-    assert_eq!(c.token.total_supply, supply0 - r.burned.0, "no inflation while the house is healthy");
-    // drain the house below its floor (test only): now the top-up is minted
+    assert_eq!(r.minted.0, 0, "a healthy House pays the top-up");
+    // drain the House to its floor (test only): the top-up is simply 0, never minted
     let house = c.house.clone();
     let drain = c.balance(&house) - HOUSE_FLOOR;
     c.move_tokens(&house, &acc(ALICE), drain, "test");
     let supply1 = c.token.total_supply;
     let s = start(&mut c, GUEST, 220);
     let r = settle(&mut c, s.match_id, 4, None, 230);
-    assert_eq!(r.minted.0, POT_TOP_UP);
-    assert_eq!(c.token.total_supply, supply1 + POT_TOP_UP - r.burned.0);
+    assert_eq!(r.minted.0, 0);
+    assert_eq!(c.total_minted, minted0, "economy v2: no minting after genesis");
+    assert!(c.token.total_supply <= supply1, "supply never grows");
+    assert!(c.balance(&house) >= HOUSE_FLOOR, "the House never pays below its floor");
     assert_supply(&c);
 }
 
@@ -1362,7 +1383,8 @@ fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
     let s = start(&mut c, GUEST, 200);
     let r = settle(&mut c, s.match_id, 2, None, 210);
     let earned = c.get_sponsorships(acc(ALICE))[0].earned.0;
-    let pot = s.pot.0 + POT_TOP_UP;
+    let entry_burn = s.pot.0 * econ::ENTRY_BURN_BPS / 10_000;
+    let pot = r.prize.0 + r.house_cut.0 + (r.burned.0 - entry_burn);
     let entries_part = (r.prize.0 / 1_000_000_000_000) * s.pot.0 / pot * 1_000_000_000_000;
     // audit #3: the cut also scales with how much of the pool the sponsors own (full 10% only at 30%)
     let scale = |full: u128, c: &Contract| {
@@ -1370,7 +1392,8 @@ fn sponsors_get_no_cut_of_the_house_top_up_in_free_matches() {
         let sh: u128 = pool.entries.iter().map(|e| e.shares.0).sum();
         full.min(full * sh * 10_000 / (pool.total_shares.0 * crate::market::SPONSOR_MAX_BPS))
     };
-    assert_eq!(earned, scale(entries_part * crate::market::SPONSOR_CUT_BPS / 10_000, &c));
+    let want = scale(entries_part * crate::market::SPONSOR_CUT_BPS / 10_000, &c);
+    assert!(earned.abs_diff(want) <= want / 500, "{earned} vs {want} (pot inferred without the brake's unburnt part)");
     assert!(earned < r.prize.0 * crate::market::SPONSOR_CUT_BPS / 10_000);
     // in a PAID match sponsors share the whole prize
     let s = start(&mut c, ALICE, 220);
@@ -1627,4 +1650,645 @@ fn teardown_clear_never_loses_escrow_or_credit_and_keeps_counters() {
     assert!(c.pending_free.is_empty() && c.pending_paid == 0);
     assert_eq!(c.balance(&acc(ME)), 0, "every entry went back by the rules before any record was deleted");
     assert_eq!(c.welcome_credit(&acc("cred.testnet")), WELCOME_STAKE - ENTRY_FEE, "a seeded credit entry is forfeited to the house, never lost");
+}
+
+// ============================================================ economy v2 (docs/ECONOMY.md)
+
+fn register(c: &mut Contract, who: &str) {
+    ctx(RELAY, 101, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc(who)), None);
+    c.set_welcome_credit(&acc(who), 0);
+}
+
+fn ctx_ts(pred: &str, height: u64, ms: u64, deposit: NearToken) {
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(&CUR.with(|c| c.borrow().clone())))
+        .predecessor_account_id(acc(pred))
+        .signer_account_id(acc(pred))
+        .block_height(height)
+        .block_timestamp(ms * 1_000_000)
+        .attached_deposit(deposit)
+        .account_balance(NearToken::from_near(50))
+        .random_seed([(height % 251) as u8 + 1; 32]);
+    testing_env!(b.build());
+}
+
+#[test]
+fn econ_params_match_the_simulator() {
+    let p: near_sdk::serde_json::Value = near_sdk::serde_json::from_str(include_str!("../../../scripts/econ-params.json")).unwrap();
+    let n = |k: &str| p[k].as_u64().unwrap_or_else(|| panic!("{k}")) as u128;
+    assert_eq!(n("ENTRY") * ONE, ENTRY_FEE);
+    assert_eq!(n("WEALTH_BPS"), ENTRY_WEALTH_BPS);
+    assert_eq!(n("MAX_ENTRY") * ONE, MAX_ENTRY);
+    assert_eq!(n("RESERVE") * ONE, RESERVE);
+    assert_eq!(n("ENTRY_BURN_BPS"), econ::ENTRY_BURN_BPS);
+    assert_eq!(n("BASE_TOP_UP") * ONE, econ::BASE_TOP_UP);
+    assert_eq!(n("BASE_BURN_BPS"), econ::BASE_BURN_BPS);
+    assert_eq!(n("MAX_BURN_BPS"), econ::MAX_BURN_BPS);
+    assert_eq!(n("BASE_HOUSE_BPS"), econ::BASE_HOUSE_BPS);
+    assert_eq!(n("MAX_HOUSE_BPS"), econ::MAX_HOUSE_BPS);
+    assert_eq!(n("BOUNTY_BPS"), BOUNTY_BPS);
+    assert_eq!(n("BOUNTY_BONUS") * ONE, econ::BOUNTY_BONUS);
+    assert_eq!(n("M_MAX_BPS"), econ::M_MAX_BPS);
+    assert_eq!(n("HOUSE_TARGET") * ONE, econ::HOUSE_TARGET);
+    assert_eq!(n("HOUSE_FLOOR") * ONE, HOUSE_FLOOR);
+    assert_eq!(n("HOUSE_GENESIS") * ONE, HOUSE_GENESIS);
+    assert_eq!(n("STARTER") * ONE, STARTER);
+    assert_eq!(n("S_TARGET") * ONE, econ::S_TARGET);
+    assert_eq!(n("S_MIN") * ONE, econ::S_MIN);
+    assert_eq!(n("EMA_DIV"), econ::EMA_DIV);
+    let up = p["UPKEEP"].as_array().unwrap();
+    for (i, (lo, bps)) in econ::UPKEEP.iter().enumerate() {
+        assert_eq!(up[i][0].as_u64().unwrap() as u128 * ONE, *lo);
+        assert_eq!(up[i][1].as_u64().unwrap() as u128, *bps);
+    }
+    assert_eq!(n("UPKEEP_HOUSE_BPS"), econ::UPKEEP_HOUSE_BPS);
+    assert_eq!(p["WEAPON"][0].as_u64().unwrap() as u128 * ONE, WEAPON_PRICES[0]);
+    assert_eq!(p["WEAPON"][1].as_u64().unwrap() as u128 * ONE, WEAPON_PRICES[1]);
+    assert_eq!(p["ARMOR"][0].as_u64().unwrap() as u128 * ONE, ARMOR_PRICES[0]);
+    assert_eq!(p["ARMOR"][1].as_u64().unwrap() as u128 * ONE, ARMOR_PRICES[1]);
+    assert_eq!(n("SKIN") * ONE, SKIN_PRICE);
+    assert_eq!(n("UPGRADE_BURN_BPS"), econ::UPGRADE_BURN_BPS);
+    assert_eq!(n("SHARES_PER_BOT") as u32, econ::SHARES_PER_BOT);
+    assert_eq!(n("IPO_SHARES") as u32, econ::IPO_SHARES);
+    assert_eq!(n("IPO_PRICE_PER_SHARE_MILLI") * ONE / 1000, econ::IPO_PRICE);
+    assert_eq!(n("DIVIDEND_BPS"), econ::DIVIDEND_BPS);
+    assert_eq!(n("TRADE_TAX_BPS"), econ::TRADE_TAX_BPS);
+    assert_eq!(n("DAILY_FULL_WINS") as u32, econ::DAILY_FULL_WINS);
+    assert_eq!(n("DAILY_HALF_WINS") as u32, econ::DAILY_HALF_WINS);
+    assert_eq!(n("WELCOME_CREDIT") * ONE, WELCOME_STAKE);
+    assert_eq!(n("SEASON_MS") as u64, econ::SEASON_MS);
+    assert_eq!(n("SEASON_EPOCH_MS") as u64, econ::SEASON_EPOCH_MS);
+}
+
+#[test]
+fn the_house_rule() {
+    // m: 0 at the floor, 1 at target, capped at 1.5; pot shares rise as the House empties
+    assert_eq!(econ::rule(HOUSE_FLOOR), (0, econ::MAX_HOUSE_BPS, econ::MAX_BURN_BPS));
+    assert_eq!(econ::rule(0), (0, econ::MAX_HOUSE_BPS, econ::MAX_BURN_BPS));
+    assert_eq!(econ::rule(econ::HOUSE_TARGET), (10_000, econ::BASE_HOUSE_BPS, econ::BASE_BURN_BPS));
+    assert_eq!(econ::rule(10 * econ::HOUSE_TARGET).0, econ::M_MAX_BPS);
+    let mid = (HOUSE_FLOOR + econ::HOUSE_TARGET) / 2;
+    assert_eq!(econ::rule(mid), (5_000, 1_000, 250));
+    // brake: full at genesis, none at S_MIN, linear between
+    assert_eq!(econ::brake(econ::S_TARGET), 10_000);
+    assert_eq!(econ::brake(econ::S_MIN), 0);
+    assert_eq!(econ::brake((econ::S_MIN + econ::S_TARGET) / 2), 5_000);
+    // progressive upkeep (marginal brackets)
+    assert_eq!(econ::upkeep(150 * ONE), 0);
+    assert_eq!(econ::upkeep(300 * ONE), 150 * ONE / 100);
+    assert_eq!(econ::upkeep(1_000 * ONE), 150 * ONE / 100 + 300 * ONE * 2 / 100 + 400 * ONE * 4 / 100);
+    assert_eq!(econ::daily_factor_bps(0), 10_000);
+    assert_eq!(econ::daily_factor_bps(3), 5_000);
+    assert_eq!(econ::daily_factor_bps(6), 2_500);
+}
+
+#[test]
+fn v2_150_matches_no_minting_and_the_economy_holds() {
+    let mut c = setup();
+    let genesis = c.total_minted;
+    let mut seen = std::collections::BTreeSet::new();
+    let mut h = 200;
+    for i in 0..150u64 {
+        let s = start(&mut c, GUEST, h);
+        let w = [3, 5, 1, 7, 2, 9, 4, 0, 6, 8][(i % 10) as usize];
+        settle(&mut c, s.match_id, w, if i % 3 == 0 { Some(((w + 1) % 10) as u8) } else { None }, h + 5);
+        h += 10;
+        assert_supply_seen(&c, &mut seen);
+        assert!(c.balance(&c.house) >= HOUSE_FLOOR, "the House never pays below its floor");
+    }
+    assert_eq!(c.total_minted, genesis, "nothing minted after genesis");
+    let e = c.get_economy();
+    assert_eq!(e.snapshots.len(), econ::SNAPSHOTS);
+    assert!(e.m_bps <= econ::M_MAX_BPS as u32);
+    assert!(e.burned.0 > 0 && e.supply.0 < genesis);
+}
+
+/// alice buys `n` IPO shares of slot `slot`'s bot
+fn ipo(c: &mut Contract, who: &str, slot: usize, n: u32, h: u64) -> AccountId {
+    let bot = c.slots[slot].clone();
+    ctx(who, h, NearToken::from_yoctonear(0));
+    c.buy_ipo(bot.clone(), n);
+    bot
+}
+
+#[test]
+fn ipo_funds_the_bot_and_dividends_come_only_from_profit() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 3, econ::IPO_SHARES, 150); // idx 4
+    assert_eq!(bal(&c, ALICE), 100 * ONE - 30 * ONE);
+    assert_eq!(c.balance(&bot), STARTER + 30 * ONE, "IPO money goes into the bot's wallet");
+    assert_eq!(c.mt_balance_of(acc(ALICE), bot.clone()).0, econ::IPO_SHARES as u128);
+    assert_eq!(c.mt_balance_of(bot.clone(), bot.clone()).0, (econ::SHARES_PER_BOT - econ::IPO_SHARES) as u128);
+    // a loss: no dividend (the IPO capital is never paid back as a dividend)
+    let s = start(&mut c, GUEST, 200);
+    settle(&mut c, s.match_id, 5, None, 210);
+    assert_eq!(c.get_holdings(acc(ALICE))[0].claimable.0, 0, "no profit, no dividend");
+    // a win: 20% of the gain above the high-water mark, pro rata 300/1000
+    let hwm = c.get_bot_econ(bot.clone()).hwm.0;
+    let s = start(&mut c, GUEST, 220);
+    let r = settle(&mut c, s.match_id, 4, None, 230);
+    assert_eq!(r.prize_to, bot);
+    let owed = c.get_holdings(acc(ALICE))[0].claimable.0;
+    let per_share = (hwm.max(0) + 0, owed / econ::IPO_SHARES as u128).1;
+    assert!(owed > 0 && per_share > 0);
+    let gain_bound = r.prize.0; // the gain can't exceed what it won
+    assert!(owed <= gain_bound * econ::DIVIDEND_BPS / 10_000 * econ::IPO_SHARES as u128 / econ::SHARES_PER_BOT as u128 + 1);
+    // claim pays exactly once
+    ctx(ALICE, 240, NearToken::from_yoctonear(0));
+    let got = c.claim_dividends(bot.clone()).0;
+    assert_eq!(got, owed);
+    assert_eq!(bal(&c, ALICE), 70 * ONE + owed);
+    ctx(ALICE, 241, NearToken::from_yoctonear(0));
+    assert_eq!(c.claim_dividends(bot.clone()).0, 0, "no double claim");
+    assert_eq!(bal(&c, ALICE), 70 * ONE + owed);
+    assert_eq!(c.balance(&c.dividends_account()), 0, "the dividend escrow holds exactly what is owed");
+    assert_supply(&c);
+}
+
+#[test]
+fn bankruptcy_sends_shares_to_zero_and_owed_dividends_survive() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 3, 100, 150);
+    let s = start(&mut c, GUEST, 200);
+    settle(&mut c, s.match_id, 4, None, 210); // a win: dividends owed
+    let owed = c.get_holdings(acc(ALICE))[0].claimable.0;
+    assert!(owed > 0);
+    // drain the bot (test only) -> it retires at the next settle
+    let drain = c.balance(&bot) - 1;
+    c.move_tokens(&bot, &acc(BOB), drain, "test");
+    let s = start(&mut c, GUEST, 220);
+    settle(&mut c, s.match_id, 1, None, 230);
+    assert!(!c.get_fighter(bot.clone()).unwrap().fighter.active, "retired broke");
+    assert!(c.get_bot_econ(bot.clone()).bankrupt);
+    assert_eq!(c.mt_balance_of(acc(ALICE), bot.clone()).0, 0, "shares go to zero");
+    assert_eq!(c.mt_supply(bot.clone()).unwrap().0, 0);
+    ctx(ALICE, 240, NearToken::from_yoctonear(0));
+    assert_eq!(c.claim_dividends(bot.clone()).0, owed, "dividends already earned stay claimable");
+    assert!(c.get_holdings(acc(ALICE)).is_empty(), "the dead holding is cleaned up");
+    ctx(ALICE, 241, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(bot.clone(), 1); })).is_err(), "no IPO in a retired bot");
+    // its leftovers go to the House via close_retired
+    let house0 = c.balance(&c.house);
+    let left = c.balance(&bot);
+    ctx(BOB, 250, NearToken::from_yoctonear(0));
+    c.close_retired(bot.clone());
+    assert_eq!(c.balance(&c.house), house0 + left);
+    assert_supply(&c);
+}
+
+#[test]
+fn the_share_market_burns_a_two_percent_tax() {
+    let mut c = setup();
+    register(&mut c, BOB);
+    grant(&mut c, ALICE, 100 * ONE);
+    grant(&mut c, BOB, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 2, 200, 150);
+    ctx(ALICE, 159, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 100, U128(ONE / 5)); })).is_err(), "a wallet signature (1 yocto) is required");
+    ctx(ALICE, 160, NearToken::from_yoctonear(1));
+    let id = c.list_shares(bot.clone(), 100, U128(ONE / 5)); // 0.2 NOX/share
+    assert_eq!(c.get_holdings(acc(ALICE))[0].locked, 100);
+    ctx(ALICE, 161, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 101, U128(ONE)); })).is_err(), "locked shares can't be listed twice");
+    let supply0 = c.token.total_supply;
+    let (a0, b0) = (bal(&c, ALICE), bal(&c, BOB));
+    ctx(BOB, 169, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_listing(id); })).is_err(), "a wallet signature (1 yocto) is required");
+    ctx(BOB, 170, NearToken::from_yoctonear(1));
+    c.buy_listing(id);
+    let cost = 100 * ONE / 5;
+    let tax = cost * econ::TRADE_TAX_BPS / 10_000;
+    assert_eq!(bal(&c, BOB), b0 - cost);
+    assert_eq!(bal(&c, ALICE), a0 + cost - tax);
+    assert!(c.token.total_supply < supply0 && supply0 - c.token.total_supply <= tax, "the tax burns (brake applies)");
+    assert_eq!(c.mt_balance_of(acc(BOB), bot.clone()).0, 100);
+    assert_eq!(c.mt_balance_of(acc(ALICE), bot.clone()).0, 100);
+    assert_eq!(c.get_bot_econ(bot.clone()).last_price, Some(U128(ONE / 5)));
+    assert_eq!(c.get_bot_econ(bot.clone()).holders, 2);
+    assert!(c.get_listings(None).is_empty());
+    ctx(BOB, 171, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_listing(id); })).is_err(), "a listing sells once");
+    assert_supply(&c);
+}
+
+#[test]
+fn mt_transfer_needs_a_wallet_signature_and_burns_two_percent_of_the_shares() {
+    let mut c = setup();
+    register(&mut c, BOB);
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 1, 100, 150);
+    ctx(ALICE, 160, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.mt_transfer(acc(BOB), bot.clone(), U128(50), None, None); })).is_err(), "1 yocto required");
+    ctx(ALICE, 161, NearToken::from_yoctonear(1));
+    c.mt_transfer(acc(BOB), bot.clone(), U128(50), None, None);
+    assert_eq!(c.mt_balance_of(acc(ALICE), bot.clone()).0, 50);
+    assert_eq!(c.mt_balance_of(acc(BOB), bot.clone()).0, 49, "2% of 50 rounded up = 1 share burned");
+    assert_eq!(c.get_bot_econ(bot.clone()).sold, 99);
+    // guests and game wallets can't receive shares; amounts beyond u32 are refused
+    ctx(ALICE, 162, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.mt_transfer(acc(GUEST), bot.clone(), U128(1), None, None); })).is_err());
+    ctx(ALICE, 163, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.mt_transfer(acc(BOB), bot.clone(), U128(u128::MAX), None, None); })).is_err());
+    ctx(ALICE, 164, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.mt_transfer(acc(BOB), bot.clone(), U128(51), None, None); })).is_err(), "can't send more than you hold");
+    assert_supply(&c);
+}
+
+#[test]
+fn guests_and_overflowing_inputs_are_refused() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = c.slots[0].clone();
+    ctx(GUEST, 150, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(bot.clone(), 1); })).is_err(), "guests can't hold shares");
+    ctx(ALICE, 151, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(bot.clone(), u32::MAX); })).is_err(), "more than the IPO block");
+    ctx(ALICE, 152, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(bot.clone(), 0); })).is_err());
+    ipo(&mut c, ALICE, 0, 10, 153);
+    ctx(ALICE, 1530, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 9, U128(ONE)); })).is_err(), "at least 10 shares");
+    ctx(ALICE, 154, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 5, U128(u128::MAX)); })).is_err(), "price cap");
+    ctx(ALICE, 155, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 10, U128(0)); })).is_err());
+    // at most 3 bots held
+    ipo(&mut c, ALICE, 1, 1, 156);
+    ipo(&mut c, ALICE, 2, 1, 157);
+    ctx(ALICE, 158, NearToken::from_yoctonear(0));
+    let b4 = c.slots[3].clone();
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(b4.clone(), 1); })).is_err(), "MAX_HOLDINGS");
+    assert_supply(&c);
+}
+
+#[test]
+fn a_real_players_wins_diminish_over_the_day() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 200 * ONE);
+    let mut h = 200;
+    let mut shares = vec![];
+    for _ in 0..4 {
+        let b0 = bal(&c, ALICE);
+        let s = start(&mut c, ALICE, h);
+        let paid = s.player_paid.0;
+        let r = settle(&mut c, s.match_id, 0, None, h + 5);
+        h += 10;
+        shares.push((bal(&c, ALICE) + paid - b0, r.prize.0));
+    }
+    // (got, full prize): the first 3 paid wins of the UTC day pay in full, the 4th pays half
+    for (got, full) in &shares[..3] {
+        assert_eq!(got, full, "{shares:?}");
+    }
+    assert_eq!(shares[3].0, shares[3].1 / 2, "{shares:?}");
+    assert_eq!(c.player_prize_bps(&acc(ALICE)), 5_000, "wins 4-6 of the day pay half");
+    c.player_prize_bps(&acc(ALICE));
+    assert_eq!(c.player_prize_bps(&acc(ALICE)), 2_500, "from the 7th, a quarter");
+    assert_supply(&c);
+}
+
+#[test]
+fn bronze_bracket_caps_bot_upgrades_for_new_players_only() {
+    let mut c = setup();
+    // give slot 0's bot maxed upgrades (test only)
+    let mut f = c.slot_fighter(0);
+    f.upgrades.weapon_tier = 2;
+    f.upgrades.armor = 2;
+    c.save_fighter(f);
+    let s = start(&mut c, GUEST, 200);
+    assert_eq!((s.roster[0].upgrades.weapon_tier, s.roster[0].upgrades.armor), (1, 1), "guests play bronze");
+    settle(&mut c, s.match_id, 3, None, 210);
+    grant(&mut c, ALICE, 100 * ONE);
+    c.xp.insert(acc(ALICE), 1_000_000); // a veteran (test only)
+    let s = start(&mut c, ALICE, 220);
+    assert_eq!((s.roster[0].upgrades.weapon_tier, s.roster[0].upgrades.armor), (2, 2), "veterans face the full roster");
+}
+
+#[test]
+fn players_pay_a_progressive_entry() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 500 * ONE);
+    let s = start(&mut c, ALICE, 200);
+    assert_eq!(s.player_paid.0, entry_fee_for(500 * ONE));
+    assert_eq!(s.player_paid.0, 13 * ONE, "4 + 2% of the 450 above the reserve");
+    grant(&mut c, ALICE, 1_000 * ONE);
+    settle(&mut c, s.match_id, 3, None, 210);
+    let s = start(&mut c, ALICE, 220);
+    assert_eq!(s.player_paid.0, MAX_ENTRY, "capped at 16");
+}
+
+#[test]
+fn seasons_roll_lazily_and_are_archived() {
+    let mut c = setup();
+    let t0 = econ::SEASON_EPOCH_MS + 1_000;
+    let bot = c.slots[4].clone();
+    // season 0: idx 5 wins
+    {
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        last.remove(&acc(GUEST));
+        last.flush();
+    }
+    ctx_ts(GUEST, 200, t0, NearToken::from_yoctonear(0));
+    let _ = c.start_match();
+    let id = c.next_match_id - 1;
+    ctx_ts(ME, 201, t0, NearToken::from_yoctonear(0));
+    c.resolve_start(U64(id));
+    ctx_ts(SERVER, 205, t0, NearToken::from_yoctonear(0));
+    let mut kills = vec![0u8; FIGHTERS];
+    kills[5] = 2;
+    c.settle_match(U64(id), places(5), kills, None, "ab".repeat(32), None);
+    let row = c.get_season_standings(None).into_iter().find(|r| r.bot == bot).unwrap();
+    assert_eq!((row.points, row.wins, row.kills), (14, 1, 2));
+    // next season: standings reset lazily, the old one is archived at the next settle
+    let t1 = t0 + econ::SEASON_MS;
+    {
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        last.remove(&acc(GUEST));
+        last.flush();
+    }
+    ctx_ts(GUEST, 300, t1, NearToken::from_yoctonear(0));
+    let _ = c.start_match();
+    let id = c.next_match_id - 1;
+    ctx_ts(ME, 301, t1, NearToken::from_yoctonear(0));
+    c.resolve_start(U64(id));
+    ctx_ts(SERVER, 305, t1, NearToken::from_yoctonear(0));
+    c.settle_match(U64(id), places(1), vec![0; FIGHTERS], None, "ab".repeat(32), None);
+    let now = c.get_season_standings(None);
+    assert_eq!(now.iter().find(|r| r.bot == bot).unwrap().points, 0, "a new season starts at zero");
+    let old = c.get_season_standings(Some(0));
+    assert_eq!(old.iter().find(|r| r.bot == bot).unwrap().points, 14, "the finished season is kept");
+    assert_eq!(c.get_fighter(bot).unwrap().fighter.record.wins, 1, "career history stays");
+}
+
+#[test]
+fn cosmetics_burn_their_price() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let burned0 = c.total_burned;
+    let house0 = c.balance(&c.house);
+    ctx(ALICE, 150, NearToken::from_yoctonear(0));
+    c.buy_cosmetic(0);
+    assert_eq!(bal(&c, ALICE), 50 * ONE);
+    assert_eq!(c.total_burned - burned0 + (c.balance(&c.house) - house0), 50 * ONE, "burned (+ the brake's unburnt part to the House)");
+    assert_eq!(c.get_cosmetics(acc(ALICE)), vec![0]);
+    ctx(ALICE, 151, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_cosmetic(0); })).is_err(), "once");
+    ctx(GUEST, 152, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_cosmetic(1); })).is_err(), "not guests");
+    assert_supply(&c);
+}
+
+#[test]
+fn new_sponsorships_are_closed_in_release_builds() {
+    // in unit tests the legacy path stays callable (exit/migration tests); release builds refuse it
+    assert!(crate::market::LEGACY_SPONSOR_IN_TESTS);
+}
+
+#[test]
+fn v2_worst_case_settle_logs_fit_in_16_kib() {
+    // every bot rich (upkeep in every bracket + an upgrade each), 3 IPO holders with 64-char names per bot
+    // (dividends on the winner), a bounty with the House bonus, legacy sponsors too, 50-char contract name
+    const LONG: &str = "a-very-long-contract-name-for-the-log-test.testnet";
+    CUR.with(|c| *c.borrow_mut() = LONG.to_string());
+    ctx(LONG, 100, NearToken::from_yoctonear(0));
+    let mut c = Contract::new(acc("owner.test"), acc(SERVER), acc(RELAY), Some(acc("operator.test")), None);
+    ctx(RELAY, 101, STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc(GUEST)), None);
+    for i in 0..27 {
+        let who = format!("{:0>59}.test", i);
+        ctx(&who, 120, STORAGE_DEPOSIT);
+        c.storage_deposit(None, None);
+        let house = c.house.clone();
+        c.move_tokens(&house, &acc(&who), 20 * ONE, "test");
+        let bot = c.slots[i % 9].clone();
+        ctx(&who, 121, NearToken::from_yoctonear(0));
+        c.buy_ipo(bot.clone(), 100);
+        ctx(&who, 122, NearToken::from_yoctonear(0));
+        c.sponsor(bot, U128(10 * ONE));
+    }
+    for s in 0..BOTS {
+        let b = c.slots[s].clone();
+        c.mint(&b, 900 * ONE, "test: rich bots");
+    }
+    c.mint(&c.house.clone(), 5_000 * ONE, "test");
+    let mut worst = 0usize;
+    let mut h = 200;
+    for w in 1..=9usize {
+        let s = start(&mut c, GUEST, h);
+        settle(&mut c, s.match_id, w, Some(((w % 9) + 1) as u8), h + 5);
+        worst = worst.max(near_sdk::test_utils::get_logs().iter().map(|l| l.len()).sum());
+        h += 10;
+    }
+    println!("v2 worst settle logs: {worst} B (limit 16384)");
+    assert!(worst < 14_000, "{worst} B leaves too little margin under 16 KiB");
+    CUR.with(|c| *c.borrow_mut() = ME.to_string());
+}
+
+#[test]
+fn listings_expire_and_dead_ones_are_pruned_and_claims_write_nothing() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 2, 100, 150);
+    ctx_ts(ALICE, 160, 1_000, NearToken::from_yoctonear(1));
+    c.list_shares(bot.clone(), 10, U128(ONE));
+    assert_eq!(c.get_listings(None).len(), 1);
+    ctx_ts(BOB, 161, 1_000 + econ::LISTING_TTL_MS, NearToken::from_yoctonear(0));
+    assert_eq!(c.prune_listings(None), 1, "anyone prunes an expired listing");
+    assert!(c.get_listings(None).is_empty());
+    assert_eq!(c.get_holdings(acc(ALICE))[0].locked, 0, "its shares are unlocked again");
+    // claiming on a bot you don't hold / a non-fighter writes nothing
+    register(&mut c, BOB);
+    ctx(BOB, 170, NearToken::from_yoctonear(0));
+    let used = env::storage_usage(); // (measured in the same mocked context as the call)
+    assert_eq!(c.claim_dividends(c.slots[5].clone()).0, 0);
+    assert_eq!(env::storage_usage(), used, "no storage written");
+    ctx(BOB, 171, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.claim_dividends(acc("random.test")); })).is_err());
+}
+
+#[test]
+fn a_full_order_book_takes_a_cheaper_offer() {
+    let mut c = setup();
+    let bot = c.slots[6].clone();
+    // 10 sellers x 2 listings fill the bot's book (20) at a high price
+    for i in 0..10 {
+        let who = format!("seller{i}.test");
+        register(&mut c, &who);
+        grant(&mut c, &who, 10 * ONE);
+        ipo(&mut c, &who, 6, 20, 150);
+        for k in 0..2 {
+            ctx(&who, 160 + k, NearToken::from_yoctonear(1));
+            c.list_shares(bot.clone(), 10, U128(5 * ONE));
+        }
+    }
+    assert_eq!(c.get_listings(Some(bot.clone())).len(), econ::MAX_LISTINGS_PER_BOT);
+    grant(&mut c, ALICE, 10 * ONE);
+    ipo(&mut c, ALICE, 6, 10, 170);
+    ctx(ALICE, 171, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.list_shares(bot.clone(), 10, U128(5 * ONE)); })).is_err(), "not cheaper: refused");
+    ctx(ALICE, 172, NearToken::from_yoctonear(1));
+    c.list_shares(bot.clone(), 10, U128(ONE));
+    let book = c.get_listings(Some(bot.clone()));
+    assert_eq!(book.len(), econ::MAX_LISTINGS_PER_BOT);
+    assert!(book.iter().any(|l| l.seller == acc(ALICE)));
+    let locked: u32 = (0..10).map(|i| c.get_holdings(acc(&format!("seller{i}.test")))[0].locked).sum();
+    assert_eq!(locked, 190, "the displaced listing's shares are unlocked");
+    assert_eq!(c.total_minted - c.total_burned, c.token.total_supply);
+}
+
+// ============================================================ audit #4 PoCs: the exploits no longer work
+
+#[test]
+fn audit4_refunded_entries_never_count_as_profit() {
+    // H-1: entries refunded from swept matches used to raise the wallet above the high-water mark
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 3, econ::IPO_SHARES, 150); // idx 4
+    let mut pend = vec![];
+    for i in 0..6 {
+        let g = guest_n(&mut c, 700 + i);
+        pend.push(start(&mut c, &g, 200 + i as u64).match_id);
+    }
+    let s = start(&mut c, GUEST, 210);
+    settle(&mut c, s.match_id, 6, None, 212); // idx 4 loses
+    for id in &pend {
+        ctx(BOB, 800, NearToken::from_yoctonear(0));
+        assert!(c.sweep_match(*id));
+    }
+    let s = start(&mut c, GUEST, 810);
+    settle(&mut c, s.match_id, 6, None, 812); // idx 4 loses again
+    assert_eq!(c.get_holdings(acc(ALICE))[0].claimable.0, 0, "no phantom dividend from refunds");
+    assert_eq!(c.get_bot_econ(bot).dividends_paid.0, 0);
+    assert_supply(&c);
+}
+
+#[test]
+fn audit4_unregister_releases_shares_and_leaves_no_rows() {
+    // M-1: unregister used to orphan holding/listing rows the contract then paid for
+    let mut c = setup();
+    register(&mut c, BOB);
+    grant(&mut c, BOB, 2 * ONE);
+    let bot = c.slots[2].clone();
+    ctx(BOB, 150, NearToken::from_yoctonear(0));
+    c.buy_ipo(bot.clone(), 20);
+    ctx(BOB, 151, NearToken::from_yoctonear(1));
+    let lid = c.list_shares(bot.clone(), 10, U128(ONE));
+    ctx(BOB, 153, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.storage_unregister(None); })).is_err(), "shares held: refused without force");
+    ctx(BOB, 154, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    assert!(c.get_holdings(acc(BOB)).is_empty(), "no holding rows left");
+    assert!(c.get_listings(None).is_empty(), "its listing is gone");
+    assert!(c.get_cosmetics(acc(BOB)).is_empty());
+    assert_eq!(c.get_bot_econ(bot.clone()).sold, 0, "its shares went back to the bot");
+    assert_eq!(c.get_bot_econ(bot.clone()).holders, 0);
+    grant(&mut c, ALICE, 20 * ONE);
+    ctx(ALICE, 160, NearToken::from_yoctonear(1));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_listing(lid); })).is_err(), "the listing is gone");
+    assert!(!c.token.accounts.contains_key(&acc(BOB)), "no FT account re-created at the contract's expense");
+}
+
+#[test]
+fn audit4_teardown_clear_removes_the_economy_state() {
+    // M-2: teardown_clear used to leave the v2 keys and maps (account deletion fails above ~10 KB)
+    let mut c = setup();
+    grant(&mut c, ALICE, 400 * ONE);
+    let bot = ipo(&mut c, ALICE, 2, 100, 150);
+    ctx(ALICE, 151, NearToken::from_yoctonear(0));
+    c.buy_cosmetic(2);
+    ctx(ALICE, 152, NearToken::from_yoctonear(1));
+    c.list_shares(bot.clone(), 10, U128(ONE));
+    let mut h = 200u64;
+    for i in 0..30u64 {
+        let ms = econ::SEASON_EPOCH_MS + i * (econ::SEASON_MS / 10) + 1;
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        last.remove(&acc(GUEST));
+        last.flush();
+        ctx_ts(GUEST, h, ms, NearToken::from_yoctonear(0));
+        let _ = c.start_match();
+        let id = c.next_match_id - 1;
+        ctx_ts(ME, h + 1, ms, NearToken::from_yoctonear(0));
+        c.resolve_start(U64(id));
+        ctx_ts(SERVER, h + 2, ms, NearToken::from_yoctonear(0));
+        let w = [3, 5, 1, 7, 2, 9, 4, 6, 8][(i % 9) as usize];
+        c.settle_match(U64(id), places(w), vec![0; FIGHTERS], None, "ab".repeat(32), None);
+        h += 10;
+    }
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    loop {
+        let p = c.teardown_clear(vec![acc(GUEST), acc(ALICE)], Some(200), Some(20));
+        if p.done {
+            break;
+        }
+    }
+    assert!(env::storage_read(b"econ_v2").is_none() && env::storage_read(b"econ_seasons").is_none(), "global v2 keys removed");
+    assert!(c.get_holdings(acc(ALICE)).is_empty() && c.get_cosmetics(acc(ALICE)).is_empty());
+    assert!(near_sdk::store::LookupMap::<AccountId, econ::BotEcon>::new(Key::BotEcon).get(&bot).is_none(), "bot rows removed");
+}
+
+#[test]
+fn profit_the_wallet_cannot_pay_now_is_paid_later() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let bot = ipo(&mut c, ALICE, 3, econ::IPO_SHARES, 150);
+    // fake a big profit while the wallet is nearly empty (test only): most of the bankroll "in escrow"
+    let mut f = c.load_fighter_pub(&bot).unwrap();
+    let hwm0 = c.get_bot_econ(bot.clone()).hwm.0;
+    let wallet = c.balance(&bot);
+    f.escrowed = U128(500 * ONE);
+    c.save_fighter(f);
+    let me = acc(ME);
+    c.mint(&me, 500 * ONE, "test: the escrowed entries");
+    let drain = wallet - ONE / 100; // leave 0.01 NOX in the wallet
+    c.move_tokens(&bot, &me, drain, "test");
+    let mut e = c.econ();
+    c.settle_bot_econ(&bot, &mut e);
+    let b = c.get_bot_econ(bot.clone());
+    let profit = (wallet - drain + 500 * ONE).saturating_sub(hwm0);
+    assert!(b.hwm.0 < hwm0 + profit, "the mark didn't jump past undistributed profit");
+    // the money comes back to the wallet: the rest of the cut is paid
+    let mut f = c.load_fighter_pub(&bot).unwrap();
+    f.escrowed = U128(0);
+    c.save_fighter(f);
+    c.move_tokens(&me, &bot, 500 * ONE + drain, "test");
+    let mut e = c.econ();
+    c.settle_bot_econ(&bot, &mut e);
+    let paid = c.get_bot_econ(bot.clone()).dividends_paid.0;
+    let want = profit * econ::DIVIDEND_BPS / 10_000 * econ::IPO_SHARES as u128 / econ::SHARES_PER_BOT as u128;
+    assert!(paid + ONE / 1000 >= want, "paid {paid} of {want}");
+}
+
+#[test]
+fn unregister_does_not_reset_the_daily_wins() {
+    let mut c = setup();
+    let _ = c.player_prize_bps(&acc(ALICE));
+    let _ = c.player_prize_bps(&acc(ALICE));
+    let _ = c.player_prize_bps(&acc(ALICE));
+    ctx(ALICE, 300, NearToken::from_yoctonear(1));
+    assert!(c.storage_unregister(Some(true)));
+    register(&mut c, ALICE);
+    assert_eq!(c.player_prize_bps(&acc(ALICE)), 5_000, "the 4th win of the day still pays half");
+}
+
+#[test]
+fn audit5_holders_can_still_leave_after_teardown_cleared_the_bots() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 100 * ONE);
+    let _bot = ipo(&mut c, ALICE, 3, 50, 150);
+    let s = start(&mut c, GUEST, 200);
+    settle(&mut c, s.match_id, 4, None, 210);
+    assert!(c.get_holdings(acc(ALICE))[0].claimable.0 > 0);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc("owner.test")).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000);
+    testing_env!(b.build());
+    let _ = c.teardown_clear(vec![], Some(200), Some(20));
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ALICE)).attached_deposit(NearToken::from_yoctonear(1)).account_balance(NearToken::from_near(50)).block_timestamp(TEARDOWN_AFTER_MS * 1_000_000 + 1);
+    testing_env!(b.build());
+    assert!(c.storage_unregister(Some(true)), "unregister works after the bots were cleared");
+    assert!(c.get_holdings(acc(ALICE)).is_empty());
 }
