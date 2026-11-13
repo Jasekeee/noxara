@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "agent/**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Game (types, unit tests, build, determinism)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Unit tests (sim determinism, replay, bots, progression, UI)
+        run: npm test
+      - name: Type-check + production build
+        run: npm run build
+      - name: Replay the committed demo match from its input log
+        run: npm run verify-match matches/demo-1.json
+      - name: Balance smoke (50 bot-only matches)
+        run: npm run sim -- 50
+
+  server:
+    name: Match server + relayer tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            relayer/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix relayer
+      - run: npm test --prefix relayer
+
+  contract:
+    name: Contract unit tests (Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: contracts/royale
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain from rust-toolchain.toml
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: contracts/royale
+      - run: cargo test --lib --locked
