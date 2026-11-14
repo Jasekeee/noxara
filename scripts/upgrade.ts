@@ -74,6 +74,7 @@ async function keyFromKeychain(account: string): Promise<string> {
   }
   throw new Error(`none of the ${cands.length} local key(s) for ${root} is a full-access key of ${account} on chain`);
 }
+if (network === "mainnet" && process.env.DEPLOYER_PRIVATE_KEY) throw new Error("mainnet signs with the keychain key (checked full-access on chain): unset DEPLOYER_PRIVATE_KEY");
 const key = process.env.DEPLOYER_PRIVATE_KEY ?? (await keyFromKeychain(signer));
 if (has("check-key")) {
   console.log(`check-key: ${signer} will sign with ${parseKey(key).publicKey.toString()}; nothing sent`);
@@ -82,13 +83,38 @@ if (has("check-key")) {
 if (network === "mainnet" && process.env.BR_MAINNET_YES !== "yes") throw new Error("mainnet needs BR_MAINNET_YES=yes");
 const near = new Near({ network, rpcUrl, keyStore: new InMemoryKeyStore({ [signer]: key }) });
 const dates = async () => ({ teardown_after: await near.view(contract, "get_teardown_after", {}), is_season_ending: await near.view(contract, "is_season_ending", {}) });
+// NEAR's code_hash is base58(sha256(wasm))
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+const base58Hex = (hex: string) => {
+  let n = BigInt(`0x${hex}`), s = "";
+  while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; }
+  return s;
+};
+const codeHash = async () => ((await (await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { request_type: "view_account", finality: "final", account_id: contract } }) })).json()) as { result: { code_hash: string } }).result.code_hash;
+const onChain = await codeHash();
+// mainnet: refuse unless the live code is exactly the release we reviewed against (or this very wasm: a no-op re-run)
+if (network === "mainnet" && !rollback && onChain !== base58Hex(ROLLBACK_SHA256) && onChain !== base58Hex(sha256))
+  throw new Error(`live code_hash ${onChain} is neither the reviewed release ${base58Hex(ROLLBACK_SHA256)} nor this wasm: refusing`);
+console.log(`live code_hash ${onChain}`);
 const before = (await near.view(contract, "get_config", {})) as Record<string, unknown>;
 console.log("before:", JSON.stringify(await dates()));
 const o = await near.transaction(signer).deployContract(contract, wasm).functionCall(contract, "migrate", {}, { gas: "100 Tgas" }).send({ waitUntil: "FINAL" });
 console.log("upgraded + migrated:", o.transaction.hash);
 const after = (await near.view(contract, "get_config", {})) as Record<string, unknown>;
 console.log("supply before/after:", before.total_supply, after.total_supply, "version", after.version);
-console.log("after:", JSON.stringify(await dates()));
+const d = await dates();
+console.log("after:", JSON.stringify(d));
+// self-check: the new code is live, supply untouched and the teardown lock is 2026-12-20 00:00 UTC
+const problems = [
+  (await codeHash()) !== base58Hex(sha256) ? "code_hash is not the deployed wasm" : "",
+  before.total_supply !== after.total_supply ? "total supply changed" : "",
+  String(d.teardown_after) !== "1797724800000" ? `teardown_after is ${String(d.teardown_after)}, expected 1797724800000` : "",
+].filter(Boolean);
+if (problems.length) {
+  console.error(`CHECK FAILED: ${problems.join("; ")} — see docs/MAINNET.md §6 (rollback)`);
+  process.exit(1);
+}
+console.log(`CHECK OK: code_hash ${base58Hex(sha256)}, supply unchanged, teardown 2026-12-20, ranked play until 2026-12-15`);
 const mf = process.argv.indexOf("--set-max-free");
 if (mf > 0) {
   const near2 = new Near({ network, rpcUrl, keyStore: new InMemoryKeyStore({ [root]: key }) });
