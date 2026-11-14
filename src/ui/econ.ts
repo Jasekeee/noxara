@@ -85,7 +85,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   }
   const guest = c.isGuest();
   const x: Ctx = { ...ctx, c, signedIn: !guest };
-  const loading = h("p", "muted", "Reading the House's books from NEAR…");
+  const loading = h("p", "muted", "Loading live economy from NEAR…");
   body.appendChild(loading);
   const [eco, market, season, mine, listings] = await Promise.all([
     c.economy().catch(() => null),
@@ -98,7 +98,10 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   loading.remove();
   const live = !!eco && eco.genesis > 0;
   if (!live) {
-    body.appendChild(h("p", "e-warn", c.mode === "chain" ? "Economy v2 isn't live on this contract yet: the numbers below stay empty until the contract upgrade lands." : "You're offline: the economy is read from NEAR, so nothing to show right now."));
+    body.appendChild(h("p", "e-warn", c.mode === "chain" ? "Economy v2 isn't live on this contract yet: the numbers below stay empty until the contract upgrade lands." : "Live data is unavailable right now. Try again."));
+    const retry = h("button", "btn-ghost small", "TRY AGAIN");
+    retry.addEventListener("click", () => ctx.rerender());
+    body.appendChild(retry);
   }
   const e: EconomyInfo = eco ?? ({ supply: 0, genesis: 0, minted: 0, burned: 0, house: 0, houseEma: 0, floor: 0, target: 0, m: 0, houseShare: 0, burnShare: 0, brake: 0, topUp: 0, season: 0, seasonEndsAt: 0, seasonBurned: 0, seasonRewards: 0, snapshots: [] } as EconomyInfo);
   const sn = e.snapshots;
@@ -405,11 +408,11 @@ export function renderNear(body: HTMLElement, d: PageDeps, openEconomy: () => vo
   body.append(
     sec("Fighters are keyless NEAR accounts", p("Each of the nine AI fighters is a real sub-account of the game contract with no access key: nobody, including us, can sign for it. Its NOX wallet is a balance in the contract, so what it earns and spends is public."), fighters.length ? chips : null),
     sec("Match seeds come from next-block randomness", p("start_match fixes the seed from the randomness of a block that does not exist yet when you press play. Neither the player nor the server can pick it.")),
-    sec("Every match is settled on chain after a replay check", p("The match server replays the input log before settling, and the contract records the result with its hash. Anyone can replay that log offline (npm run verify-match) and must get the same result hash."), extLink("Settlements: the game contract's transactions", acct(contract))),
+    sec("Every match is settled on chain after a replay check", p("The match server replays the input log before settling, and the contract records the result with its hash. Anyone can replay that log themselves (npm run verify-match) and must get the same result hash."), extLink("Settlements: the game contract's transactions", acct(contract))),
     sec("NOX is a NEP-141 token; shares are NEP-245", p("NOX and the fighter shares live in one contract. NOX follows NEP-141. Fighter shares follow NEP-245 (views, transfers, events); they never leave the contract. NOX is play-money: it can't be bought, there is no swap.")),
     sec("Gasless guest play", p("A guest gets a function-call key limited to the game contract, and a relayer wraps each call in a NEP-366 meta-transaction and pays the gas. No wallet pop-up, no fee. Real NEAR accounts sign in once and then play the same way.")),
     sec("Welcome credit", p("A real account gets 30 NOX of entry-only credit, once, with a daily cap. The House pays it out of treasury NOX. Nothing is minted for it, and guests earn 0.")),
     sec("The House rule is readable on chain", p("Rewards, taxes, burns and the brake follow one public formula of the House's moving average. Read it yourself:"), h("pre", "ncode", `near view ${contract} get_economy`), (() => { const b = h("button", "btn-chip small", "SEE THE LIVE NUMBERS"); b.addEventListener("click", openEconomy); return b; })()),
-    sec("Honest trust model", p("The match server computes and replays each match before settling it; the contract records the result and the input-log hash; anyone can re-verify offline. Settlement proves the result matches the recorded inputs, not that a human played them. During judging the developer keeps the contract key so bugs can be fixed. This is testnet; nothing here is real money."), extLink("The contract on NEAR", acct(contract))),
+    sec("Honest trust model", p("The match server computes and replays each match before settling it; the contract records the result and the input-log hash; anyone can re-verify it independently. Settlement proves the result matches the recorded inputs, not that a human played them. During judging the developer keeps the contract key so bugs can be fixed. This is testnet; nothing here is real money."), extLink("The contract on NEAR", acct(contract))),
   );
 }

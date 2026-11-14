@@ -30,7 +30,7 @@ export const ordinal = (n: number) => {
 };
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const FRIENDLY: Record<string, string> = {
-  unreachable: "Can't reach the NOXARA server right now, so this can't be shared or ranked. Offline practice still works.",
+  unreachable: "Can't reach the NOXARA server right now, so this can't be shared or ranked. Practice is still open.",
   rate_limited: "Too many tries from this connection. Wait a bit and try again.",
   too_fast: "That run finished faster than real time, so it was not accepted.",
   replay_mismatch: "The server could not reproduce that run, so it was not accepted.",

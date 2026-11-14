@@ -977,3 +977,5 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .tag3d.me { position: absolute; }
 .tag3d .you { position: absolute; left: 50%; top: calc(100% + 78px); transform: translateX(-50%); white-space: nowrap; }
 .tag3d .bv span { white-space: nowrap; }
+.net-retry { position: absolute; top: calc(44px + var(--safe-t)); left: 16px; z-index: 2; }
+@media (max-width: 600px) { .net-retry { top: calc(34px + var(--safe-t)); left: 8px; font-size: 10px; } }

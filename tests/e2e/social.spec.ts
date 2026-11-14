@@ -70,14 +70,14 @@ test("daily: play it, land on the board highlighted, then challenge a friend and
   await ctx.close();
 });
 
-test("unreachable server: daily shows a clear message, offline practice still works", async ({ page }) => {
+test("unreachable server: daily shows a clear message, practice still works", async ({ page }) => {
   const errors = collectErrors(page);
   await page.route("**/api/daily**", (r) => r.abort("connectionrefused"));
   await page.goto("/?e2e&offline");
   await requireHook(page);
   await page.locator("#nav-daily").click();
   await expect(page.locator("#social-page")).toContainText("Can't reach the NOXARA server");
-  await expect(page.locator("#social-page")).toContainText("practice match offline");
+  await expect(page.locator("#social-page")).toContainText("Practice is open");
   await page.getByRole("button", { name: "Back" }).click();
   await expect(page.locator("#play")).toBeVisible();
   expect(errors.filter((e) => !/ERR_|Failed to load resource/.test(e))).toEqual([]);
