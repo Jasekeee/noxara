@@ -1,0 +1,21 @@
+[package]
+name = "anchor"
+version = "1.0.0"
+edition = "2021"
+publish = false
+license = "MIT"
+description = "NOXARA mainnet anchor: an append-only daily record (hash of all settled testnet matches + an economy snapshot). No near-sdk: a few hundred bytes of wasm."
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+codegen-units = 1
+opt-level = "z"
+lto = true
+debug = false
+panic = "abort"
+strip = true
+overflow-checks = true
+
+[workspace]

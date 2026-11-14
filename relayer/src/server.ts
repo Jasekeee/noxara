@@ -79,7 +79,13 @@ const relayPerIp = new RateLimiter(Number(env("RELAY_PER_IP_PER_MIN", "60")), 60
 const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10")), 3_600_000);
 // storage subsidies for signed-in real accounts: once per account ever, at most N per hour (N x 0.02 NEAR)
 // guest budget mode: 1 NEAR total for everything the relayer spends on players, N new guests a day
-const budget = new SpendBudget(path.join(DATA_DIR, "../budget.json"), env("RELAYER_BUDGET_NEAR", "1"), Number(env("DAILY_GUEST_CAP", "200")));
+// Two separate NEAR budgets so guests can never starve real accounts:
+//  - guests: new guest accounts (funding + storage + gas) and their relayed calls; small on purpose (mainnet:
+//    0.25 NEAR) with a daily cap on new guests. When it runs out guests play the free offline Training Island.
+//  - real accounts: storage registrations and relayed calls of signed-in NEAR accounts (unchanged).
+const guestBudget = new SpendBudget(path.join(DATA_DIR, "../budget-guest.json"), env("GUEST_BUDGET_NEAR", "0.25"), Number(env("DAILY_GUEST_CAP", "8")));
+const budget = new SpendBudget(path.join(DATA_DIR, "../budget.json"), env("RELAYER_BUDGET_NEAR", "1"), Number.MAX_SAFE_INTEGER);
+const budgetFor = (senderId: string) => (isGuest(senderId) ? guestBudget : budget);
 const closedReply = (why: string) => ({ error: why === "daily_cap" ? "today's free guest spots are taken: sign in with NEAR or play offline" : "the free relayer budget is used up: sign in with NEAR or play offline", code: "guests_closed", reason: why });
 const subsidies = new Subsidies(path.join(DATA_DIR, "../subsidised.json"), Number(env("REGISTER_GLOBAL_PER_HOUR", "30")));
 const settlePerIp = new RateLimiter(Number(env("SETTLE_PER_IP_PER_MIN", "20")), 60_000);
@@ -178,7 +184,7 @@ const server = http.createServer(async (req, res) => {
     const soc = await social.handle(req, ipOf(req));
     if (soc) return writeReply(res, soc, origin, ORIGINS);
     if (req.method === "GET" && req.url === "/api/health") {
-      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null, ...budget.status() }, origin);
+      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null, ...guestBudget.status(), realRemaining: fmtNear(budget.remaining) }, origin);
     }
     const rec = req.method === "GET" ? /^\/api\/match\/([0-9]{1,18})\/record$/.exec(req.url ?? "") : null;
     if (rec) {
@@ -191,14 +197,14 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const publicKey = String(body.publicKey ?? "");
       if (!/^ed25519:[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(publicKey)) return send(res, 400, { error: "bad public key" }, origin);
-      const shut = budget.closed("guest", RESERVE.guest);
+      const shut = guestBudget.closed("guest", RESERVE.guest);
       if (shut) return send(res, 503, closedReply(shut), origin);
       if (GUEST_VIA_CONTRACT) {
         const hex = crypto.randomBytes(5).toString("hex");
         if (!isGuestId(hex)) throw new Error("guest id");
         const g = await chain.createGuestViaContract(hex, publicKey, GUEST_FUNDING, GUEST_STORAGE);
         // the funding comes back if the account couldn't be created (the contract refunds it); the storage doesn't
-        budget.spend(g.burnt + yoctoOf(GUEST_STORAGE) + (g.created ? nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) : 0n), "guest");
+        guestBudget.spend(g.burnt + yoctoOf(GUEST_STORAGE) + (g.created ? nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) : 0n), "guest");
         if (!g.created || g.failure) return send(res, 500, { error: `guest: ${g.failure ?? "not created"}` }, origin);
         owners.add(g.accountId, publicKey);
         return send(res, 200, { accountId: g.accountId, tx: g.tx, storageTx: g.tx, ms: Math.round(performance.now() - t0) }, origin);
@@ -207,7 +213,7 @@ const server = http.createServer(async (req, res) => {
       const r = await chain.createGuest(id, publicKey, GUEST_METHODS, GUEST_FUNDING, GUEST_ALLOWANCE);
       owners.add(id, publicKey);
       const s = await chain.storageDeposit(id, GUEST_STORAGE);
-      budget.spend(nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) + yoctoOf(GUEST_STORAGE) + r.burnt + s.burnt, "guest");
+      guestBudget.spend(nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) + yoctoOf(GUEST_STORAGE) + r.burnt + s.burnt, "guest");
       if (s.failure) return send(res, 500, { accountId: id, error: `storage: ${s.failure}` }, origin);
       return send(res, 200, { accountId: id, tx: r.tx, storageTx: s.tx, ms: Math.round(performance.now() - t0) }, origin);
     }
@@ -231,7 +237,7 @@ const server = http.createServer(async (req, res) => {
       // no gas for no-ops: e.g. claim_login is relayed only when the contract says it pays (no tx otherwise)
       const pre = await preflight(check.methods, d.senderId, (m, a) => chain.view(m, a));
       if (pre) return send(res, 409, { error: pre, code: "nothing_to_claim" }, origin);
-      const shutRelay = budget.closed("relay", RESERVE.relay);
+      const shutRelay = budgetFor(d.senderId).closed("relay", RESERVE.relay);
       if (shutRelay) {
         // real accounts keep playing: their client signs the same call itself (its key's allowance pays)
         return send(res, 503, isGuest(d.senderId) ? closedReply(shutRelay) : { error: "relayer closed: sign it yourself", code: "relay_closed", reason: shutRelay }, origin);
@@ -246,7 +252,7 @@ const server = http.createServer(async (req, res) => {
         globalGas.refund("all", check.gas);
         throw e;
       }
-      budget.spend(r.burnt);
+      budgetFor(d.senderId).spend(r.burnt);
       if (r.failure) return send(res, 409, { tx: r.tx, error: r.failure, ms: Math.round(performance.now() - t0) }, origin);
       return send(res, 200, { tx: r.tx, value: r.value, guest: isGuest(d.senderId), ms: Math.round(performance.now() - t0) }, origin);
     }
@@ -310,7 +316,7 @@ await chain.warm();
   const cfg = await chain.view<{ storage_deposit: string; guest_storage_deposit?: string }>("get_config").catch(() => null);
   GUEST_STORAGE ||= cfg?.guest_storage_deposit ? `${cfg.guest_storage_deposit} yocto` : "0.02 NEAR";
   REAL_STORAGE ||= cfg?.storage_deposit ? `${cfg.storage_deposit} yocto` : "0.02 NEAR";
-  console.log(`storage: guests ${GUEST_STORAGE}, real accounts ${REAL_STORAGE}; budget ${fmtNear(budget.remaining)} of ${fmtNear(budget.total)} NEAR left`);
+  console.log(`storage: guests ${GUEST_STORAGE}, real accounts ${REAL_STORAGE}; guest budget ${fmtNear(guestBudget.remaining)} of ${fmtNear(guestBudget.total)} NEAR (${guestBudget.dailyGuests} new guests/day), real-account budget ${fmtNear(budget.remaining)} of ${fmtNear(budget.total)} NEAR`);
 }
 server.listen(PORT, () => console.log(`relayer ${relayerId} + match server ${serverId ?? "(off)"} on :${PORT} (${network}, game ${gameId}, sim ${SIM_VERSION})`));
 for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { chain.stop(); server.close(() => process.exit(0)); });

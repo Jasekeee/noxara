@@ -16,7 +16,7 @@ teardown-override = []
 
 [dependencies]
 # no default features: the default pulls wee_alloc (unmaintained); the Rust allocator is used instead
-near-sdk = { version = "5.30.1", default-features = false, features = ["legacy"] }
+near-sdk = { version = "5.30.1", default-features = false }
 near-contract-standards = "5.30.1"
 borsh = { version = "1", features = ["derive"] }
 
@@ -34,3 +34,4 @@ lto = true
 debug = false
 panic = "abort"
 overflow-checks = true
+strip = true
