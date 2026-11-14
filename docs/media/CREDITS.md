@@ -10,7 +10,7 @@
 
 ## Footage
 - All gameplay is NOXARA itself (three.js; Kenney CC0 models — see `public/licenses/`):
-  local practice matches (`?offline&autoplay&seed=9|12&trailer`, fixed-timestep capture) and
+  local practice matches (`?offline&autoplay&seed=9|12&trailer`, Big Island `seed=5&map=big`; fixed-timestep capture, tagged "PRACTICE MATCH" on screen) and
   one live NEAR-mainnet guest match on https://playnoxara.vercel.app (`?autoplay&trailer`).
 - Settle tx shown: `EJPkiz7XpYqPSiydESq1AcUutuxBNa6gCwVqosgfRDkP` (start tx `8PDe5H45PZkzHMDjcGLQrvhsc2Uk1Mqenh8yVXEFrg2u`),
   viewed on the public explorer Pikespeak (pikespeak.ai) — NearBlocks served a bot-check page to the capture browser.
