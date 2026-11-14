@@ -4,8 +4,8 @@ import { h, icon, ICON } from "./dom";
 
 /** Mainnet links, filled in after the owner's mainnet deploy (docs/SUBMISSION.md §5). null = not deployed yet. */
 export const MAINNET: { contract: string | null; deployTx: string | null; explorer: string } = {
-  contract: null,
-  deployTx: null,
+  contract: "noxara.near",
+  deployTx: "BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6",
   explorer: "https://nearblocks.io",
 };
 export const GITHUB_URL = "https://github.com/Jasekeee/noxara";

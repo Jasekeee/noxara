@@ -1,0 +1,73 @@
+{
+  "deployed_at": "2026-11-14T10:28:17.329Z",
+  "topology": "contract on the root; relayer = match server",
+  "contract": "noxara.near",
+  "owner": "zhasik.near",
+  "teardown_beneficiary": "zhasik.near",
+  "server": "relay.noxara.near",
+  "relayer": "relay.noxara.near",
+  "txs": {
+    "deploy_and_new": "BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6",
+    "create_relay": "3DSx9oNdeC66CpdjC4pLgDqFq4WKbnnQ8rQ7PF1Sty5h"
+  },
+  "storage_usage": 524253,
+  "npc_access_keys": {
+    "house.noxara.near": 0,
+    "brindle.noxara.near": 0,
+    "quillon.noxara.near": 0,
+    "vesper.noxara.near": 0,
+    "magpie.noxara.near": 0,
+    "tallow.noxara.near": 0,
+    "dorrit.noxara.near": 0,
+    "zinnia.noxara.near": 0,
+    "okapi.noxara.near": 0,
+    "fenwick.noxara.near": 0
+  },
+  "fighters": [
+    {
+      "account": "brindle.noxara.near",
+      "name": "Brindle",
+      "personality": "aggressive"
+    },
+    {
+      "account": "quillon.noxara.near",
+      "name": "Quillon",
+      "personality": "camper"
+    },
+    {
+      "account": "vesper.noxara.near",
+      "name": "Vesper",
+      "personality": "sniper"
+    },
+    {
+      "account": "magpie.noxara.near",
+      "name": "Magpie",
+      "personality": "looter"
+    },
+    {
+      "account": "tallow.noxara.near",
+      "name": "Tallow",
+      "personality": "coward"
+    },
+    {
+      "account": "dorrit.noxara.near",
+      "name": "Dorrit",
+      "personality": "balanced"
+    },
+    {
+      "account": "zinnia.noxara.near",
+      "name": "Zinnia",
+      "personality": "aggressive"
+    },
+    {
+      "account": "okapi.noxara.near",
+      "name": "Okapi",
+      "personality": "camper"
+    },
+    {
+      "account": "fenwick.noxara.near",
+      "name": "Fenwick",
+      "personality": "balanced"
+    }
+  ]
+}
