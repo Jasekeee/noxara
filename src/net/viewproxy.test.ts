@@ -33,7 +33,7 @@ describe("contract views via the match server", () => {
     const calls = stub((u) => {
       expect(u.searchParams.get("method")).toBe("get_top");
       expect(JSON.parse(u.searchParams.get("args")!)).toEqual({ kind: "bots", by: "earnings", n: 50 });
-      return json(200, { result: TOP });
+      return json(200, { status: 200, result: TOP });
     });
     const c = await client();
     expect(c.mode).toBe("chain");
@@ -55,7 +55,7 @@ describe("contract views via the match server", () => {
     vi.useFakeTimers({ toFake: ["setTimeout"] });
     try {
       let n = 0;
-      stub(() => (n++, json(503, { error: "live data is unavailable right now", code: "rpc_busy" })));
+      stub(() => (n++, json(200, { status: 503, error: "live data is unavailable right now", code: "rpc_busy" })));
       const c = await client();
       const p = c.leaderboard("players").catch((e: unknown) => e);
       await vi.runAllTimersAsync();
@@ -69,7 +69,7 @@ describe("contract views via the match server", () => {
   });
 
   it("a missing view (MethodNotFound) means an empty board, not an error", async () => {
-    stub(() => json(404, { error: "this view does not exist on the contract", code: "method_not_found" }));
+    stub(() => json(200, { status: 404, error: "this view does not exist on the contract", code: "method_not_found" }));
     const c = await client();
     expect(await c.leaderboard("players")).toEqual([]);
   });

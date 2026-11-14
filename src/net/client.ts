@@ -402,12 +402,14 @@ class Client implements GameClientT3, GameClientEcon {
       } catch {
         return viewCall<T>(this.rpcUrl, this.contract, method, args); // the server is unreachable: ask the RPC directly
       }
-      const j = (await r.json().catch(() => null)) as { result?: T; error?: string; code?: string } | null;
+      const j = (await r.json().catch(() => null)) as { result?: T; error?: string; code?: string; status?: number } | null;
       if (r.status === 404 && !j?.code) {
         this.viewProxy = false; // an older server without /api/view
         return viewCall<T>(this.rpcUrl, this.contract, method, args);
       }
-      if (!r.ok || !j) throw new ViewError(j?.error ?? `HTTP ${r.status}`, j?.code ?? (r.status === 429 ? "rate_limited" : "unavailable"), r.status);
+      // the server answers 200 with the view's own `status` (a busy RPC isn't a failed HTTP resource)
+      const st = j?.status ?? r.status;
+      if (!r.ok || !j || st !== 200 || j.error) throw new ViewError(j?.error ?? `HTTP ${r.status}`, j?.code ?? (st === 429 ? "rate_limited" : "unavailable"), st);
       this.viewProxy = true;
       return j.result as T;
     }

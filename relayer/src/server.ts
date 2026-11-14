@@ -225,17 +225,19 @@ const server = http.createServer(async (req, res) => {
     if (req.url === "/api/view" || req.url?.startsWith("/api/view?")) {
       if (req.method !== "GET" && req.method !== "POST") return send(res, 405, { error: "method not allowed" }, origin);
       const vip = ipOf(req);
-      if (!viewPerIp.take(vip)) return send(res, 429, { error: "slow down", code: "rate_limited" }, origin);
+      // view replies are always HTTP 200 with `status` in the body: a busy RPC is an expected state the page shows
+      // ("live data unavailable, try again"), not a failed resource that browsers log as a console error
+      if (!viewPerIp.take(vip)) return send(res, 200, { status: 429, error: "slow down", code: "rate_limited" }, origin);
       let method: unknown, args: unknown;
       if (req.method === "GET") {
         const q = new URL(req.url, "http://x").searchParams;
         method = q.get("method");
         const a = q.get("args");
-        if (a && a.length > 1024) return send(res, 400, { error: "args too large", code: "bad_view" }, origin);
+        if (a && a.length > 1024) return send(res, 200, { status: 400, error: "args too large", code: "bad_view" }, origin);
         try {
           args = a ? JSON.parse(a) : {};
         } catch {
-          return send(res, 400, { error: "args must be JSON", code: "bad_view" }, origin);
+          return send(res, 200, { status: 400, error: "args must be JSON", code: "bad_view" }, origin);
         }
       } else {
         const body = await readJson(req, 2_048);
@@ -243,7 +245,7 @@ const server = http.createServer(async (req, res) => {
         args = body.args;
       }
       const r = await views.view(method, args, () => viewMissPerIp.take(vip));
-      return send(res, r.status, r.body, origin);
+      return send(res, 200, { status: r.status, ...r.body }, origin);
     }
     const rec = req.method === "GET" ? /^\/api\/match\/([0-9]{1,18})\/record$/.exec(req.url ?? "") : null;
     if (rec) {
