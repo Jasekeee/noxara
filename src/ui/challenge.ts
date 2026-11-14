@@ -5,7 +5,7 @@ import type { GameClient } from "../net/api";
 import { guestId, guestName, savedName, saveName, social, type AnswerResult, type ChallengeInfo, type DailyBoard, type DailyInfo, type DailySubmitResult, type RunResult } from "../net/social";
 import { FIGHTERS, type MatchConfig, type MatchRecord } from "../sim/types";
 import type { StartResult } from "../net/api";
-import { h } from "./dom";
+import { h, icon } from "./dom";
 import { countdown, mmss, renderDaily } from "./tournament";
 import { renderRewards } from "./rewards";
 import "./social.css";
@@ -67,7 +67,8 @@ export class Social {
     const app = $("app") ?? document.body;
 
     // title: DAILY chip + challenge landing banner
-    const chip = h("button", "btn-chip", "DAILY");
+    const chip = h("button", "rail-btn", undefined, icon("M7 2h2v2h6V2h2v2h3v18H4V4h3zm-1 7v11h12V9zm2 2h3v3H8z"), h("span", "", "Daily"));
+    chip.type = "button";
     chip.id = "nav-daily";
     chip.addEventListener("click", () => {
       d.sfx("ui");
