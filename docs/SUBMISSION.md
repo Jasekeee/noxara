@@ -6,6 +6,24 @@
 Track: **games** (`games`). Status: **live on NEAR mainnet** — play at **https://playnoxara.vercel.app** (contract `noxara.near`, deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`). The testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment.
 Repository: https://github.com/Jasekeee/noxara (private until the owner makes it public, at the latest 2026-11-14 20:00 UTC).
 
+## 0. Submission form — final answers (copy/paste)
+| Field | Answer |
+|---|---|
+| Title | **NOXARA** |
+| One-liner | 9 AI mercenaries. Real wallets. One bounty. Only one walks out. |
+| Description (short) | A 3-minute battle royale against 9 AI mercenaries whose wallets are real, keyless NEAR accounts. They pay entries, buy upgrades, go broke and get replaced; the richest carries a bounty. Guests play in seconds with no wallet and no gas; every ranked match is replayed by the server and settled on NEAR mainnet (`noxara.near`), where anyone can check it. |
+| Description (long) | Use §1 below. |
+| Primary track | **Games** — NPCs with wallets and an economy that evolves without a dev patch: the 9 fighters are on-chain businesses (entries, prizes, upkeep, upgrades, bankruptcy → rookie), fans can own NEP-245 shares, and players never touch the chain as guests. |
+| Secondary track | **Memecoins** — honest scope: NOX is play-money, not a traded coin; what fits is the mechanic: a treasury that follows one public on-chain rule (`get_economy`) and a supply that only burns after genesis. |
+| Live demo | https://playnoxara.vercel.app |
+| Repository | https://github.com/Jasekeee/noxara |
+| Video | trailer: posted on X by the owner (link added after posting) |
+| X post | added after posting |
+| Mainnet contract | `noxara.near` — https://nearblocks.io/address/noxara.near (deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`; code sha256 `d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472`) |
+| Proof in one command | `npm run verify` → 11/11 PASS on mainnet (code hash = audited build, 9 keyless bots, settled match input-log hash, minted = genesis 2,900) |
+| Traction (live, 2026-11-14 15:54 UTC, `get_config` via the match server) | 11 matches started, 7 settled on mainnet; 2,900 NOX minted (genesis only), 162.48 burned |
+| AI disclosure | Built by the owner directing Claude Code (Anthropic); all code, tests and docs were generated with AI assistance and reviewed by tests, independent AI security reviews and the owner. Art: Kenney CC0. |
+
 ## 1. One paragraph
 NOXARA is a 3-minute top-down battle royale: you against 9 AI fighters on an island at dusk. The fighters are real NEAR sub-accounts **with no access keys**:
 - they pay entries, keep their winnings, pay upkeep and buy upgrades;
@@ -43,12 +61,18 @@ Judge path: open https://playnoxara.vercel.app, press PLAY as a guest (no wallet
 | 82–90 s | Challenge-a-friend link + DAILY leaderboard | Play the same match as your friends. |
 Capture: `node tools/demo-video.ts` records an ~80 s captioned draft of this shot list (`docs/screens/demo-draft.webm`, local only, with review stills `demo-frame-*.jpg`); the final cut adds a real end screen with **Verified** and a signed-in share purchase. Game audio only.
 
-## 4. X thread (DRAFT — post only with the owner's "yes")
-1. NOXARA — *Only one walks out.* A 3-minute battle royale where your 9 rivals are AI fighters with their own NEAR wallets. They pay entries, buy upgrades, go bankrupt. The richest wears a bounty. Play as a guest in seconds. https://playnoxara.vercel.app [video]
-2. The fighters are real NEAR accounts with zero access keys — only the game's rules move their NOX.
-3. One public rule runs the treasury: above target, rewards rise; below, the House keeps more and burns more. Nothing is minted after genesis.
-4. Own a fighter: IPO shares, dividends only from profit, shares go to zero on bankruptcy. NOX is play-money.
-5. Every match is seeded by the next block, replayed from your inputs and settled on chain. Built for the NEAR hackathon games track. [repo]
+## 4. X launch thread (DRAFT — the owner posts; nothing is posted by Claude)
+1/ NOXARA — 9 AI mercenaries. Real wallets. One bounty. Only one walks out.
+A 3-minute battle royale where every rival is an AI fighter with its own NEAR account. Live on mainnet, play as a guest in seconds.
+[trailer] https://playnoxara.vercel.app
+
+2/ What's different: the fighters are real, keyless NEAR accounts. They pay entries, keep their winnings, buy upgrades and go broke — then a rookie takes the slot. The richest one wears the crown: take it out and the bounty is yours.
+
+3/ Proof, not promises: every ranked match is replayed by the server from your inputs and settled on NEAR mainnet with its input-log hash (`noxara.near`). Look for "Verified", open the tx on NearBlocks, or run `npm run verify`: 11/11 checks against mainnet.
+https://nearblocks.io/address/noxara.near
+
+4/ Play in 10 seconds: open the link, press PLAY. No wallet, no gas — the chain stays out of your way. Code, economy and trust model: https://github.com/Jasekeee/noxara
+Built for the NEAR hackathon games track. @NEARProtocol #NEARHackathon
 
 ## 5. Mainnet runbook (history: executed by the owner 2026-11-14)
 Prerequisites: the audited `main` build; `node scripts/build-contract.ts` prints the sha256 recorded in docs/MAINNET.md; all tests green.
