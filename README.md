@@ -81,7 +81,7 @@ npm test --prefix relayer                  # match server, relayer, challenge + 
 ```
 
 ## Roadmap
-- **ONLINE** (title-screen button, coming soon): real players, live matchmaking.
+- **ONLINE** (title-screen button, coming soon): live matchmaking against real opponents.
 - **3v3 TEAMS (online)** (title-screen button, coming soon): squad up with friends, 3 vs 3.
 - **Live PvP lobbies** (humans + AI fighters in one match) — next step.
 - No real-money wagering anywhere; NOX is play-money and is not launched or traded (docs/DECISIONS.md).
