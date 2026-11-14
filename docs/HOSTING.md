@@ -16,7 +16,7 @@ Keys never leave Railway's variables screen: you paste them there yourself from 
    | `RELAYER_ACCOUNT_ID` / `RELAYER_PRIVATE_KEY` | `relay.noxara.near` / from `.env.mainnet` |
    | `SERVER_ACCOUNT_ID` / `SERVER_PRIVATE_KEY` | `relay.noxara.near` / same key (mainnet: the relayer is also the match server) |
    | `GUEST_VIA_CONTRACT` | `1` (guests become `g-<id>.noxara.near`) |
-   | `GUEST_BUDGET_NEAR` / `DAILY_GUEST_CAP` | `0.25` / `8` (≈ 9 new guests in total; then guests get the free Training Island) |
+   | `GUEST_BUDGET_NEAR` / `DAILY_GUEST_CAP` | `0.5` / `18` (≈ 18 new guests until the budget is topped up; then guests get the free Training Island) |
    | `RELAYER_BUDGET_NEAR` | `0.25` (real accounts' registrations + gas; when it runs out they sign their own transactions) |
    | `CORS_ORIGINS` | `https://<your-vercel-domain>` |
    | `PUBLIC_URL` / `GAME_URL` | `https://<your-vercel-domain>` |

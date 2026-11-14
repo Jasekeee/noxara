@@ -9,8 +9,8 @@ const tmp = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), "budget-")), "
 // measured on testnet: a new guest = 0.003 funding + 0.01514 storage + ~0.006 gas (account + first start)
 const PER_GUEST = near("0.0242");
 
-test("a 0.25 NEAR guest budget closes after ~9 new guests; the real-account budget is separate and stays open", () => {
-  const guests = new SpendBudget(tmp(), "0.25", 1000);
+test("a 0.5 NEAR guest budget closes after ~18-20 new guests; the real-account budget is separate and stays open", () => {
+  const guests = new SpendBudget(tmp(), "0.5", 1000);
   const real = new SpendBudget(tmp(), "1", Number.MAX_SAFE_INTEGER);
   let n = 0;
   while (!guests.closed("guest", RESERVE.guest)) {
@@ -18,7 +18,7 @@ test("a 0.25 NEAR guest budget closes after ~9 new guests; the real-account budg
     n++;
   }
   assert.equal(guests.closed("guest", RESERVE.guest), "budget");
-  assert.ok(n >= 9 && n <= 10, `guests before closing: ${n}`);
+  assert.ok(n >= 18 && n <= 21, `guests before closing: ${n}`);
   assert.equal(guests.status().guests, "closed");
   assert.equal(real.closed("register", RESERVE.register), null);
   assert.equal(real.closed("relay", RESERVE.relay), null);

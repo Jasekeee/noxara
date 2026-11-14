@@ -39,8 +39,8 @@ const beneficiary = arg("beneficiary", owner);
 if (onRoot && owner === root) throw new Error("--contract-on-root needs --owner <another account you control> (it alone can teardown once the root's keys are gone)");
 const fund = Number(arg("fund", "4.5"));
 const serverFund = Number(arg("server-fund", "1"));
-// on the root (mainnet): 0.25 guest budget + 0.25 real-account budget + 0.25 settlement gas (docs/COST.md)
-const relayFund = Number(arg("relay-fund", onRoot ? "0.75" : "4"));
+// on the root (mainnet): 0.5 guest budget + 0.25 real-account budget + 0.25 settlement gas (docs/COST.md)
+const relayFund = Number(arg("relay-fund", onRoot ? "1.0" : "4"));
 const headroom = Number(arg("headroom", "0.3")); // contract state growth: measured ~0.6 KB per match paid by the contract (docs/COST.md)
 const dryRun = has("dry-run");
 const repo = path.join(import.meta.dirname, "..");
@@ -93,7 +93,7 @@ const plan = {
     contract_total: onRoot ? contractNeed : fund,
     relayer_account: relayFund,
     server_account: onRoot ? 0 : serverFund,
-    per_guest: "0.0275 measured (0.01514 storage -> contract, refundable at teardown; 0.003 funding + ~0.0094 gas spent), capped by GUEST_BUDGET_NEAR (0.25) and DAILY_GUEST_CAP (8)",
+    per_guest: "0.0275 measured (0.01514 storage -> contract, refundable at teardown; 0.003 funding + ~0.0094 gas spent), capped by GUEST_BUDGET_NEAR (0.5) and DAILY_GUEST_CAP (18)",
     per_match_gas: "0.00153 start (relayed) + 0.00274 settle, measured on testnet",
     gas_upper_bound_deploy: 0.05,
     total_from_root: +((onRoot ? contractNeed : fund) + relayFund + (onRoot ? 0 : serverFund) + 0.05).toFixed(3),

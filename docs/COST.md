@@ -20,13 +20,13 @@ Gas: mainnet and testnet use the same minimum gas price (0.1 Ngas → 0.0001 NEA
 | Genesis state | 0.06 | locked, refundable |
 | State headroom | 0.30 | locked, refundable (whatever isn't used) |
 | 10 keyless NPC accounts (9 fighters + house) | 0.01 | **spent** (keyless accounts can't be deleted) |
-| `relay.noxara.near`: guest budget (≈ 9 guests, then guests get the free Training Island) | 0.25 | ≈ 0.11 spent (funding + gas), ≈ 0.14 storage → contract → refundable |
+| `relay.noxara.near`: guest budget (owner: 0.5 ≈ 18 guests, cap 18/day; then guests get the free Training Island) | 0.50 | ≈ 0.22 spent (funding + gas), ≈ 0.27 storage → contract → refundable |
 | `relay.noxara.near`: real-account budget (≈ 10 registrations + gas; then players sign their own txs) | 0.25 | storage refundable, gas spent |
 | `relay.noxara.near`: settlement gas (≈ 90 matches at 0.00274) | 0.25 | **spent** as used; leftover refundable |
 | Deploy gas (upper bound) | 0.05 | **spent** (expected ≈ 0.01) |
-| **Total to fund `noxara.near`** | **6.38** (fund 6.5) | |
+| **Total to fund `noxara.near`** | **6.63** (owner funds 6.7) | |
 | Of which locked & refundable after teardown | ≈ 5.6–5.9 | |
-| Of which really spent (≈ 9 guests, ≈ 90 matches) | ≈ 0.45 at full use; ≈ 0.1 if traffic is light | |
+| Of which really spent (≈ 18 guests, ≈ 90 matches) | ≈ 0.55 at full use; ≈ 0.1 if traffic is light | |
 Not included (both options): registering the name `noxara.near` itself in your wallet.
 
 ## Option B — game stays on testnet; mainnet holds an anchor + the 9 mercenaries' identities

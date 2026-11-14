@@ -81,9 +81,9 @@ const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10
 // guest budget mode: 1 NEAR total for everything the relayer spends on players, N new guests a day
 // Two separate NEAR budgets so guests can never starve real accounts:
 //  - guests: new guest accounts (funding + storage + gas) and their relayed calls; small on purpose (mainnet:
-//    0.25 NEAR) with a daily cap on new guests. When it runs out guests play the free offline Training Island.
+//    0.5 NEAR ≈ 18 new guests) with a daily cap on new guests. When it runs out guests play the free offline Training Island.
 //  - real accounts: storage registrations and relayed calls of signed-in NEAR accounts (unchanged).
-const guestBudget = new SpendBudget(path.join(DATA_DIR, "../budget-guest.json"), env("GUEST_BUDGET_NEAR", "0.25"), Number(env("DAILY_GUEST_CAP", "8")));
+const guestBudget = new SpendBudget(path.join(DATA_DIR, "../budget-guest.json"), env("GUEST_BUDGET_NEAR", "0.5"), Number(env("DAILY_GUEST_CAP", "18")));
 const budget = new SpendBudget(path.join(DATA_DIR, "../budget.json"), env("RELAYER_BUDGET_NEAR", "1"), Number.MAX_SAFE_INTEGER);
 const budgetFor = (senderId: string) => (isGuest(senderId) ? guestBudget : budget);
 const closedReply = (why: string) => ({ error: why === "daily_cap" ? "today's free guest spots are taken: sign in with NEAR or play offline" : "the free relayer budget is used up: sign in with NEAR or play offline", code: "guests_closed", reason: why });
