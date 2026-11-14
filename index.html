@@ -161,22 +161,31 @@
       <!-- death / end -->
       <section id="end" class="screen hidden" aria-labelledby="end-title" role="dialog">
         <div class="end-inner">
-          <div id="end-place" class="end-place">#4</div>
-          <h2 id="end-title" class="end-title">ELIMINATED</h2>
-          <p id="end-sub" class="end-sub">of 10</p>
+          <div class="end-col end-left">
+          <div class="end-banner">
+            <div id="end-place" class="end-place">#4</div>
+            <h2 id="end-title" class="end-title">ELIMINATED</h2>
+            <p id="end-sub" class="end-sub">of 10</p>
+          </div>
+          <div id="end-killer" class="end-killer hidden"></div>
           <div class="end-stats">
             <div><b id="end-kills">0</b><span>kills</span></div>
             <div><b id="end-dmg">0</b><span>damage</span></div>
             <div><b id="end-time">0:00</b><span>survived</span></div>
           </div>
-          <div id="xp-box" class="xpbox hidden" aria-live="polite"></div>
-          <div id="levelup" class="levelup" aria-hidden="true">LEVEL UP!</div>
-          <div id="ledger" class="ledger"></div>
           <div class="end-btns">
-            <button id="again" class="btn-primary">PLAY AGAIN</button>
-            <button id="again-training" class="btn-ghost hidden">TRY THE TRAINING ISLAND</button>
-            <button id="spectate" class="btn-ghost">SPECTATE</button>
-            <button id="to-lobby" class="btn-ghost">MAIN MENU</button>
+            <button id="again" class="btn-primary end-again"><span id="again-main">PLAY AGAIN</span><small id="again-mode">Standard</small></button>
+            <div class="end-sec">
+              <button id="spectate" class="btn-ghost end-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5C6.5 5 2.7 9 1.5 12c1.2 3 5 7 10.5 7s9.3-4 10.5-7C21.3 9 17.5 5 12 5zm0 11.500a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-7a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg><span>SPECTATE</span></button>
+              <button id="to-lobby" class="btn-ghost end-ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3L2 11.500h3V21h5.500v-6h3v6H19v-9.500h3z"/></svg><span>MAIN MENU</span></button>
+            </div>
+            <button id="again-training" class="end-link hidden">Training Island</button>
+          </div>
+          </div>
+          <div class="end-col end-right">
+            <div id="xp-box" class="xpbox hidden" aria-live="polite"></div>
+            <div id="levelup" class="levelup" aria-hidden="true">LEVEL UP!</div>
+            <div id="ledger" class="ledger"></div>
           </div>
         </div>
       </section>

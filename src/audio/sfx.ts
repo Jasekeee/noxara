@@ -197,6 +197,13 @@ class Sfx {
     if (!this.ok("def", 1)) return;
     [392, 370, 349, 262].forEach((f, i) => this.tone("triangle", f, f * 0.98, i === 3 ? 0.8 : 0.22, 0.15, i * 0.2));
   }
+  /** End card slam: a low thud with a rising shimmer (won) or a falling one (lost). Synthesized. */
+  endStinger(won: boolean) {
+    if (!this.ok("endst", 1)) return;
+    this.tone("sine", 140, 45, 0.35, 0.22);
+    this.tone("square", won ? 523 : 330, won ? 1047 : 165, 0.45, 0.08, 0.05);
+    this.tone("triangle", won ? 784 : 262, won ? 1568 : 131, 0.6, 0.08, 0.16);
+  }
   countTick(go: boolean) {
     if (!this.ok(go ? "go" : "count", 0.3)) return;
     if (go) {

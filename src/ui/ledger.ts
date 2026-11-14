@@ -118,7 +118,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     const order = L.placements.map((p, i) => [p, i] as const).filter(([p]) => p > 0).sort((a, b) => a[0] - b[0]).slice(0, 3);
     for (const [p, i] of order) row(p === 1 ? ICON.crown : ICON.star, `#${p} ${i === 0 ? "You" : dn(L, i)} — ${L.kills[i]} kill${L.kills[i] === 1 ? "" : "s"}`);
     el.appendChild(rows);
-    el.appendChild(h("p", "lg-note", "Practice match (offline) — results stay on this device."));
+    el.appendChild(h("p", "lg-note", "Practice match · not ranked. Results stay on this device."));
     return;
   }
 

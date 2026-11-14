@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
-import { displayId, isChainAcct, shortAcct } from "./ui/acct";
+import { acctLabel, displayId, isChainAcct, shortAcct } from "./ui/acct";
 import { PauseMenu } from "./ui/menu";
 import { AimLine } from "./render/aimline";
 import { Recorder } from "./sim/record";
@@ -1023,7 +1023,7 @@ function drawLedger() {
     el.textContent = "";
     const n = document.createElement("p");
     n.className = "lg-note";
-    n.textContent = inTraining ? `${st.alive} still fighting — training island: nothing is paid or recorded. Spectate to watch it end.` : `${st.alive} still fighting — the pot and the bounty are paid out when the last one stands. Spectate to watch it end.`;
+    n.textContent = inTraining ? `${st.alive} still fighting. Training Island: nothing is paid or recorded.` : "The pot pays out when the last one stands.";
     el.appendChild(n);
     return;
   }
@@ -1045,6 +1045,53 @@ function drawLedger() {
   });
 }
 
+/** Who took you out: portrait, full account id, wallet balance (only when the lobby knows it), crown + WANTED for the bounty target. */
+function renderKillerCard(won: boolean, killer: number | null | undefined) {
+  const box = $("end-killer");
+  box.textContent = "";
+  box.classList.remove("wanted");
+  if (won || !match || killer === undefined) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.classList.remove("hidden");
+  const mk = (tag: string, cls: string, text?: string) => {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  };
+  if (killer === null) {
+    box.classList.add("storm");
+    box.appendChild(mk("div", "ek-storm", "The storm got you"));
+    return;
+  }
+  box.classList.remove("storm");
+  const kf = match.state.fighters[killer];
+  const wanted = !!kf.bounty;
+  box.classList.toggle("wanted", wanted);
+  const face = document.createElement("img");
+  face.className = "ek-face";
+  face.alt = "";
+  face.width = 64;
+  face.height = 64;
+  if (portraits[killer]) face.src = portraits[killer];
+  const acct = match.cfg.fighters[killer].id;
+  const info = fighters.find((f) => f.slot === killer - 1);
+  const live = !!client && client.mode === "chain" && !!current && !current.matchId.startsWith("local-") && isChainAcct(acct);
+  const body = mk("div", "ek-body");
+  body.appendChild(mk("small", "ek-k", "TAKEN OUT BY"));
+  body.appendChild(acctLabel(acct, kf.name, "acct-label ek-name"));
+  if (live && info && Number.isFinite(info.balance)) body.appendChild(mk("span", "ek-bal", `Wallet ${fmt(info.balance)} NOX`));
+  box.appendChild(face);
+  box.appendChild(body);
+  if (wanted) {
+    const tag = mk("div", "ek-wanted");
+    tag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg><span>WANTED</span>';
+    box.appendChild(tag);
+  }
+}
+
 function showEnd(force: boolean) {
   if (!match) return;
   const st = match.state;
@@ -1060,17 +1107,23 @@ function showEnd(force: boolean) {
   el.classList.toggle("win", won);
   $("end-place").textContent = `#${place}`;
   $("end-title").textContent = won ? "LAST ONE STANDING" : "ELIMINATED";
+  $("end-place").textContent = `#${place}`;
   const killer = killerOf.get(0);
-  const how = won ? "the island is yours" : killer != null ? `taken out by ${nameOf(killer)}` : killerOf.has(0) ? "lost to the storm" : "";
-  const winnerLine = st.over ? (st.winner === null ? "no winner" : won ? "" : `${nameOf(st.winner)} won`) : `${st.alive} still fighting`;
-  $("end-sub").textContent = [`of ${FIGHTERS}`, how, winnerLine].filter(Boolean).join(" — ");
+  $("end-sub").textContent = won ? `of ${FIGHTERS} · the island is yours` : `of ${FIGHTERS}${st.over && st.winner !== null ? ` · ${nameOf(st.winner)} won` : st.over ? "" : ` · ${st.alive} still fighting`}`;
+  // replay the entrance animation + stinger
+  el.classList.remove("end-in");
+  void el.offsetWidth;
+  el.classList.add("end-in");
+  sfx.endStinger(won);
   $("end-kills").textContent = String(me.kills);
   // a fast early exit in a real match: offer the training island
   const fast = !won && !inTraining && me.placement >= 7 && (match.state.tick < 70 * 20 || me.kills === 0);
   $("again-training").classList.toggle("hidden", !fast && !inTraining);
   // after training: the main button is a real match; the secondary one trains again
-  $("again").textContent = inTraining ? "PLAY REAL MATCH" : inBig ? "BIG ISLAND AGAIN" : "PLAY AGAIN";
-  $("again-training").textContent = inTraining ? "TRAIN AGAIN" : "TRY THE TRAINING ISLAND";
+  $("again-main").textContent = inTraining ? "PLAY REAL MATCH" : "PLAY AGAIN";
+  $("again-mode").textContent = inTraining ? "Standard" : inBig ? "Big Island" : "Standard";
+  $("again-training").textContent = inTraining ? "Train again" : "Training Island";
+  renderKillerCard(won, killer);
   $("end-dmg").textContent = String(Math.round(me.damageDealt));
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
