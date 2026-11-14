@@ -8,7 +8,7 @@ import { PauseMenu } from "./ui/menu";
 import { AimLine } from "./render/aimline";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
-import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
+import { SPAWN_PROTECT, WEAPONS, stormPhasesFor } from "./sim/rules";
 import { HUMAN_SKIN_IDS, charFor, loadAll, loadSkins } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
@@ -170,6 +170,7 @@ let endShown = false;
 let spectating = false;
 let matchStartT = 0;
 let stormTickT = 0;
+let stormBannerPhase = 0;
 let introT = 0;
 const INTRO = 1.0;
 let countShown = -1;
@@ -676,6 +677,7 @@ async function startMatch() {
   phase = "playing";
   matchStartT = time;
   introT = INTRO;
+  stormBannerPhase = 0;
   countShown = -1;
   myKillTimes = [];
   lastAmmo = -1;
@@ -892,8 +894,7 @@ function onEvents(evs: SimEvent[]) {
         break;
       }
       case "storm":
-        hud.banner("THE STORM IS CLOSING IN", "storm");
-        sfx.stormWarn();
+        // phase announced (tick 1 for the first one): the banner fires when the circle actually starts to shrink (frame loop)
         break;
       case "win": {
         if (e.who === 0) sfx.victory();
@@ -1443,9 +1444,29 @@ function frame(now: number) {
     // storm effects for the local player
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
     const outside = me.alive && phase === "playing" && dx * dx + dy * dy > st.storm.r * st.storm.r;
-    safeArrow.visible = outside && watch === 0;
+    // banner only when a shrink really starts (never during the countdown)
+    if (phase === "playing" && !starting && introT <= 0 && st.storm.phase > stormBannerPhase) {
+      const sp = stormPhasesFor(match.cfg)[st.storm.phase - 1];
+      if (sp && st.tick >= sp.shrinkStart) {
+        stormBannerPhase = st.storm.phase;
+        hud.banner(st.storm.phase === 1 ? "THE SAFE ZONE IS SHRINKING" : "THE STORM IS MOVING", "storm");
+        sfx.stormWarn();
+      }
+    }
+    const nx = me.x - st.storm.tx, ny = me.y - st.storm.ty;
+    const outNext = me.alive && phase === "playing" && !outside && st.storm.targetR < st.storm.r - 1 && nx * nx + ny * ny > st.storm.targetR * st.storm.targetR;
+    safeArrow.visible = (outside || outNext) && watch === 0;
     if (safeArrow.visible) {
-      const ax = st.storm.cx * U - views[0].pos.x, az = st.storm.cy * U - views[0].pos.z;
+      const gx = outside ? st.storm.cx : st.storm.tx, gy = outside ? st.storm.cy : st.storm.ty;
+      const ax = gx * U - views[0].pos.x, az = gy * U - views[0].pos.z;
+      {
+        // screen-space glyph for the HUD warning ("MOVE ↗")
+        const p0 = new THREE.Vector3(views[0].pos.x, 0, views[0].pos.z).project(camera);
+        const p1 = new THREE.Vector3(gx * U, 0, gy * U).project(camera);
+        const a = Math.atan2(p1.y - p0.y, p1.x - p0.x); // screen: +x right, +y up
+        const glyphs = ["→", "↗", "↑", "↖", "←", "↙", "↓", "↘"];
+        hud.zoneDir = glyphs[(Math.round(a / (Math.PI / 4)) + 8) % 8];
+      }
       const yaw = Math.atan2(-ax, -az);
       safeArrow.rotation.y = yaw;
       const k = 2.2 + Math.sin(time * 8) * 0.25;
