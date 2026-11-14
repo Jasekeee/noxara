@@ -40,5 +40,24 @@ Severity × effort ordering. "Who": C = Claude (allowed without asking), O = own
 | F-20 | D | MEDIUM | NEP-245 subset (no `mt_metadata` / `mt_tokens`) | [D-8] | Say "NEP-245 subset" clearly; add views in a later upgrade | S / M | C / K |
 | F-21 | C,D | LOW | No CI badge, CI lacks e2e; internal agent logs in the repo; bot ids not linked to the explorer; 390 px pill clipped | [C-10, C-13, D-12, C-14] | Badge, move logs to docs/process, explorer links, shorter pill | S | C |
 
-## Phase 2 — fixes
-(filled in as they land)
+## Phase 2 — fixes (14:08–15:00 UTC, all live on mainnet + Vercel + Railway, verified on the live site)
+| ID | Status | What changed | Verified |
+|---|---|---|---|
+| F-1 | **fixed** | README, MAINNET.md (EXECUTED header: tx, sha256, owner, relayer), SUBMISSION.md, HOSTING.md, ECONOMY.md all say "live on mainnet since 2026-11-14; testnet = rehearsal"; admin-powers table in the README | grep: no current-status "Testnet only"/"Prepared, not deployed"/"NOT executed" |
+| F-3 | **fixed** | Storm chip follows the sim's phase table ("SAFE ZONE SHRINKS IN 0:28" → "STORM MOVING" → "NEXT SHRINK"); "OUTSIDE THE (NEXT) ZONE · MOVE ↗" with an arrow; banner only when a shrink starts. UI only — sim untouched | e2e 21/21, sim/replay tests unchanged |
+| F-4 | **mitigated** | The 8–9 s drop-in (guest pass + next-block seed) now shows tonight's line-up (the Mark first, account ids, wallets) with honest steps instead of a spinner. The wait itself is the chain's (next block) — not removed | `docs/screens/fx-dropin-*.png` |
+| F-5 | **docs fixed; contract decision pending** | Docs/About: ranked (on-chain) play until 2026-11-20 00:00 UTC, practice always, exit window 11-20 → 11-25. Extending ranked play needs a contract upgrade (owner's "yes") | — |
+| F-6 | **fixed** | Server proxies + caches read-only contract views (`/api/view`, 18-method allow-list, per-IP + global limits, coalescing, stale-on-429, RPC failover list); client routes all contract views through it with backoff; honest "Live data is unavailable right now. Try again." states | live: 17 proxied views, **0 direct RPC calls, 0 HTTP 429, 0 console errors** (desktop + 390) |
+| F-7 | **fixed** | `npm run verify` = mainnet by default (code hash = audited build sha256, keyless bots, settled match input-log hash, minted = genesis) + `verify:testnet`; installs relayer deps on a fresh clone; retries 429s. README lists the clean-clone commands for contract/sandbox tests | `npm run verify` **11/11 PASS** against mainnet |
+| F-8 | **fixed** | Network-aware labels (About "Game contract (mainnet)", no "This is testnet" / testnet-mint notes on mainnet) | live About/Economy |
+| F-10 | partial | `verify` is the one-command proof; About links contract + live txs. A dedicated /proof page is deferred | — |
+| F-11 | **documented** | README trust model: public seed + deterministic sim → server real-time check is the defense; commit-reveal on the roadmap | — |
+| F-12 | **fixed** | Elimination screen: "WHERE THE POT GOES" (pot, bounty, who gets it), "XP is added when the match ends", WATCH THE PAYOUT (4× spectate) | compile + e2e; real-pot render not screenshotted |
+| F-13 | **fixed** | One coaching cue at a time (3.5 s gap), cues after GO, no storm banner during the countdown; death card names the weapon + "grab a gold-beam crate first" tip when holding the Popper | mobile start screenshot |
+| F-14 | **fixed (server)** | 3 new guests per IP per UTC day (persisted, hashed IPs); IPv4-mapped/IPv6 /64 normalisation for every per-IP limiter (security-review fix) | relayer tests 74/74 |
+| F-19 | **fixed** | Board paints the cached roster instantly; persistent "THE MARK: <account> · +N NOX" pill, "BOUNTY TAKEN" when it falls | — |
+| F-20 | **fixed (docs)** | "NEP-245 subset" stated where NEP-245 is claimed | — |
+| F-21 | **fixed** | CI badge, process logs moved to docs/process/, explorer links on the leaderboard, .env.example renamed | — |
+| A-16 | **fixed** | Relayer fetches the block height before relaying (no skipped expiry check) | relayer tests |
+
+Deferred (contract changes or owner actions): F-2 make the repo public (owner), F-5 extend ranked play (contract, owner "yes"), F-9 first share holder (owner wallet), F-11 commit-reveal (contract, post-hackathon), F-15 credit-win payouts / paid-match expiry / settle-key trust (contract, post-hackathon), F-16 prune owner keys (owner), F-17 top-up relay + contract balance (owner), F-18 Cup prizes (owner), F-10 dedicated /proof page.
