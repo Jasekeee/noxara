@@ -5,6 +5,7 @@
 // it is gasless exactly like a guest. If anything chain-side is unreachable the client drops to mode
 // "offline": local seed + t1Roster(), local XP, the game stays fully playable.
 import type { BotMarket, CreateGameClient, EconomyInfo, FighterEvent, FighterInfo, GameClientEcon, GameClientT3, Holding, Listing, SeasonRow, ShareMarketRow, LeaderRow, Payout, Progress, SettleResult, Sponsorship, StartResult } from "./api";
+import { truncAcct } from "./acctname";
 import { levelProgress, unlocksForLevel, upgradesForLevel, xpForMatch } from "../sim/progression";
 import { SIM_VERSION, type MatchConfig, type MatchRecord, type Personality } from "../sim/types";
 import { t1Roster } from "../sim/roster";
@@ -901,7 +902,7 @@ class Client implements GameClientT3, GameClientEcon {
   }
 }
 
-export const shortName = (id: string) => (id.startsWith("g-") ? `Guest ${id.slice(2, 6)}` : id.replace(/\.(testnet|near)$/, ""));
+export const shortName = (id: string) => truncAcct(id);
 
 const fmt = (y: string) => {
   const v = toBounty(y);

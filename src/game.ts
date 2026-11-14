@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
-import { isChainAcct } from "./ui/acct";
+import { isChainAcct, shortAcct } from "./ui/acct";
 import { PauseMenu } from "./ui/menu";
 import { AimLine } from "./render/aimline";
 import { Recorder } from "./sim/record";
@@ -294,7 +294,7 @@ async function refreshAccount() {
   const wel = $("welcome");
   wel.classList.add("hidden");
   if (t3 && !guest) {
-    $("acct-name").textContent = await c.account().catch(() => "");
+    { const id = await c.account().catch(() => ""); const el = $("acct-name"); el.textContent = id ? shortAcct(id) : ""; el.title = id; if (id) el.setAttribute("aria-label", id); }
     const b = await c.balance().catch(() => 0);
     $("acct-bal").textContent = `${fmt(b)} NOX`;
     // welcome credit: play-money that only pays match entries (never transferable)

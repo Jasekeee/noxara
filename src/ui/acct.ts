@@ -1,13 +1,12 @@
 // Real NEAR account ids for bots. Never invent a name: only ids that came from the chain are shown.
 import { h } from "./dom";
+import { isChainAcct, truncAcct } from "../net/acctname";
 
-/** Chain ids end in .testnet / .near (offline roster ids like "bot.fenwick" are not accounts). */
-export const isChainAcct = (a: string | null | undefined): a is string => !!a && /\.(testnet|near)$/.test(a);
+export { isChainAcct };
 
-/** "brindle.royale.br-7e8492.testnet" -> "brindle.royale…" (full id belongs in a title / aria-label). */
+/** Middle-truncated id that keeps the real suffix; tighter at phone width. */
 export function shortAcct(a: string): string {
-  const l = a.split(".");
-  return l.length > 2 ? `${l[0]}.${l[1]}…` : a;
+  return truncAcct(a, typeof innerWidth === "number" && innerWidth <= 480 ? 22 : 28);
 }
 
 /** A small account tag, or null offline. `href` makes it an explorer link. */
