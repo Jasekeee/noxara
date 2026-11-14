@@ -1393,6 +1393,7 @@ async function boot() {
   if (fighters.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
     fillSparks($("roster"), sparks);
+    if (client) void loadSparks(client); // the first lobby render can come before the portraits: load the sparklines here too
   }
   rebuildPreview();
   await nextFrame();
