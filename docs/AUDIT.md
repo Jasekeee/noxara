@@ -61,3 +61,12 @@ Severity × effort ordering. "Who": C = Claude (allowed without asking), O = own
 | A-16 | **fixed** | Relayer fetches the block height before relaying (no skipped expiry check) | relayer tests |
 
 Deferred (contract changes or owner actions): F-2 make the repo public (owner), F-5 extend ranked play (contract, owner "yes"), F-9 first share holder (owner wallet), F-11 commit-reveal (contract, post-hackathon), F-15 credit-win payouts / paid-match expiry / settle-key trust (contract, post-hackathon), F-16 prune owner keys (owner), F-17 top-up relay + contract balance (owner), F-18 Cup prizes (owner), F-10 dedicated /proof page.
+
+## Re-score after fixes (fresh judge panel, 15:00–15:25 UTC; `docs/audit/C2-rescore.md`)
+| Persona | Before | After |
+|---|---|---|
+| Protocol engineer | 47 | **52** |
+| VC / investor | 48 | **48** |
+| Gamer | 50 | **51** |
+
+The re-score found one regression introduced by phase 2: WATCH THE PAYOUT (4× spectate) — and MAIN MENU mid-match — ended the simulation faster than real time, so the server refused the result (`too_fast`) and the match was not settled. **Fixed at 15:38 UTC** (the client waits until the match could have been played in real time; verified on testnet: die → watch payout → settled + Verified). Other points from the panel: empty share market (owner action), private repo / no tag / no video (owner), first ranked match harsh for newcomers, the pre-settle pot shown on the elimination screen is an estimate (78.07 settled vs 79.39 shown), local XP is added even if settlement fails.
