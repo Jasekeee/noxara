@@ -853,3 +853,12 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .mode-entry { display: flex; justify-content: center; }
 .big-btn { margin-top: 6px; }
 .big-btn.soon { opacity: 0.55; cursor: default; }
+/* judge #5: all modes in one row (title fits 1440x900 with the WANTED badge visible); roadmap buttons quieter */
+.modes-row { display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch; gap: 8px; margin-top: 10px; }
+.modes-row .train-btn, .modes-row .mode-entry .train-btn { margin-top: 0; }
+.modes-row .mode-entry { display: contents; }
+.modes-row .soon-btn { opacity: .72; }
+@media (max-width: 640px) {
+  .modes-row { gap: 6px; }
+  .lobby-nav { flex-wrap: wrap; overflow-x: visible; }
+}

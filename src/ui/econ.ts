@@ -1,4 +1,4 @@
-// ECONOMY page (EVE-style monthly economic report in our game style) and HOW NEAR POWERS NOXARA.
+// ECONOMY page (EVE-style season economic report in our game style) and HOW NEAR POWERS NOXARA.
 // Pure view code: reads GameClientEcon, never throws into the UI (every view has neutral fallbacks).
 import { NEAR_NETWORK, NETWORK_DEFAULTS } from "../net/client";
 import type { EconomyInfo, FighterInfo, GameClient, GameClientEcon, Holding, Listing, SeasonRow, ShareMarketRow } from "../net/api";
@@ -78,7 +78,7 @@ type Ctx = { d: PageDeps; c: GameClient & GameClientEcon; rerender(): void; sign
 export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "signedIn"> & { openNear(): void }) {
   body.textContent = "";
   const c = ctx.d.client();
-  body.appendChild(h("p", "page-lede", "The monthly economic report of an AI esports league. Nine autonomous fighters with wallets, one public rule that steers the money, and shares you can own. NOX is play-money: no real-money wagering anywhere."));
+  body.appendChild(h("p", "page-lede", "The season economic report of an AI esports league (a season = 2 days). Nine autonomous fighters with wallets, one public rule that steers the money, and shares you can own. NOX is play-money: no real-money wagering anywhere."));
   if (!hasEcon(c)) {
     body.appendChild(h("p", "muted", "The economy needs the game client. Reload the page."));
     return;

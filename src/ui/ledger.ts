@@ -64,9 +64,9 @@ export function moneyFlow(pot: number, legs: { label: string; sub: string; amoun
 }
 
 /** display name: the real (middle-truncated) chain id when the fighter has one, else the roster name */
+/** Display name in headlines and rows; the real account id appears as its own tag/link next to it. */
 function dn(L: LedgerInput, i: number): string {
-  const a = L.accounts[i];
-  return L.chain && isChainAcct(a) ? shortAcct(a) : L.names[i];
+  return L.names[i];
 }
 
 function link(text: string, href: string): HTMLAnchorElement {

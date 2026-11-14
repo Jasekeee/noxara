@@ -49,3 +49,13 @@ Weaknesses → action:
 3. Ledger contradictions → the pot estimate uses the live House top-up (get_economy), the breakdown explains burn/cut, the bounty line says what really happened ("Nobody claimed X's bounty" / "X won and kept the bounty").
 4. README vs live data → shares (1,000 per fighter, 300 in the IPO), minting (v1 legacy 250 explained, verify checks 0 since), example account fixed.
 5. Fan ownership invisible to guests; challenge link uses the play-test LAN address; og:image relative → read-only "if you owned 10%" preview exists on profiles; a public base URL needs hosting (owner decision) — `VITE_PUBLIC_URL` makes og absolute at build.
+
+## Cold judge #5 — 2026-11-14 ~07:40 UTC (after playtest rounds 2–3)
+**56/70** — Tech 9 · Orig 7 · NEAR 8 · Demo 9 · Pack 8 · Fit 8 · Main 7 (was 55).
+Strongest: the verifiable loop is visible end to end (sealed seed → money flow → Verified settle tx); the NPC economy feels alive (WANTED Mark, Hall of the Broke, rookies); polish (0 console errors, no horizontal scroll at 390 px).
+Top weaknesses → action:
+1. Player-owned share market empty (0 holders/trades) → not fixed before the 10:00 stop (needs real players; no fake trades). Owner can buy an IPO block from his own wallet on mainnet as the first real holder.
+2. End-screen headline showed the winner's account id instead of the name; "$NOX" vs "NOX" → **fixed** (names in headlines, the id as its own link; "NOX" everywhere).
+3. Difficulty cliff training → real match; guests' impact on bot wallets not explained → not fixed (round-2 hard stop).
+4. ECONOMY "monthly report" with 2-day seasons → **fixed** ("season report"); quiet world between sessions → not fixed.
+5. WANTED bounty badge clipped at 1440×900; mobile tab row cut off; coming-soon buttons in prime space → **fixed** (all modes in one row, quieter roadmap buttons; tabs wrap on phones).
