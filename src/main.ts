@@ -1,6 +1,11 @@
 // Tiny entry: the title screen is plain HTML/CSS and paints immediately. The 3D game (three.js, models,
 // shaders) is a separate chunk loaded after the first paint, when the browser is idle — so a cold first
 // visit shows the logo and PLAY at once, and pressing PLAY early simply starts the match when ready.
+import { prefetchModels } from "./render/modelList";
+
+// the island's models start downloading now, in parallel with the three.js and game chunks (?offline e2e runs too)
+prefetchModels();
+
 const play = document.getElementById("play");
 // PLAY is clickable from the first paint: pressed while the 3D still loads, the match starts as soon as it's ready.
 play?.addEventListener("click", () => {

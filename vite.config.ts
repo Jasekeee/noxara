@@ -13,8 +13,27 @@ function absoluteSocialImage(base: string | undefined): Plugin {
   };
 }
 
+/** The 3D chunks are dynamic imports (loaded after the title paints): preload them from the HTML head so they
+ *  download in parallel with the entry script instead of after it. */
+function preloadGameChunks(): Plugin {
+  return {
+    name: "preload-game-chunks",
+    apply: "build",
+    transformIndexHtml: {
+      order: "post",
+      handler(html, ctx) {
+        const files = Object.values(ctx.bundle ?? {})
+          .filter((c) => c.type === "chunk" && /^assets\/(three\.module|game)-[\w-]+\.js$/.test(c.fileName) && c.code.length > 5000)
+          .map((c) => c.fileName);
+        const links = files.map((f) => `<link rel="modulepreload" crossorigin href="/${f}">`).join("\n    ");
+        return links ? html.replace("</head>", `    ${links}\n  </head>`) : html;
+      },
+    },
+  };
+}
+
 export default defineConfig(({ mode }) => ({
   build: { target: "es2022", chunkSizeWarningLimit: 1200 },
   server: { port: 5180, strictPort: true },
-  plugins: [absoluteSocialImage(loadEnv(mode, process.cwd(), "VITE_").VITE_PUBLIC_URL || process.env.VITE_PUBLIC_URL)],
+  plugins: [preloadGameChunks(), absoluteSocialImage(loadEnv(mode, process.cwd(), "VITE_").VITE_PUBLIC_URL || process.env.VITE_PUBLIC_URL)],
 }));

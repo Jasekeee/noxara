@@ -3,69 +3,10 @@ import * as THREE from "three";
 import { GLTFLoader, type GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import type { WeaponKind } from "../sim/types";
 
-const BASE = `${import.meta.env.BASE_URL}models/`;
 
-/** 10 distinct Kenney Mini Characters (no zombie). Fighter idx -> character. */
-export const CHARS = [
-  "character-male-a",
-  "character-female-b",
-  "character-robot",
-  "character-male-c",
-  "character-female-d",
-  "character-knight",
-  "character-alien",
-  "character-female-a",
-  "character-raider",
-  "character-male-e",
-];
+export { CHARS, HUMAN_SKINS, HUMAN_SKIN_IDS, WEAPON_MODEL, NATURE, charFor } from "./modelList";
+import { MODEL_BASE as BASE, prefetchModels, modelNames } from "./modelList";
 
-/** Human-only skins unlocked by level (palette ids 10..14, see src/sim/progression.ts). */
-export const HUMAN_SKINS: Record<number, string> = {
-  10: "character-female-c",
-  11: "character-male-d",
-  12: "character-female-f",
-  13: "character-male-g",
-  14: "character-soldier",
-};
-export const HUMAN_SKIN_IDS = [0, 10, 11, 12, 13, 14];
-/** character model for a fighter idx + skin id */
-export function charFor(idx: number, skin: number): string {
-  if (idx === 0 && HUMAN_SKINS[skin]) return HUMAN_SKINS[skin];
-  return CHARS[idx % CHARS.length];
-}
-
-export const WEAPON_MODEL: Record<WeaponKind, string> = {
-  popper: "blasters/blaster-b",
-  blaster: "blasters/blaster-d",
-  shotgun: "blasters/blaster-q",
-  sniper: "blasters/blaster-f",
-  grenade: "blasters/grenade-a",
-};
-
-export const NATURE = [
-  "rock_largeA",
-  "rock_largeB",
-  "rock_tallA",
-  "rock_tallB",
-  "rock_smallA",
-  "stone_tallA",
-  "tree_default",
-  "tree_detailed",
-  "tree_fat_fall",
-  "plant_bushLarge",
-  "plant_bushDetailed",
-  "grass",
-  "grass_large",
-  "grass_leafs",
-  "flower_purpleA",
-  "flower_redA",
-  "flower_yellowA",
-  "mushroom_red",
-  "log",
-  "stump_old",
-].map((n) => `nature/${n}`);
-
-const PROPS = ["blasters/crate-medium", "blasters/crate-wide", "blasters/crate-small"];
 
 const cache = new Map<string, GLTF>();
 
@@ -92,11 +33,9 @@ const yieldTask = () => new Promise<void>((r) => setTimeout(r, 0));
  */
 export async function loadAll(onProgress: (p: number) => void): Promise<void> {
   const loader = new GLTFLoader();
-  const names = [...CHARS.map((c) => `chars/${c}`), ...Object.values(HUMAN_SKINS).map((c) => `chars/${c}`), ...Object.values(WEAPON_MODEL), ...NATURE, ...PROPS];
-  const buffers = names.map((n) => fetch(`${BASE}${n}.glb`).then((r) => {
-    if (!r.ok) throw new Error(`asset ${n}: HTTP ${r.status}`);
-    return r.arrayBuffer();
-  }));
+  const names = modelNames();
+  const pre = prefetchModels(); // started at first paint by src/main.ts (or now)
+  const buffers = names.map((n) => pre.get(n)!);
   let done = 0;
   for (let i = 0; i < names.length; i++) {
     const n = names[i];
