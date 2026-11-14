@@ -66,19 +66,22 @@ export const NATURE = [
 
 export const PROPS = ["blasters/crate-medium", "blasters/crate-wide", "blasters/crate-small"];
 
-/** Every model a match can need, in load order. */
+/** Level-unlocked player skins: loaded in the background after the island is ready (not needed for a first match). */
+export const SKIN_NAMES = Object.values(HUMAN_SKINS).map((c) => `chars/${c}`);
+
+/** Every model the first match needs, in load order (the player skins come later). */
 export function modelNames(): string[] {
-  return [...CHARS.map((c) => `chars/${c}`), ...Object.values(HUMAN_SKINS).map((c) => `chars/${c}`), ...Object.values(WEAPON_MODEL), ...NATURE, ...PROPS];
+  return [...CHARS.map((c) => `chars/${c}`), ...Object.values(WEAPON_MODEL), ...NATURE, ...PROPS];
 }
 
 type Prefetch = Map<string, Promise<ArrayBuffer>>;
 const g = globalThis as unknown as { __brModels?: Prefetch };
 
 /** Start every GLB download now (idempotent); loadAll() picks the promises up. */
-export function prefetchModels(): Prefetch {
-  if (g.__brModels) return g.__brModels;
-  const m: Prefetch = new Map();
-  for (const n of modelNames()) {
+export function prefetchModels(names = modelNames()): Prefetch {
+  const m: Prefetch = g.__brModels ?? new Map();
+  for (const n of names) {
+    if (m.has(n)) continue;
     const p = fetch(`${MODEL_BASE}${n}.glb`).then((r) => {
       if (!r.ok) throw new Error(`asset ${n}: HTTP ${r.status}`);
       return r.arrayBuffer();

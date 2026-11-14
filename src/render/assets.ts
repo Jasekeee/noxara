@@ -5,7 +5,7 @@ import type { WeaponKind } from "../sim/types";
 
 
 export { CHARS, HUMAN_SKINS, HUMAN_SKIN_IDS, WEAPON_MODEL, NATURE, charFor } from "./modelList";
-import { MODEL_BASE as BASE, prefetchModels, modelNames } from "./modelList";
+import { CHARS, MODEL_BASE as BASE, SKIN_NAMES, prefetchModels, modelNames } from "./modelList";
 
 
 const cache = new Map<string, GLTF>();
@@ -31,10 +31,9 @@ const yieldTask = () => new Promise<void>((r) => setTimeout(r, 0));
  * Fetch every model in parallel (network only), then parse them one at a time with a yield between
  * each, so loading never makes a long main-thread task (cold-cache first load stays responsive).
  */
-export async function loadAll(onProgress: (p: number) => void): Promise<void> {
+export async function loadAll(onProgress: (p: number) => void, names = modelNames()): Promise<void> {
   const loader = new GLTFLoader();
-  const names = modelNames();
-  const pre = prefetchModels(); // started at first paint by src/main.ts (or now)
+  const pre = prefetchModels(names); // started at first paint by src/main.ts (or now)
   const buffers = names.map((n) => pre.get(n)!);
   let done = 0;
   for (let i = 0; i < names.length; i++) {
@@ -68,8 +67,12 @@ export async function loadAll(onProgress: (p: number) => void): Promise<void> {
   }
 }
 
+/** The level-unlocked player skins, after the island is ready. */
+export const loadSkins = () => loadAll(() => undefined, SKIN_NAMES.filter((n) => !cache.has(n)));
+
 export function gltf(name: string): GLTF {
-  const g = cache.get(name);
+  // a player skin requested before loadSkins() finished: the default character until then
+  const g = cache.get(name) ?? (SKIN_NAMES.includes(name) ? cache.get(`chars/${CHARS[0]}`) : undefined);
   if (!g) throw new Error(`asset not loaded: ${name}`);
   return g;
 }

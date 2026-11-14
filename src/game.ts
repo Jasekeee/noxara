@@ -9,7 +9,7 @@ import { AimLine } from "./render/aimline";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
 import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
-import { HUMAN_SKIN_IDS, charFor, loadAll } from "./render/assets";
+import { HUMAN_SKIN_IDS, charFor, loadAll, loadSkins } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
 import { Fx } from "./render/fx";
@@ -1479,6 +1479,7 @@ async function boot() {
   }
   rebuildPreview();
   await nextFrame();
+  await loadSkins(); // level-unlocked skins: after the island is playable
   skinPortraits = await makePortraits(renderer, HUMAN_SKIN_IDS.map((id) => charFor(0, id)));
 }
 
