@@ -310,6 +310,31 @@ async function refreshLobby() {
   await refreshAccount();
 }
 
+// ------------------------------------------------------------------ drop-in line-up (while the chain seals the match)
+function showLineup() {
+  const box = $("drop-lineup");
+  box.textContent = "";
+  const active = fighters.filter((f) => f.status === "active").sort((a, b) => Number(b.bounty) - Number(a.bounty) || b.balance - a.balance).slice(0, 9);
+  for (const f of active) {
+    const card = document.createElement("div");
+    card.className = "dl-card" + (f.bounty ? " mark" : "");
+    const img = document.createElement("img");
+    img.alt = "";
+    img.width = 46;
+    img.height = 46;
+    const src = portraits[f.slot + 1];
+    if (src) img.src = src;
+    const nm = document.createElement("b");
+    nm.textContent = displayId(f.account, f.name);
+    nm.title = f.account;
+    const sub = document.createElement("small");
+    sub.textContent = f.bounty ? `WANTED · +${fmt(f.bountyValue)} NOX` : `${fmt(f.balance)} NOX`;
+    card.append(img, nm, sub);
+    box.appendChild(card);
+  }
+  box.classList.toggle("hidden", !active.length);
+}
+
 // ------------------------------------------------------------------ one-time "this is the Mark" hint
 const BOUNTY_HINT = "noxara.hint.bounty";
 function seenBountyHint(): boolean {
@@ -691,9 +716,15 @@ async function startMatch() {
   // "chain_error" = a transient failure last time: the client tries the chain again (and says so if it still fails)
   const chainTry = !!c && (c.mode === "chain" || c.offlineReason === "chain_error");
   if (c && chainTry) {
+    showLineup();
     $("dropping").classList.remove("hidden");
-    $("drop-sub").textContent = "sealing the match seed on NEAR…";
+    // the wait is real (a guest pass on first play + the next block seals the seed): show tonight's line-up instead of a spinner
+    const steps = c.isGuest() && !(c as GameClient & { hasSession?: () => boolean }).hasSession?.() ? ["Getting your guest pass…", "Sealing the match seed on NEAR…", "Placing the mercenaries…"] : ["Sealing the match seed on NEAR…", "Placing the mercenaries…"];
+    let si = 0;
+    $("drop-sub").textContent = steps[0];
+    const stepT = window.setInterval(() => { si = Math.min(si + 1, steps.length - 1); $("drop-sub").textContent = steps[si]; }, 3200);
     start = await withTimeout(c.startMatch(), 50000); // includes one quiet retry after 1.5 s inside the client
+    clearInterval(stepT);
   } else if (c) start = await withTimeout(c.startMatch(), 3000);
   const fellBack = chainTry && !forced && (!start || start.matchId.startsWith("local-"));
   current = start ?? localStart();

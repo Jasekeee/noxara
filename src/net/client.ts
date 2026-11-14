@@ -250,6 +250,11 @@ class Client implements GameClientT3, GameClientEcon {
     }
   }
 
+  /** true once this browser holds an account (guest or signed in): the first ranked match also creates the guest pass */
+  hasSession(): boolean {
+    return !!this.saved;
+  }
+
   isGuest(): boolean {
     return !this.realSaved;
   }
