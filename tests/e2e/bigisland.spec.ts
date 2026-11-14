@@ -12,7 +12,9 @@ test("big island: the title button starts an offline match on the big map", asyn
   const btn = page.locator("#big-island");
   await expect(btn).toBeVisible();
   await expect(page.locator("#play")).toHaveText("PLAY", { timeout: 30_000 });
-  await btn.click();
+  await btn.click(); // selects the mode; PLAY starts it
+  await expect(btn).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#play").click();
   await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("playing");
   const cfg = await page.evaluate(() => (window.__br as unknown as { match(): { cfg: { map?: string }; map: { radius: number } } }).match());
   expect(cfg.cfg.map).toBe("big");

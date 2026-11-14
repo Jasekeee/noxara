@@ -43,7 +43,7 @@ test("about: /?about opens the page and the title link opens it", async ({ page 
   await page.goto(offlineUrl("about"));
   await requireHook(page);
   await expect(page.getByRole("heading", { name: "ABOUT THE GAME" })).toBeVisible();
-  await expect(page.getByText("Only one walks out. Hunt the richest. Take the bounty.")).toBeVisible();
+  await expect(page.locator(".page-lede")).toContainText("Only one walks out. Hunt the richest. Take the bounty.");
   await expect(page.getByText("X post: coming soon")).toBeVisible();
   await page.goto(offlineUrl());
   await requireHook(page);
@@ -80,7 +80,7 @@ test("title: the mode selector decides what PLAY starts (training, remembered, s
 
   await page.locator("#play").click();
   await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("playing");
-  const training = await page.evaluate(() => (window.__br!.record?.() as unknown as { cfg?: { training?: boolean } } | undefined)?.cfg?.training);
+  const training = await page.evaluate(() => (window.__br as unknown as { match(): { cfg: { training?: boolean } } }).match().cfg.training);
   expect(training, "PLAY started a training match").toBe(true);
   expect(errors).toEqual([]);
 });
