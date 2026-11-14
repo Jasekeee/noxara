@@ -848,3 +848,4 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .soon-row { flex-direction: row; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
 .fcard.bounty.wanted .fc-up, .fcard.bounty.wanted .fc-rec { display: none; }
 .fcard.bounty.wanted .fc-top { width: 66px; height: 66px; } .fcard.bounty.wanted .fc-face { width: 66px; height: 66px; }
+.fc-acct { font-size: 9px; letter-spacing: -.02em; text-overflow: clip; }
