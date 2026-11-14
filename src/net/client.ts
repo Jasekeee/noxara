@@ -12,14 +12,21 @@ import { matchConfigFromChain, specsFromFighters, type ChainMatch, type ChainRos
 import { ed25519Supported, finalBlockHash, generateKey, inputLogHash, rpc, sendTransaction, settleMessage, sha256, signDelegate, signTransaction, Signer, toBase64, viewCall, type StoredKey } from "./near";
 
 const env = ((import.meta as { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
+/** Per-network defaults: VITE_NEAR_NETWORK=mainnet alone switches every id/link to noxara.near + mainnet explorers. */
+export const NETWORK_DEFAULTS = {
+  testnet: { rpc: "https://test.rpc.fastnear.com", contract: "royale.br-7e8492.testnet", explorer: "https://testnet.nearblocks.io", wallet: "https://testnet.mynearwallet.com" },
+  mainnet: { rpc: "https://free.rpc.fastnear.com", contract: "noxara.near", explorer: "https://nearblocks.io", wallet: "https://app.mynearwallet.com" },
+} as const;
+const NET = (env.VITE_NEAR_NETWORK === "mainnet" ? "mainnet" : "testnet") as "testnet" | "mainnet";
 const DEFAULTS = {
   relayer: env.VITE_RELAYER_URL ?? "http://127.0.0.1:8788",
-  rpc: env.VITE_NEAR_RPC ?? "https://test.rpc.fastnear.com",
-  contract: env.VITE_CONTRACT_ID ?? "royale.br-7e8492.testnet",
-  explorer: env.VITE_EXPLORER ?? "https://testnet.nearblocks.io",
-  wallet: env.VITE_WALLET_URL ?? "https://testnet.mynearwallet.com",
-  network: (env.VITE_NEAR_NETWORK ?? "testnet") as "testnet" | "mainnet",
+  rpc: env.VITE_NEAR_RPC ?? NETWORK_DEFAULTS[NET].rpc,
+  contract: env.VITE_CONTRACT_ID ?? NETWORK_DEFAULTS[NET].contract,
+  explorer: env.VITE_EXPLORER ?? NETWORK_DEFAULTS[NET].explorer,
+  wallet: env.VITE_WALLET_URL ?? NETWORK_DEFAULTS[NET].wallet,
+  network: NET,
 };
+export const NEAR_NETWORK = NET;
 const STORE = "bountyroyale.guest.v1";
 const STORE_REAL = "bountyroyale.account.v1";
 const STORE_PENDING = "bountyroyale.signin.v1";

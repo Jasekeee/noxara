@@ -1,5 +1,6 @@
 // ECONOMY page (EVE-style monthly economic report in our game style) and HOW NEAR POWERS NOXARA.
 // Pure view code: reads GameClientEcon, never throws into the UI (every view has neutral fallbacks).
+import { NEAR_NETWORK, NETWORK_DEFAULTS } from "../net/client";
 import type { EconomyInfo, FighterInfo, GameClient, GameClientEcon, Holding, Listing, SeasonRow, ShareMarketRow } from "../net/api";
 import { acctTag } from "./acct";
 import { h, icon, ICON, fmt } from "./dom";
@@ -393,8 +394,8 @@ function listModal(x: Ctx, r: ShareMarketRow, owned: number) {
 export function renderNear(body: HTMLElement, d: PageDeps, openEconomy: () => void) {
   body.textContent = "";
   const c = d.client();
-  const contract = (c as unknown as { contractId?: string } | null)?.contractId ?? "royale.br-7e8492.testnet";
-  const acct = (a: string) => (c ? c.explorerAccount(a) : `https://testnet.nearblocks.io/address/${a}`);
+  const contract = (c as unknown as { contractId?: string } | null)?.contractId ?? NETWORK_DEFAULTS[NEAR_NETWORK].contract;
+  const acct = (a: string) => (c ? c.explorerAccount(a) : `${NETWORK_DEFAULTS[NEAR_NETWORK].explorer}/address/${a}`);
   const sec = (title: string, ...kids: (Node | null)[]) => h("section", "nsec", undefined, h("h3", "", title), ...kids);
   const p = (t: string) => h("p", "", t);
   body.appendChild(h("p", "page-lede", "NOXARA is a game first. You never need a wallet to play. Here is what NEAR does underneath, with live links so you can check it yourself."));

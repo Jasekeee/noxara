@@ -19,7 +19,7 @@ import { BOLT_COLOR, PAL, WEAPON_LABEL } from "./render/palette";
 import { Controls } from "./input/input";
 import { Hud } from "./ui/hud";
 import { sfx } from "./audio/sfx";
-import { createGameClient } from "./net/client";
+import { createGameClient, NEAR_NETWORK } from "./net/client";
 import type { FighterInfo, GameClient, GameClientT3, SettleResult, StartResult } from "./net/api";
 import { withMock } from "./ui/mock";
 import { Pages } from "./ui/pages";
@@ -239,7 +239,7 @@ async function refreshLobby() {
     chain_error: "NEAR is busy",
   };
   const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
-  mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
+  mode.textContent = c.mode === "chain" ? `live wallets · NEAR ${NEAR_NETWORK}` : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
