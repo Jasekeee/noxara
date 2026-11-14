@@ -33,6 +33,7 @@ import { Social } from "./ui/challenge";
 import { fmt } from "./ui/dom";
 import { BIG_ISLAND_ENABLED } from "./modes";
 import { getMode, setBoardOpener } from "./ui/titlemenu";
+import { trailerCamera, trailerTimeScale } from "./trailer";
 
 const U = 1 / 1000;
 const DT = 1 / TICK_HZ;
@@ -1445,7 +1446,7 @@ function frame(now: number) {
     slowT -= rdt;
     if (slowT <= 0) timeScale = 1;
   }
-  const dt = rdt * timeScale;
+  const dt = rdt * timeScale * trailerTimeScale(rdt);
   time += rdt;
   autoQuality(rawDt);
 
@@ -1618,7 +1619,10 @@ function frame(now: number) {
     const k = introT / INTRO;
     dist *= 1 + k * k * 1.8;
   }
-  if (phase === "title" || starting) {
+  const tcam = trailerCamera(camera, rdt, match && views.length ? match.state.fighters.map((f, i) => ({ x: views[i]?.pos.x ?? 0, z: views[i]?.pos.z ?? 0, alive: f.alive, bounty: !!f.bounty })) : [], watch);
+  if (tcam) {
+    dist = tcam.dist;
+  } else if (phase === "title" || starting) {
     const a = time * 0.06;
     dist = portrait ? 58 * Math.pow(1 / camera.aspect, 0.5) : 58;
     camTarget.set(Math.cos(a) * 4, 0, Math.sin(a) * 4);
@@ -1635,8 +1639,9 @@ function frame(now: number) {
   const fog = scene.fog as THREE.Fog;
   fog.near = Math.max(48, dist + 14);
   fog.far = fog.near + 70;
-  sun.position.set(camTarget.x + 22, 17, camTarget.z + 12); // low dusk key light, long shadows
-  sun.target.position.set(camTarget.x, 0, camTarget.z);
+  const lt = tcam ? tcam.look : camTarget;
+  sun.position.set(lt.x + 22, 17, lt.z + 12); // low dusk key light, long shadows
+  sun.target.position.set(lt.x, 0, lt.z);
 
   water.uniforms.uTime.value = time;
   fx.update(dt, alpha, time);
