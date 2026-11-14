@@ -552,11 +552,11 @@ fn storage_deposit_covers_a_player_and_a_pending_match() {
     let bot_id = 4 + "yarrow-1234.royale.br-7e8492.testnet".len();
     let entry = borsh::to_vec(&crate::SponsorEntry { sponsor: acc(who), shares: U128(u128::MAX), staked: U128(u128::MAX), earned: U128(u128::MAX), since_matches: 0 }).unwrap().len();
     // + the welcome record (a set entry) and the welcome credit (u128)
-    // + the login row (registration day + last claim, daily.rs). The 3 legacy pool entries are kept in the
+    // + the login row (registration time + last claim day, daily.rs). The 3 legacy pool entries are kept in the
     // budget only while the login row fits too: `sponsor` is refused in release builds (economy v2), so a new
     // player can't create them; the list row stays as a stand-in for the v2 holdings list.
     let legacy = 3 * entry;
-    let extra = rec(1 + id_len, 8) + rec(1 + id_len, 4 + 3 * bot_id) + rec(1 + id_len, 0) + rec(1 + id_len, 16) + rec(1 + id_len, 8);
+    let extra = rec(1 + id_len, 8) + rec(1 + id_len, 4 + 3 * bot_id) + rec(1 + id_len, 0) + rec(1 + id_len, 16) + rec(1 + id_len, 12);
     let _ = legacy;
     let used = rec(1 + id_len, p) + rec(1 + 8, m) + rec(1 + id_len, 16) + extra;
     let cost = env::storage_byte_cost().as_yoctonear() * used as u128;
@@ -1124,7 +1124,7 @@ fn unregister_then_register_brings_no_new_credit_and_keeps_the_record_paid() {
         _ => None,
     })).unwrap();
     // the welcome record and the login row (registration day, daily.rs) outlive the registration
-    let login_row = (40 + 5 + "erin.testnet".len() as u128 + 8) * env::storage_byte_cost().as_yoctonear();
+    let login_row = (40 + 5 + "erin.testnet".len() as u128 + 12) * env::storage_byte_cost().as_yoctonear();
     assert_eq!(refund.as_yoctonear(), STORAGE_DEPOSIT.as_yoctonear() - WELCOME_RECORD_NEAR.as_yoctonear() - login_row, "the record's storage stays paid");
     register_as(&mut c, "erin.testnet", "erin.testnet", 2);
     assert_eq!(c.welcome_credit(&acc("erin.testnet")), 0);
@@ -1737,8 +1737,10 @@ fn econ_params_match_the_simulator() {
     assert_eq!(n("CHECKIN_DAILY_CAP") as u32, daily::CHECKIN_DAILY_CAP);
     assert_eq!(n("QUEST_DAILY_CAP") as u32, daily::QUEST_DAILY_CAP);
     assert_eq!(n("LOGIN_REWARD_MILLI") * ONE / 1000, daily::LOGIN_REWARD);
-    assert_eq!(n("LOGIN_DAILY_CAP") as u32, daily::LOGIN_DAILY_CAP);
-    assert_eq!(n("LOGIN_MIN_AGE_DAYS") as u32, daily::LOGIN_MIN_AGE_DAYS);
+    assert_eq!(n("LOGIN_RESERVED_CAP") as u32, daily::LOGIN_RESERVED_CAP);
+    assert_eq!(n("LOGIN_OPEN_CAP") as u32, daily::LOGIN_OPEN_CAP);
+    assert_eq!(n("LOGIN_RESERVED_WINDOW_DAYS") as u64 * 86_400_000, daily::LOGIN_RESERVED_WINDOW_MS);
+    assert_eq!(n("LOGIN_MIN_AGE_HOURS") as u64 * 3_600_000, daily::LOGIN_MIN_AGE_MS);
 }
 
 #[test]
@@ -2470,14 +2472,38 @@ fn audit6_no_idle_check_in_farming_and_zero_payouts_consume_nothing() {
 // ============================================================ daily login reward (daily.rs) + contract-made guests
 
 fn register_on(c: &mut Contract, who: &str, d: u64) {
-    ctx_ts(RELAY, 120, day_ms(d), STORAGE_DEPOSIT);
+    register_at(c, who, day_ms(d));
+}
+
+fn register_at(c: &mut Contract, who: &str, ms: u64) {
+    ctx_ts(RELAY, 120, ms, STORAGE_DEPOSIT);
     c.storage_deposit(Some(acc(who)), None);
     c.set_welcome_credit(&acc(who), 0);
 }
 
+/// claim at day `d` (registered on an earlier day: day_ms is 01:00 UTC, so a day later is ≥ 24 h later)
 fn login(c: &mut Contract, who: &str, d: u64) -> u128 {
-    ctx_ts(who, 130, day_ms(d), NearToken::from_yoctonear(0));
+    login_at(c, who, day_ms(d))
+}
+
+fn login_at(c: &mut Contract, who: &str, ms: u64) -> u128 {
+    ctx_ts(who, 130, ms, NearToken::from_yoctonear(0));
     c.claim_login().0
+}
+
+/// a match paid from `who`'s own NOX at `ms` (what `record_daily` writes at settle)
+fn paid_at(who: &str, ms: u64) {
+    let mut m = near_sdk::store::LookupMap::<AccountId, daily::PlayerDaily>::new(Key::PlayerDaily);
+    let mut d = m.get(&acc(who)).cloned().unwrap_or_default();
+    d.last_paid_ms = ms;
+    d.lifetime_paid += 1;
+    m.insert(acc(who), d);
+    m.flush();
+}
+
+fn pool_of(c: &Contract, who: &str, ms: u64) -> Option<String> {
+    ctx_ts(who, 131, ms, NearToken::from_yoctonear(0));
+    c.get_login(acc(who)).pool
 }
 
 #[test]
@@ -2485,7 +2511,7 @@ fn login_reward_once_per_day_from_the_house_no_match_needed() {
     let mut c = setup();
     register_on(&mut c, "carol.test", 20_000);
     assert_eq!(login(&mut c, "carol.test", 20_000), 0, "not on the day the account registered");
-    assert!(c.get_login(acc("carol.test")).why_not.unwrap().contains("day after"));
+    assert!(c.get_login(acc("carol.test")).why_not.unwrap().contains("24 hours"));
     let (minted0, supply0, house0) = (c.total_minted, c.token.total_supply, bal(&c, c.house.as_str()));
     let paid = login(&mut c, "carol.test", 20_001);
     assert_eq!(paid, daily::LOGIN_REWARD * m_now(&c).min(10_000) / 10_000, "LOGIN_REWARD × min(m, 1)");
@@ -2496,16 +2522,28 @@ fn login_reward_once_per_day_from_the_house_no_match_needed() {
     assert_eq!(login(&mut c, "carol.test", 20_001), 0, "once per UTC day");
     assert_eq!(bal(&c, "carol.test"), paid);
     let v = c.get_login(acc("carol.test"));
-    assert!(v.claimed_today && !v.can_claim && v.claims_today == 1);
+    assert!(v.claimed_today && !v.can_claim && v.claims_today == 1 && v.open_left == daily::LOGIN_OPEN_CAP - 1, "a no-match account drew from OPEN");
     assert!(login(&mut c, "carol.test", 20_002) > 0, "a new UTC day pays again");
     // the streak check-in is separate and still needs a wallet-paid match
     ctx_ts("carol.test", 140, day_ms(20_002), NearToken::from_yoctonear(0));
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err());
     // accounts registered before the upgrade (no login row) can claim right away
-    assert!(daily::login_map().get(&acc(ALICE)).is_some(), "setup registered Alice on day 0");
+    assert!(daily::login_map().get(&acc(ALICE)).is_some(), "setup registered Alice");
     daily::login_map().remove(&acc(ALICE));
     assert!(login(&mut c, ALICE, 20_002) > 0);
     assert_supply_seen(&c, &mut [acc("carol.test")].into_iter().collect());
+}
+
+#[test]
+fn login_age_is_24_hours_not_a_calendar_day() {
+    let mut c = setup();
+    let t = day_ms(20_000) + 22 * 3_600_000 + 59 * 60_000 + 59_999; // 23:59:59.999 UTC
+    register_at(&mut c, "carol.test", t);
+    let midnight = (20_001) * 86_400_000;
+    assert_eq!(login_at(&mut c, "carol.test", midnight), 0, "the next calendar day isn't enough");
+    assert_eq!(login_at(&mut c, "carol.test", t + daily::LOGIN_MIN_AGE_MS - 1), 0, "since + 24 h - 1 ms");
+    assert!(!c.get_login(acc("carol.test")).claimed_today, "nothing consumed");
+    assert!(login_at(&mut c, "carol.test", t + daily::LOGIN_MIN_AGE_MS) > 0, "since + 24 h pays");
 }
 
 #[test]
@@ -2516,36 +2554,91 @@ fn login_reward_is_zero_for_guests_game_wallets_and_strangers() {
     let new_guest = "g-0123abcd.royale.test";
     register_on(&mut c, new_guest, 20_000);
     assert!(c.get_player(acc(new_guest)).unwrap().guest, "a contract-made guest registers as a guest");
+    paid_at(new_guest, day_ms(20_001)); // even with a (forged) paid-match record
     assert_eq!(login(&mut c, new_guest, 20_001), 0, "contract-made guest");
     let bot = slot_acc(&c, 0);
     register_on(&mut c, &bot, 20_000);
     assert_eq!(login(&mut c, &bot, 20_001), 0, "a bot");
     assert_eq!(login(&mut c, "stranger.test", 20_001), 0, "not registered");
     assert_eq!(bal(&c, c.house.as_str()), house0, "nothing paid");
-    assert_eq!(c.get_login(acc(GUEST)).claims_today, 0, "nothing counted against the cap");
+    assert_eq!(c.get_login(acc(GUEST)).claims_today, 0, "nothing counted against the caps");
 }
 
 #[test]
-fn login_reward_global_cap_then_zero_without_consuming_anything() {
+fn login_reserved_pool_needs_a_wallet_paid_match_in_the_last_7_days() {
     let mut c = setup();
-    let who: Vec<String> = (0..=daily::LOGIN_DAILY_CAP).map(|i| format!("farm{i}.test")).collect();
-    for w in &who {
+    let now = day_ms(20_010);
+    for w in ["six.test", "eight.test", "none.test"] {
         register_on(&mut c, w, 20_000);
     }
-    let mut total = 0;
-    for w in &who[..daily::LOGIN_DAILY_CAP as usize] {
-        let p = login(&mut c, w, 20_001);
-        assert!(p > 0);
-        total += p;
+    paid_at("six.test", now - 6 * 86_400_000);
+    paid_at("eight.test", now - 8 * 86_400_000);
+    assert_eq!(pool_of(&c, "six.test", now).as_deref(), Some("reserved"), "paid 6 days ago");
+    assert_eq!(pool_of(&c, "eight.test", now).as_deref(), Some("open"), "paid 8 days ago");
+    assert_eq!(pool_of(&c, "none.test", now).as_deref(), Some("open"), "never paid: open pool, no match required");
+    // welcome-credit matches never count (record_daily skips them)
+    c.set_welcome_credit(&acc(ALICE), WELCOME_STAKE);
+    alice_paid_match(&mut c, 20_010, 200, false, false);
+    assert!(!c.get_login(acc(ALICE)).reserved_eligible, "a welcome-credit match doesn't qualify");
+    // a wallet-paid one does
+    c.set_welcome_credit(&acc(ALICE), 0);
+    grant(&mut c, ALICE, 50 * ONE);
+    alice_paid_match(&mut c, 20_010, 220, false, false);
+    assert_eq!(pool_of(&c, ALICE, day_ms(20_010) + 10_000).as_deref(), Some("reserved"));
+    // and the claim draws from that pool
+    assert!(login_at(&mut c, "six.test", now) > 0);
+    assert!(login_at(&mut c, "none.test", now) > 0);
+    let v = c.get_login(acc("eight.test"));
+    assert_eq!((v.reserved_left, v.open_left), (daily::LOGIN_RESERVED_CAP - 1, daily::LOGIN_OPEN_CAP - 1));
+}
+
+#[test]
+fn login_pools_order_and_both_caps() {
+    let mut c = setup();
+    let now = day_ms(20_001);
+    let n_res = daily::LOGIN_RESERVED_CAP as usize;
+    let n_open = daily::LOGIN_OPEN_CAP as usize;
+    let active: Vec<String> = (0..n_res + 2).map(|i| format!("active{i}.test")).collect();
+    let farm: Vec<String> = (0..n_open + 1).map(|i| format!("farm{i}.test")).collect();
+    for w in active.iter().chain(farm.iter()) {
+        register_on(&mut c, w, 20_000);
     }
-    assert!(total <= daily::LOGIN_DAILY_CAP as u128 * daily::LOGIN_REWARD, "a day's exposure is bounded by the cap");
-    let last = who.last().unwrap();
+    for w in &active {
+        paid_at(w, now - 3_600_000);
+    }
+    // the farm (no paid matches) can only take the OPEN pool, then gets 0 without consuming anything
+    let mut farmed = 0;
+    for w in &farm[..n_open] {
+        assert_eq!(pool_of(&c, w, now).as_deref(), Some("open"));
+        farmed += login_at(&mut c, w, now);
+    }
+    assert!(farmed > 0 && farmed <= daily::LOGIN_OPEN_CAP as u128 * daily::LOGIN_REWARD, "a farm's day is bounded by OPEN");
+    let last = farm.last().unwrap();
     let house = bal(&c, c.house.as_str());
-    assert_eq!(login(&mut c, last, 20_001), 0, "cap reached");
+    assert_eq!(login_at(&mut c, last, now), 0, "OPEN full");
     assert_eq!(bal(&c, c.house.as_str()), house);
     let v = c.get_login(acc(last));
-    assert!(!v.claimed_today && v.why_not.unwrap().contains("all claimed"), "the refused claim consumed nothing");
-    assert!(login(&mut c, last, 20_002) > 0, "the next day it pays");
+    assert!(!v.claimed_today && v.pool.is_none() && v.why_not.unwrap().contains("all claimed"), "nothing consumed");
+    // ... while active players still have the whole RESERVED pool
+    for w in &active[..n_res] {
+        assert_eq!(pool_of(&c, w, now).as_deref(), Some("reserved"));
+        assert!(login_at(&mut c, w, now) > 0);
+    }
+    let v = c.get_login(acc(&active[n_res]));
+    assert_eq!((v.reserved_left, v.open_left, v.claims_today), (0, 0, daily::LOGIN_RESERVED_CAP + daily::LOGIN_OPEN_CAP));
+    assert_eq!(login_at(&mut c, &active[n_res], now), 0, "both pools full");
+    // an active player falls back to OPEN when RESERVED is full (fresh day, reserved filled first)
+    let next = day_ms(20_002);
+    for w in &active[..n_res] {
+        paid_at(w, next - 3_600_000);
+        assert_eq!(pool_of(&c, w, next).as_deref(), Some("reserved"));
+        assert!(login_at(&mut c, w, next) > 0);
+    }
+    paid_at(&active[n_res], next - 3_600_000);
+    assert_eq!(pool_of(&c, &active[n_res], next).as_deref(), Some("open"), "RESERVED full: falls back to OPEN");
+    assert!(login_at(&mut c, &active[n_res], next) > 0);
+    let v = c.get_login(acc(&active[n_res + 1]));
+    assert_eq!((v.reserved_left, v.open_left), (0, daily::LOGIN_OPEN_CAP - 1));
 }
 
 #[test]
@@ -2568,7 +2661,9 @@ fn login_row_survives_unregister_and_its_storage_is_kept_from_the_refund() {
     assert!(login(&mut c, "carol.test", 20_001) > 0);
     ctx_ts("carol.test", 150, day_ms(20_001), NearToken::from_yoctonear(1));
     let kept = c.daily_row_near(&acc("carol.test"));
-    assert_eq!(kept, (40 + 5 + "carol.test".len() as u128 + 8) * env::storage_byte_cost().as_yoctonear(), "only the login row");
+    assert_eq!(kept, (40 + 5 + "carol.test".len() as u128 + 12) * env::storage_byte_cost().as_yoctonear(), "only the login row");
+    let row = borsh::to_vec(&daily::login_map().get(&acc("carol.test")).cloned().unwrap()).unwrap();
+    assert_eq!(row.len(), 12, "the byte count in daily_row_near matches the layout");
     assert!(c.storage_unregister(Some(true)));
     let receipts = near_sdk::test_utils::get_created_receipts();
     let refund = receipts.iter().rev().find_map(|r| r.actions.iter().find_map(|a| match a {
@@ -2578,7 +2673,7 @@ fn login_row_survives_unregister_and_its_storage_is_kept_from_the_refund() {
     assert_eq!(refund, Some(STORAGE_DEPOSIT.as_yoctonear() - WELCOME_RECORD_NEAR.as_yoctonear() - kept), "the row's bytes stay paid");
     register_on(&mut c, "carol.test", 20_001);
     assert_eq!(login(&mut c, "carol.test", 20_001), 0, "re-registering can't claim the same day twice");
-    assert_eq!(daily::login_map().get(&acc("carol.test")).unwrap().since_day, 20_000, "registration day kept");
+    assert_eq!(daily::login_map().get(&acc("carol.test")).unwrap().since_ms, day_ms(20_000), "first registration kept");
     assert!(login(&mut c, "carol.test", 20_002) > 0);
 }
 

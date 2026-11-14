@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkDelegate, isGuestAccount, isGuestId, RateLimiter, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "../src/policy.ts";
+import { checkDelegate, preflight, isGuestAccount, isGuestId, RateLimiter, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "../src/policy.ts";
 
 const p: RelayPolicy = { gameContractId: "game.t", guestParentId: "relay.t", allowedMethods: ["start_match", "draw", "leave"], maxGasPerAction: 30n * 10n ** 12n, maxActions: 1 };
 const fc = (methodName: string, deposit = 0n, gas = 15n * 10n ** 12n) => ({ functionCall: { methodName, args: new Uint8Array(), gas, deposit } });
@@ -97,4 +97,21 @@ test("claim_login is relayed gaslessly (default allow-list, 30 Tgas cap)", () =>
   assert.equal(checkDelegate({ ...call(30n * 10n ** 12n), receiverId: "other.t" }, lp).ok, false);
   // guests' own keys never get it (GUEST_METHODS stays start/sweep; the contract fixes create_guest's key too)
   assert.equal(checkDelegate({ ...call(30n * 10n ** 12n), actions: [{ functionCall: { methodName: "create_guest", args: new Uint8Array(), gas: 30n * 10n ** 12n, deposit: 0n } }] }, lp).ok, false, "create_guest is never relayed");
+});
+
+test("claim_login is relayed only when get_login says it pays (no tx for no-ops)", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const view = (answer: unknown) => async (m: string, a: Record<string, unknown>) => {
+    calls.push([m, a]);
+    if (answer instanceof Error) throw answer;
+    return answer;
+  };
+  assert.equal(await preflight(["claim_login"], "alice.t", view({ can_claim: true, pool: "open" })), null);
+  assert.deepEqual(calls[0], ["get_login", { account_id: "alice.t" }]);
+  assert.equal(await preflight(["claim_login"], "alice.t", view({ can_claim: false, why_not: "already claimed today" })), "already claimed today");
+  assert.equal(await preflight(["claim_login"], "alice.t", view(null)), "no login reward to claim");
+  assert.ok(await preflight(["claim_login"], "alice.t", view(new Error("rpc down"))), "fails closed");
+  const n = calls.length;
+  assert.equal(await preflight(["start_match"], "alice.t", view({ can_claim: false })), null, "other methods: no view");
+  assert.equal(calls.length, n);
 });

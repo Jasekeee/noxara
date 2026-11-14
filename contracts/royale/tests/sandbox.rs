@@ -734,15 +734,19 @@ async fn day_of(w: &Worker<Sandbox>) -> anyhow::Result<u64> {
     Ok(w.view_block().await?.timestamp() / 86_400_000_000_000)
 }
 
-/// Fast-forwarding a whole UTC day is too slow in the sandbox: rewrite an account's login row instead
-/// (`Key::LoginRow` = storage prefix 22, borsh(AccountId) key, borsh(LoginRow { since_day, claimed_day }) value).
-async fn set_login_row(w: &Worker<Sandbox>, c: &Contract, who: &near_workspaces::AccountId, since_day: u32, claimed_day: u32) -> anyhow::Result<()> {
+/// Fast-forwarding a whole day is too slow in the sandbox: rewrite an account's login row instead
+/// (`Key::LoginRow` = storage prefix 22, borsh(AccountId) key, borsh(LoginRow { since_ms: u64, claimed_day: u32 })).
+async fn set_login_row(w: &Worker<Sandbox>, c: &Contract, who: &near_workspaces::AccountId, since_ms: u64, claimed_day: u32) -> anyhow::Result<()> {
     let mut key = vec![22u8];
     key.extend((who.as_str().len() as u32).to_le_bytes());
     key.extend(who.as_str().as_bytes());
-    let mut val = since_day.to_le_bytes().to_vec();
+    let mut val = since_ms.to_le_bytes().to_vec();
     val.extend(claimed_day.to_le_bytes());
     Ok(w.patch_state(c.id(), &key, &val).await?)
+}
+
+async fn now_ms(w: &Worker<Sandbox>) -> anyhow::Result<u64> {
+    Ok(w.view_block().await?.timestamp() / 1_000_000)
 }
 
 async fn claim_login(a: &Account, c: &Contract) -> anyhow::Result<u128> {
@@ -759,12 +763,14 @@ async fn login_reward_daily_from_the_house_guests_zero_no_mint() -> anyhow::Resu
     let g = guest(&wd, "g-ab12").await?;
     assert_eq!(claim_login(&carol, c).await?, 0, "not on the registration day");
     let v: Value = c.view("get_login").args_json(json!({"account_id": carol.id()})).await?.json()?;
-    assert!(v["why_not"].as_str().unwrap().contains("day after"), "{v}");
-    let today = day_of(&wd.w).await? as u32;
-    // the account registered yesterday (the layout check: get_login must read the patched row)
-    set_login_row(&wd.w, c, carol.id(), today - 1, 0).await?;
+    assert!(v["why_not"].as_str().unwrap().contains("24 hours"), "{v}");
+    assert_eq!(v["pool"], Value::Null);
+    // the account registered 24 h ago (the layout check: get_login must read the patched row)
+    set_login_row(&wd.w, c, carol.id(), now_ms(&wd.w).await? - 86_400_000, 0).await?;
     let v: Value = c.view("get_login").args_json(json!({"account_id": carol.id()})).await?.json()?;
     assert_eq!(v["can_claim"], true, "{v}");
+    assert_eq!(v["pool"], "open", "no paid match: the OPEN pool");
+    assert_eq!(v["pool_left"], 15);
     let cfg0: Value = c.view("get_config").await?.json()?;
     let paid = claim_login(&carol, c).await?;
     assert!(paid > 0 && paid <= ONE / 2, "0.5 NOX × min(m, 1): {paid}");
@@ -783,7 +789,7 @@ async fn login_reward_daily_from_the_house_guests_zero_no_mint() -> anyhow::Resu
     assert_eq!(v["can_claim"], false);
     // a new UTC day pays again (the last claim was yesterday)
     let today = day_of(&wd.w).await? as u32;
-    set_login_row(&wd.w, c, carol.id(), today - 2, today - 1).await?;
+    set_login_row(&wd.w, c, carol.id(), now_ms(&wd.w).await? - 2 * 86_400_000, today - 1).await?;
     assert!(claim_login(&carol, c).await? > 0);
     let v: Value = c.view("get_login").args_json(json!({"account_id": carol.id()})).await?.json()?;
     assert_eq!(v["claimed_today"], true);

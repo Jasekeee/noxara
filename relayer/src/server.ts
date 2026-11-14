@@ -18,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Chain } from "./chain.ts";
 import { signatureOk, settleSignatureOk, KeyOwners } from "./verify.ts";
-import { checkDelegate, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
+import { checkDelegate, preflight, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
 import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
 import { registerMessage } from "./protocol.ts";
 import { Subsidies } from "./subsidies.ts";
@@ -228,6 +228,9 @@ const server = http.createServer(async (req, res) => {
       if (!sig.ok || !sig.publicKey) return send(res, 401, { error: "bad signature" }, origin);
       if (!(await owners.owns(d.senderId, sig.publicKey))) return send(res, 401, { error: "unknown key for this account" }, origin);
       if (!relayPerSender.take(d.senderId)) return send(res, 429, { error: "slow down" }, origin);
+      // no gas for no-ops: e.g. claim_login is relayed only when the contract says it pays (no tx otherwise)
+      const pre = await preflight(check.methods, d.senderId, (m, a) => chain.view(m, a));
+      if (pre) return send(res, 409, { error: pre, code: "nothing_to_claim" }, origin);
       const shutRelay = budget.closed("relay", RESERVE.relay);
       if (shutRelay) {
         // real accounts keep playing: their client signs the same call itself (its key's allowance pays)

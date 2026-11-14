@@ -370,8 +370,8 @@ impl Contract {
         // the check-in/quest row also outlives the account (re-registering must not reset today's claims)
         // PlayerDaily row: key (1 + 4 + len) + value (8 + 4 + 4 + 4 + 12 + 1 + 4) + 40 overhead
         let b = if StoreMap::<AccountId, crate::daily::PlayerDaily>::new(Key::PlayerDaily).get(id).is_some() { 40 + 5 + id.len() as u128 + 37 } else { 0 };
-        // the login row (registration day + last claim) outlives it too: key (1 + 4 + len) + value (4 + 4) + 40
-        let c = if crate::daily::login_map().get(id).is_some() { 40 + 5 + id.len() as u128 + 8 } else { 0 };
+        // the login row (registration time + last claim day) outlives it too: key (1 + 4 + len) + value (8 + 4) + 40
+        let c = if crate::daily::login_map().get(id).is_some() { 40 + 5 + id.len() as u128 + 12 } else { 0 };
         (a + b + c) * env::storage_byte_cost().as_yoctonear()
     }
 

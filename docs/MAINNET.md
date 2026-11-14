@@ -33,7 +33,7 @@ The owner account (your wallet, e.g. `<you>.near`) is set as `owner` and as the 
 ## 2. Cost (preliminary — final numbers after the audit fixes and the testnet rehearsal)
 | Item | NEAR | Kind |
 |---|---|---|
-| Contract code storage (wasm 521,532 B incl. daily check-in/quests, login reward, `create_guest` → 1 NEAR per 100 KB) | ≈ 5.22 | refundable (on teardown) |
+| Contract code storage (wasm 524,292 B incl. daily check-in/quests, login reward, `create_guest` → 1 NEAR per 100 KB) | ≈ 5.24 | refundable (on teardown) |
 | Contract state headroom (testnet: ≈ 56 KB after 46 matches) | ≈ 0.96 | refundable |
 | Relayer budget: guest accounts + storage deposits + relayed gas, hard-capped | 1.00 | mostly spent; unused part refundable |
 | 10 keyless bot/house accounts | 0.01 | spent (no key → can't be deleted) |

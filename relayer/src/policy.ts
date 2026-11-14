@@ -20,6 +20,19 @@ export const METHOD_GAS_DEFAULT: Record<string, bigint> = {
   start_match: 150n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS, claim_welcome: 30n * TGAS, claim_login: 30n * TGAS,
 };
 
+/** Relayed calls that could be paid-for no-ops: ask the contract first and refuse without sending a tx (audit #7
+ *  L-2: `claim_login` returns 0 as a success when nothing is due). Returns the refusal reason, or null to relay. */
+export async function preflight(methods: readonly string[], sender: string, view: (method: string, args: Record<string, unknown>) => Promise<unknown>): Promise<string | null> {
+  if (!methods.includes("claim_login")) return null;
+  let v: { can_claim?: boolean; why_not?: string | null } | null;
+  try {
+    v = (await view("get_login", { account_id: sender })) as typeof v;
+  } catch {
+    return "can't check the login reward right now";
+  }
+  return v?.can_claim === true ? null : (v?.why_not ?? "no login reward to claim");
+}
+
 export type DelegateLike = {
   senderId: string;
   receiverId: string;
