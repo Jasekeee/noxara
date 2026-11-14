@@ -458,6 +458,19 @@ export class Pages {
   }
 
   // ---------------------------------------------------------------- LEADERBOARD
+  /** Account label that links to the explorer for real chain accounts (bots included). */
+  private acctLink(account: string, name: string): HTMLElement {
+    const c = this.d.client();
+    const label = acctLabel(account, name);
+    if (!c || c.mode !== "chain" || !isChainAcct(account)) return label;
+    const a = h("a", "acct-link", undefined, label);
+    a.href = c.explorerAccount(account);
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.setAttribute("aria-label", `${account} on the NEAR explorer`);
+    return a;
+  }
+
   leaderboard(kind: "bots" | "players" = "bots") {
     const render = () => {
       $("page-title").textContent = "LEADERBOARD";
@@ -498,7 +511,7 @@ export class Pages {
           img.alt = "";
           if (f) img.src = this.d.portrait(f);
           const tr = h("tr", i < 3 ? `top${i + 1}` : "");
-          tr.append(h("td", "rank", String(i + 1)), h("td", "", undefined, f ? img : h("span", "lb-dot")), h("td", "nm", undefined, r.name === "You" ? h("span", "", "You") : acctLabel(r.account, r.name)), h("td", "", String(r.wins)), h("td", "", String(r.kills)), h("td", "", String(r.matches)), h("td", "gold", fmt(r.earnings)));
+          tr.append(h("td", "rank", String(i + 1)), h("td", "", undefined, f ? img : h("span", "lb-dot")), h("td", "nm", undefined, r.name === "You" ? h("span", "", "You") : this.acctLink(r.account, r.name)), h("td", "", String(r.wins)), h("td", "", String(r.kills)), h("td", "", String(r.matches)), h("td", "gold", fmt(r.earnings)));
           if (f) {
             tr.tabIndex = 0;
             tr.classList.add("link");

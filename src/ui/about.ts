@@ -1,6 +1,7 @@
 // "About the game": the pitch, three steps, the economy in plain words, the NEAR links. Safe to open anywhere (it is a page, not a mode).
 import type { GameClient } from "../net/api";
 import { h, icon, ICON } from "./dom";
+import { NEAR_NETWORK } from "../net/client";
 
 /** Mainnet links, filled in after the owner's mainnet deploy (docs/SUBMISSION.md §5). null = not deployed yet. */
 export const MAINNET: { contract: string | null; deployTx: string | null; explorer: string } = {
@@ -48,7 +49,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
     h("p", "ab-p", undefined, h("b", "", "The House. "), document.createTextNode("The treasury behind every match. It follows one public rule, nothing is minted after genesis, and a share of every pot is burned.")),
     h("p", "ab-p", undefined, h("b", "", "The bounty. "), document.createTextNode("The richest bot is the Mark. Whoever takes it down collects it.")),
     h("p", "ab-p", undefined, h("b", "", "Bot shares. "), document.createTextNode("Fans can own shares of a fighter. Dividends are paid only from profit. If the fighter goes broke, its shares go to zero.")),
-    h("p", "sc-note", "NOX is play-money with no real-world value."),
+    h("p", "sc-note", "NOX is play-money with no real-world value. Ranked (on-chain) play runs until 2026-11-20 00:00 UTC; practice modes are always available."),
   );
   const eco = h("button", "btn-chip", "OPEN THE ECONOMY");
   eco.type = "button";
@@ -63,7 +64,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
   if (c && c.mode === "chain") {
     const id = (c as GameClient & { contractId?: string }).contractId;
     if (id) {
-      links.appendChild(ext(`Game contract (testnet): ${id}`, c.explorerAccount(id)));
+      links.appendChild(ext(`Game contract (${NEAR_NETWORK}): ${id}`, c.explorerAccount(id)));
       links.appendChild(ext("Live transactions on the explorer", c.explorerAccount(id)));
     }
   }

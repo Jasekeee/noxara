@@ -5,7 +5,7 @@
 NEAR HACKATHON entry. Primary track: **games** (memecoins optional, don't optimize for it). The owner is not a developer: Claude writes all code. Quality bar: feels like a Brawl Stars / Fortnite slice, not a web demo.
 
 ## Hard rules
-- **Testnet and local only.** No mainnet, `git push`, repo creation, hosting deploy or posts without the owner's explicit "yes".
+- **NOXARA is live on NEAR mainnet (`noxara.near`, since 2026-11-14); testnet is the rehearsal environment.** No further mainnet changes, `git push`, repo creation, hosting deploy or posts without the owner's explicit "yes".
 - Never ask for or read seed phrases / mnemonics. Never read `~/.near-credentials/mainnet`. Secrets only in `.env` (gitignored).
 - **No mainnet keys exist on this machine** until the owner imports them for the final deploy. If any mainnet credential appears in `~/.near-credentials` or `.env*` before that, stop and tell the owner (check names only, never print key material).
 - Do not send users' data to NEAR AI or any external AI service.
@@ -43,7 +43,7 @@ games: "Build NPCs with wallets, player-owned markets and economies that evolve 
 - **T3:** sponsorship market, player progression, "Fighters" page (wallet, record, story per bot), leaderboards, mobile polish, README "do X → see Y" + `npm run verify`, mainnet release plan (steps + NEAR cost) for the owner's "yes".
 
 ## Parallel agents
-Up to 4 agents, each in its own git worktree/branch, strict file ownership (see `docs/OWNERSHIP.md`). The lead integrates: merge every ~2 h, run all tests before merging, nobody edits another agent's files. Shared interfaces live in `src/sim/types.ts` and are changed only by the lead.
+Up to 4 agents, each in its own git worktree/branch, strict file ownership (see `docs/process/OWNERSHIP.md`). The lead integrates: merge every ~2 h, run all tests before merging, nobody edits another agent's files. Shared interfaces live in `src/sim/types.ts` and are changed only by the lead.
 
 ## Quality gates
 0 console errors · Playwright "guest opens → plays a full match" passes · Lighthouse accessibility ≥95 (performance ≥80 for 3D) · all tests green · first match understandable with zero text walls (teach by playing) · 60 FPS on a mid laptop.

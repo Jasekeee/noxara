@@ -940,7 +940,7 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
   #title { padding: 2vh 0 8px; gap: 6px; justify-content: flex-start; }
   #title .title-inner { margin-top: 48px; padding: 0 12px; gap: 8px; }
   .logo { transform: rotate(-3deg) scale(.82); margin: -8px 0; }
-  .net-mode { top: calc(10px + var(--safe-t)); left: 8px; max-width: 34vw; font-size: 9px; }
+  .net-mode { top: calc(10px + var(--safe-t)); left: 8px; max-width: 62vw; font-size: 9px; }
   .mode-seg { display: grid; grid-template-columns: repeat(6, 1fr); width: calc(100vw - 24px); gap: 4px; padding: 4px; }
   .seg { grid-column: span 2; min-height: 38px; padding: 0 4px; font-size: 12px; justify-content: center; letter-spacing: .03em; }
   .seg.soon { grid-column: span 3; }

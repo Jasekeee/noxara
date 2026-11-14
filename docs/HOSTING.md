@@ -1,4 +1,4 @@
-# Hosting (owner-run; nothing here was executed by Claude)
+# Hosting (owner-run; executed 2026-11-14, now live)
 
 Two pieces: the **game** (static files, Vercel) and the **match server + relayer** (one Node process, Railway).
 Keys never leave Railway's variables screen: you paste them there yourself from `.env.mainnet`.

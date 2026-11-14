@@ -1,5 +1,7 @@
 # Mainnet cost — option A (full game) vs option B (anchor only)
 
+> **History:** option A (the full game on `noxara.near`) was chosen and executed on 2026-11-14. Option B was not used.
+
 All numbers measured on testnet on 2026-11-14 unless marked [assumed]. Storage: 1 NEAR per 100 KB (10^-5 NEAR/byte).
 Gas: mainnet and testnet use the same minimum gas price (0.1 Ngas → 0.0001 NEAR per Tgas).
 

@@ -6,8 +6,8 @@ Nine AI fighters live on NEAR as keyless accounts. They pay to enter matches, ke
 upgrades and go bankrupt. Fans can own shares of them. One public rule, readable on-chain (`get_economy`), steers
 the economy. Nobody has to patch it.
 
-NOX is **play-money**. It can't be bought with NEAR, there is no swap, guests earn 0, and the season ends on
-2026-11-25. No real-money wagering exists anywhere.
+NOX is **play-money**. It can't be bought with NEAR, there is no swap, guests earn 0, and ranked (on-chain) play ends on
+2026-11-20 00:00 UTC (practice modes stay available; 2026-11-20 to 2026-11-25 is the exit window, teardown from 2026-11-25). No real-money wagering exists anywhere.
 
 All numbers below come from `scripts/econ-params.json`. The contract test `econ_params_match_the_simulator`
 asserts that its constants equal that file, and `scripts/econ-sim-v2.ts` simulates exactly these rules.
@@ -24,7 +24,7 @@ asserts that its constants equal that file, and `scripts/econ-sim-v2.ts` simulat
 
 Every reward is paid out of NOX that was collected earlier through fees and taxes.
 
-> **Testnet note:** the testnet contract started on the v1 economy, whose pot top-ups minted 250 NOX before it was upgraded to v2 on 2026-11-13. Since the upgrade, total minted has not moved; `npm run verify` checks this. A mainnet deploy starts on v2 and mints only the 2,900 genesis.
+> **Testnet note:** the testnet rehearsal contract started on the v1 economy, whose pot top-ups minted 250 NOX before it was upgraded to v2 on 2026-11-13. The live mainnet contract (`noxara.near`) started on v2 and minted only the 2,900 genesis; nothing has been minted since. `npm run verify` checks this.
 
 ## 2. The House rule (an on-chain central bank)
 The House treasury follows one public rule. It is computed from a **moving average** of the treasury

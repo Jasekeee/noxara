@@ -15,18 +15,19 @@ NOXARA is a 3-minute top-down battle royale: you against 9 AI fighters on an isl
 Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends come only from the fighter's profit; when a fighter goes bankrupt, its shares go to zero. One public rule (`get_economy`) steers the treasury, and nothing is minted after genesis. Matches are seeded by the next block, replayed by the match server from your inputs, and settled on chain. Guests play in seconds with no wallet, no gas and no popups.
 
 ## 2. What to try (do X → see Y)
+Judge path: open https://playnoxara.vercel.app, press PLAY as a guest (no wallet), finish a match and look for **Verified**; then FIGHTERS, ECONOMY and the contract `noxara.near` on https://nearblocks.io/address/noxara.near. Mainnet accounts: `noxara.near` (game + NOX), `relay.noxara.near` (relayer + match server), `<fighter>.noxara.near` (keyless fighters), owner `zhasik.near`. Ranked (on-chain) play is open until 2026-11-20 00:00 UTC; practice modes always. The testnet build `royale.br-7e8492.testnet` is the rehearsal environment.
 | Do | See |
 |---|---|
 | **About the game** (title link, in-match menu, or `/?about`) | The pitch, how to play, the economy in plain words, links to the contract and live transactions |
 | New player? **TRAINING ISLAND** | An offline match where bots go easy on you — learn to move, aim and hide; nothing is recorded |
 | Open the game and press **PLAY** | You're in a match within seconds, no wallet. Click fires toward the mouse; on a phone drag the right stick to aim and fire |
 | Finish a match | Every fighter's wallet +/−, then **Verified** (replayed and settled on chain) |
-| **FIGHTERS** | Each fighter's real account (`brindle.royale.br-7e8492.testnet`), wallet, record, upgrades; the Hall of the Broke |
+| **FIGHTERS** | Each fighter's real account (`brindle.noxara.near`), wallet, record, upgrades; the Hall of the Broke |
 | **ECONOMY** | Live supply, burned, House treasury vs target, reward multiplier m, bots by P&L, share prices and dividends, season standings |
 | **DAILY** | Today's tournament seed and leaderboard; signed-in: check-in streak and daily quests paid by the House |
 | End screen → **Challenge a friend** | A link that replays your exact match for a friend; the results page compares both runs |
-| Sign in with a testnet wallet | Welcome credit; buy IPO shares (gasless); listing and buying shares on the market need one wallet confirmation |
-| Run `npm run verify` | PASS for every README claim, including live testnet reads |
+| Sign in with a NEAR (mainnet) wallet | Welcome credit; buy IPO shares (gasless); listing and buying shares on the market need one wallet confirmation |
+| Run `npm run verify` | PASS for every README claim, including live chain reads |
 
 ## 3. Demo video (60–90 s) — script and shot list
 | t | Shot (capture) | On-screen caption |
@@ -49,7 +50,7 @@ Capture: `node tools/demo-video.ts` records an ~80 s captioned draft of this sho
 4. Own a fighter: IPO shares, dividends only from profit, shares go to zero on bankruptcy. NOX is play-money.
 5. Every match is seeded by the next block, replayed from your inputs and settled on chain. Built for the NEAR hackathon games track. [repo]
 
-## 5. Mainnet runbook (owner-run, one command at a time; nothing here was executed)
+## 5. Mainnet runbook (history: executed by the owner 2026-11-14)
 Prerequisites: the audited `main` build; `node scripts/build-contract.ts` prints the sha256 recorded in docs/MAINNET.md; all tests green.
 
 | # | Who | Command | Cost |

@@ -1,4 +1,4 @@
-// Helpers for the client test hook (docs/OWNERSHIP.md): with ?e2e the client exposes window.__br.
+// Helpers for the client test hook (docs/process/OWNERSHIP.md): with ?e2e the client exposes window.__br.
 import { test, type Page } from "@playwright/test";
 import type { MatchRecord } from "../../src/sim/types";
 
@@ -23,7 +23,7 @@ export async function requireHook(page: Page, timeout = 20_000): Promise<void> {
     .waitForFunction(() => typeof window.__br?.phase === "function", undefined, { timeout })
     .then(() => true)
     .catch(() => false);
-  test.skip(!found, "window.__br test hook missing: the client does not implement ?e2e yet (Agent A, docs/OWNERSHIP.md)");
+  test.skip(!found, "window.__br test hook missing: the client does not implement ?e2e yet (Agent A, docs/process/OWNERSHIP.md)");
 }
 
 export const phase = (page: Page) => page.evaluate(() => window.__br!.phase());

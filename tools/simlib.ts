@@ -5,7 +5,7 @@ import type { FighterSpec, Input, Match, MatchConfig, MatchRecord, Personality }
 import { BIG_MATCH_TICKS, MATCH_TICKS } from "../src/sim/types.ts";
 import { icos, isin } from "../src/sim/fixed.ts";
 
-/** The documented cross-agent API (docs/OWNERSHIP.md). */
+/** The documented cross-agent API (docs/process/OWNERSHIP.md). */
 export interface Sim {
   createMatch(cfg: MatchConfig): Match;
   botInput(match: Match, idx: number): Input;

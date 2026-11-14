@@ -1,8 +1,11 @@
-# NOXARA — mainnet release plan (NOT executed)
+# NOXARA — mainnet release (EXECUTED 2026-11-14)
 
-Owner decision (2026-11-13): **mainnet yes, in the cheapest safe form — prepare, then ask.** Nothing here
-has been run on mainnet. No mainnet keys exist on this machine. Every mainnet or hosting step waits for
-the owner's literal reply **"yes, deploy"**.
+> **Executed 2026-11-14.** Contract `noxara.near`, deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`, code sha256 `d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472`; owner `zhasik.near`; relayer / match server `relay.noxara.near`. Game https://playnoxara.vercel.app, server https://noxara-production.up.railway.app. The full-access key on `noxara.near` is kept for fixes during judging. The admin methods are listed in the README ("Admin powers"). The testnet build (`royale.br-7e8492.testnet`) remains as the rehearsal environment.
+> **Ranked (on-chain) play runs until 2026-11-20 00:00 UTC** (the contract then refuses new matches); practice modes are always available. 2026-11-20 to 2026-11-25 is the exit window (players reclaim deposits); teardown from 2026-11-25.
+>
+> Everything below is the original plan, kept as history; where it says "NOT executed", "pending" or "after yes", read it as done unless the box above says otherwise.
+
+*History (2026-11-13):* the owner decided mainnet yes in the cheapest safe form — prepare, then ask; every step waited for the literal reply "yes, deploy".
 
 ## 0. Gate before any mainnet step
 | Gate | Status |
@@ -14,7 +17,7 @@ the owner's literal reply **"yes, deploy"**.
 | Independent audit #3 | done 2026-11-13 ~20:00 UTC: GO once the stale default wasm is rebuilt (done) + MEDIUM sponsor-cut scaling (fixed, test `audit3_a_small_stake_earns_a_proportional_cut`); LOWs can follow as an upgrade |
 | Release wasm rebuilt from the audited commit (branch `release/v1`) | `contracts/royale/target/near/royale.wasm`, 394,518 bytes, sha256 `a6377e2ea4124985a6fe006dd53bb167dc98e2b227b3f00f603f1128f39063ca`; `scripts/deploy.ts`/`upgrade.ts` refuse a wasm older than the sources |
 
-**Deadline rule:** if mainnet is not live and stable by 2026-11-14 15:00 UTC, the testnet version is submitted. **Keys:** the contract's full-access key is NOT removed (fixes during judging, teardown after 2026-11-25); the README lists every admin method.
+**Deadline rule:** if mainnet is not live and stable by 2026-11-14 15:00 UTC, the testnet version is submitted. **Keys:** the contract's full-access key is NOT removed (fixes during judging, teardown after 2026-11-25); the README lists every admin method ("Admin powers").
 
 **Latest build (main, 2026-11-14 07:20 UTC):** wasm 524,292 bytes, sha256 `9cf9a98585c2f8128559a550b28ad51d36205b7cdfe3edd37d03525dd977e4b4` (sources `ce6bbdd9…`; adds the daily login reward with split pools and `create_guest`; audit #7 GO for testnet and mainnet after the M-1/L-1/L-2 fixes; unit 115/115, sandbox 17/17), live on testnet since tx `EzfE6CMCiP2P7oGpa4sbVWMxjbL9Uti41KkxNjGLaYNa` (supply unchanged). Previous: 504,653 B `a087c20a…` (tx `3ovpnnJo…`).
 
@@ -66,8 +69,8 @@ nothing recorded) while signed-in players keep playing with their own function-c
    The relayer's variables include `GUEST_VIA_CONTRACT=1` (guests become `g-<hex>.noxara.near`, made by the
    contract); only `RELAYER_PRIVATE_KEY` (= `relay.noxara.near`) is secret — no key of `noxara.near` is hosted.
 
-## 4. Teardown after 2026-11-25
-The season ends 2026-11-25 00:00 UTC. NOX is play-money. From the season end new matches are refused;
+## 4. Teardown after 2026-11-25 (planned)
+Ranked play ends 2026-11-20 00:00 UTC (new matches are refused from then); 2026-11-20 to 2026-11-25 is the exit window; teardown is allowed from 2026-11-25 00:00 UTC. NOX is play-money.
 players can unregister to get self-paid storage deposits back.
 1. Delete the game contract and return its whole balance (code + state storage) to your wallet:
    `near account delete-account noxara.near beneficiary <you>.near network-config mainnet sign-with-legacy-keychain send`
@@ -86,5 +89,5 @@ players can unregister to get self-paid storage deposits back.
 | Relayer drained | 1 NEAR hard budget, daily guest cap, per-IP limit, clean stop |
 | Relay/server key compromise | can only relay and settle; settlements carry input-log hashes anyone can re-verify; `set_server` rotation |
 | Player searches offline for a winning input log (seed is public before play, sim is deterministic) | server rejects records submitted faster than real time and implausible input rates; settlement proves consistency, not human play; winnings are play-money |
-| Token treated as an investment | NOX is play-money: no sale, no swap, no NEAR→NOX purchase, guests earn 0, season ends 2026-11-25 |
+| Token treated as an investment | NOX is play-money: no sale, no swap, no NEAR→NOX purchase, guests earn 0, ranked play ends 2026-11-20 |
 | Block randomness | seed fixed by `random_seed` of a later block; not validator-proof (documented) |
