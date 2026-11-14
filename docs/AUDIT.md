@@ -70,3 +70,19 @@ Deferred (contract changes or owner actions): F-2 make the repo public (owner), 
 | Gamer | 50 | **51** |
 
 The re-score found one regression introduced by phase 2: WATCH THE PAYOUT (4× spectate) — and MAIN MENU mid-match — ended the simulation faster than real time, so the server refused the result (`too_fast`) and the match was not settled. **Fixed at 15:38 UTC** (the client waits until the match could have been played in real time; verified on testnet: die → watch payout → settled + Verified). Other points from the panel: empty share market (owner action), private repo / no tag / no video (owner), first ranked match harsh for newcomers, the pre-settle pot shown on the elimination screen is an estimate (78.07 settled vs 79.39 shown), local XP is added even if settlement fails.
+
+## Final production push (15:50–16:50 UTC) and final re-score (`docs/audit/C3-final.md`)
+| Persona | Audit start | After phase 2 | Final |
+|---|---|---|---|
+| Protocol engineer | 47 | 52 | **53** |
+| VC / investor | 48 | 48 | **49** |
+| Gamer | 50 | 51 | **52** |
+
+Done in this push (all verified live):
+- **Season extension on mainnet** (owner ran it): ranked play until 2026-12-15, teardown 2026-12-20; tx `BRLkqYPrbmXUQbwzhaUPC5AmM7SWa9ybd31z8UbQp63k`, code sha256 `2c85142b…` (code_hash `3zndndRV…ng48`), CHECK OK; fresh security review GO (119 unit + 18 sandbox incl. an upgrade from the exact mainnet build); rollback wasm `contracts/royale/tests/fixtures/royale_v3_d734724.wasm` (sha256 d734724f…, previous code_hash FV53G9…). `npm run verify` now checks the new hash: 11/11 PASS on mainnet.
+- **GitHub polish:** README hero (banner, pitch, badges, Play now, 60-second judge path, NEAR table with mainnet links, mermaid architecture, economy, trust model, do-X-see-Y verified on a fresh clone, roadmap, AI disclosure, credits), SECURITY.md, docs/media (banner, social preview, CREDITS). Secret scan: gitleaks full history 0 leaks; no private keys in history. The owner's email is in commit author metadata (needs the owner's decision before going public).
+- **Launch trailer (57 s) + explainer (77 s)**, 16:9 + 1:1, H.264/AAC, < 15 MB, −14 LUFS, original CC0 synthesized music; local only (`docs/video/`, gitignored).
+- **Death screen:** pot and bounty labelled as estimates (≈).
+- **Live smoke (16:45 UTC):** guest match on mainnet → settled tx `DQzrdMCdNK2s5c6NTzh2ThmCPGadhtMy4cYj14evfM4h` → Verified link; iPhone width: LIVE · NEAR MAINNET, no horizontal scroll; 0 console errors.
+
+Remaining (owner or post-hackathon): make the repo public (+ author email decision), tag `hackathon-submission`, post the trailer and fill the video/X links, first IPO purchase by the owner, Weekly Cup prizes, commit-reveal seeds, human spawns outside the next zone (sim change), explain unsettled matches (abandoned) in the UI.
