@@ -1050,3 +1050,12 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 #end .end-title { white-space: nowrap; font-size: clamp(22px, 6vw, 38px); }
 #end .xpbox { margin: 0; }
 #end .end-btns > .end-again { order: 0; } #end .end-btns > .end-sec { order: 1; } #end .end-btns > #challenge { order: 2; } #end .end-btns > .end-link { order: 3; }
+
+/* F-12: elimination reward preview */
+.end-payout { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 2px; border-color: var(--gold); color: var(--gold); font: 900 15px/1.1 var(--display); letter-spacing: .08em; padding: 10px 14px; }
+.end-payout small { font: 700 11px/1 var(--font); letter-spacing: 0; opacity: .8; color: #fff; }
+.end-payout.hidden { display: none; }
+.pot-preview { width: 100%; display: grid; gap: 4px; padding: 10px 14px; border-radius: 14px; background: rgba(255,201,60,.1); border: 2px solid rgba(255,201,60,.4); text-align: left; font: 700 13px/1.35 var(--font); }
+.pot-preview .pp-h { font: 900 11px/1 var(--display); letter-spacing: .14em; color: var(--gold); }
+.pot-preview b { color: var(--gold); }
+.pot-preview .pp-xp { opacity: .75; font-size: 12px; }

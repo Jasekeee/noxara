@@ -172,6 +172,8 @@ let matchStartT = 0;
 let stormTickT = 0;
 let stormBannerPhase = 0;
 let pendingHints = false;
+/** dead player chose WATCH THE PAYOUT: the spectated match runs at 4x */
+let spectateFF = false;
 let introT = 0;
 const INTRO = 1.0;
 let countShown = -1;
@@ -682,6 +684,7 @@ async function startMatch() {
   matchStartT = time;
   introT = INTRO;
   stormBannerPhase = 0;
+  spectateFF = false;
   countShown = -1;
   myKillTimes = [];
   lastAmmo = -1;
@@ -1031,6 +1034,23 @@ function drawLedger() {
     n.className = "lg-note";
     n.textContent = inTraining ? `${st.alive} still fighting. Training Island: nothing is paid or recorded.` : "The pot pays out when the last one stands.";
     el.appendChild(n);
+    // where the pot goes: only amounts known from the match start (the exact split is reported when the match settles)
+    if (!inTraining && current && current.pot > 0) {
+      const pp = document.createElement("div");
+      pp.className = "pot-preview";
+      const line = (html: string, cls = "") => {
+        const d = document.createElement("div");
+        if (cls) d.className = cls;
+        d.innerHTML = html;
+        pp.appendChild(d);
+      };
+      line("WHERE THE POT GOES", "pp-h");
+      line(`Pot <b>${fmt(current.pot)} NOX</b> goes to the last one standing, minus a small burn and the House cut.`);
+      const bi = current.bountyIdx;
+      if (bi !== null && current.bountyValue > 0) line(`Bounty <b>${fmt(current.bountyValue)} NOX</b> goes to whoever eliminates ${displayId(current.cfg.fighters[bi].id, current.cfg.fighters[bi].name)}.`);
+      line("XP is added when the match ends.", "pp-xp");
+      el.appendChild(pp);
+    }
     return;
   }
   renderLedger(el, {
@@ -1136,6 +1156,7 @@ function showEnd(force: boolean) {
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
   $("spectate").classList.toggle("hidden", st.over);
+  $("watch-payout").classList.toggle("hidden", st.over || inTraining || !(current && current.pot > 0));
   $("to-lobby").classList.remove("hidden"); // MAIN MENU is always a way out (an unfinished match is finished in the background)
   social.endShown(st.over);
   drawLedger();
@@ -1182,12 +1203,18 @@ const toMainMenu = () => {
 };
 $("to-lobby").addEventListener("click", guarded(toMainMenu));
 $("spec-menu").addEventListener("click", toMainMenu);
-$("spectate").addEventListener("click", guarded(() => {
+const startSpectate = (ff: boolean) => {
   sfx.ui();
+  spectateFF = ff;
   spectating = true;
   endOpen = false;
   $("end").classList.add("hidden");
   $("hud").classList.remove("hidden");
+};
+$("spectate").addEventListener("click", guarded(() => startSpectate(false)));
+$("watch-payout").addEventListener("click", guarded(() => {
+  toast("Fast-forward x4 until the payout");
+  startSpectate(true);
 }));
 $("spec-exit").addEventListener("click", () => showEnd(true));
 addEventListener("keydown", (e) => {
@@ -1361,14 +1388,15 @@ function frame(now: number) {
     if (introT <= 0) matchStartT = time;
   }
   if (match && (phase === "playing" || phase === "over") && introT <= 0 && !starting) {
-    acc += dt * SPEED;
+    const ff = spectating && spectateFF ? 4 : 1;
+    acc += dt * SPEED * ff;
     let n = 0;
-    while (acc >= DT && n < 8 * SPEED) {
+    while (acc >= DT && n < 8 * SPEED * ff) {
       stepSim();
       acc -= DT;
       n++;
     }
-    if (n >= 8 * SPEED) acc = 0;
+    if (n >= 8 * SPEED * ff) acc = 0;
   }
   const alpha = Math.min(1, acc / DT);
 
