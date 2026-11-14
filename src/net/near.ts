@@ -166,6 +166,17 @@ export async function signDelegate(signer: Signer, d: { senderId: string; receiv
 
 // ---------------------------------------------------------------- RPC
 
+/** A failed JSON-RPC call: `status` is the HTTP status (429 = rate limited), `detail` the node's error text. */
+export class RpcError extends Error {
+  status: number;
+  detail: string;
+  constructor(message: string, status: number, detail = "") {
+    super(message);
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 export async function rpc<T>(url: string, method: string, params: unknown, timeoutMs = 8000): Promise<T> {
   const r = await fetch(url, {
     method: "POST",
@@ -173,19 +184,21 @@ export async function rpc<T>(url: string, method: string, params: unknown, timeo
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal: AbortSignal.timeout(timeoutMs),
   });
+  if (r.status === 429 || r.status >= 500) throw new RpcError(`HTTP ${r.status}`, r.status);
   const j = await r.json();
-  if (j.error) throw new Error(j.error?.cause?.name ?? j.error?.message ?? "rpc error");
+  if (j.error) throw new RpcError(j.error?.cause?.name ?? j.error?.message ?? "rpc error", r.status, typeof j.error.data === "string" ? j.error.data : JSON.stringify(j.error));
   return j.result as T;
 }
 
 export async function viewCall<T>(url: string, contract: string, method: string, args: Record<string, unknown> = {}): Promise<T> {
-  const r = await rpc<{ result: number[] }>(url, "query", {
+  const r = await rpc<{ result?: number[]; error?: string }>(url, "query", {
     request_type: "call_function",
     finality: "optimistic",
     account_id: contract,
     method_name: method,
     args_base64: toBase64(utf8(JSON.stringify(args))),
   });
+  if (!Array.isArray(r.result)) throw new RpcError("view failed", 200, String(r.error ?? ""));
   return JSON.parse(new TextDecoder().decode(new Uint8Array(r.result))) as T;
 }
 

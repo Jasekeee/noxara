@@ -7,6 +7,7 @@
 // Persisted so a restart doesn't reset it.
 import fs from "node:fs";
 import path from "node:path";
+import crypto from "node:crypto";
 
 const YOCTO = 10n ** 24n;
 export const near = (s: string) => {
@@ -84,4 +85,64 @@ export const RESERVE = {
 /** NEAR actually burnt by a transaction (all receipts). */
 export function tokensBurnt(o: { transaction_outcome: { outcome: { tokens_burnt: string } }; receipts_outcome: { outcome: { tokens_burnt: string } }[] }): bigint {
   return BigInt(o.transaction_outcome.outcome.tokens_burnt) + o.receipts_outcome.reduce((a, r) => a + BigInt(r.outcome.tokens_burnt), 0n);
+}
+
+/** New guests per network address per UTC day (audit F-14 / A-4), persisted next to the budgets so a restart
+ *  doesn't reset it. Addresses are stored only as salted hashes (16 hex chars), never in the clear. */
+export class IpDailyCap {
+  readonly limit: number;
+  private file: string;
+  private salt: string;
+  private s: { day: number; n: Record<string, number> };
+
+  constructor(file: string, limit: number, now = Date.now()) {
+    this.file = file;
+    this.limit = limit;
+    this.s = { day: Math.floor(now / 86_400_000), n: {} };
+    let salt = "";
+    try {
+      const v = JSON.parse(fs.readFileSync(file, "utf8")) as { day: number; n: Record<string, number>; salt?: string };
+      if (typeof v.day === "number" && v.n && typeof v.n === "object") this.s = { day: v.day, n: v.n };
+      salt = v.salt ?? "";
+    } catch {
+      // first run
+    }
+    this.salt = salt || crypto.randomBytes(16).toString("hex");
+  }
+
+  private key(ip: string) {
+    return crypto.createHash("sha256").update(`${this.salt}:${ip}`).digest("hex").slice(0, 16);
+  }
+
+  private roll(now: number) {
+    const day = Math.floor(now / 86_400_000);
+    if (day !== this.s.day) this.s = { day, n: {} };
+  }
+
+  /** Count one new guest for this address; false (nothing counted) when today's cap is reached. */
+  take(ip: string, now = Date.now()): boolean {
+    this.roll(now);
+    const k = this.key(ip);
+    if ((this.s.n[k] ?? 0) >= this.limit) return false;
+    this.s.n[k] = (this.s.n[k] ?? 0) + 1;
+    this.persist();
+    return true;
+  }
+
+  /** Give the slot back (the guest was never created). */
+  release(ip: string, now = Date.now()) {
+    this.roll(now);
+    const k = this.key(ip);
+    if (this.s.n[k]) {
+      this.s.n[k]--;
+      if (!this.s.n[k]) delete this.s.n[k];
+      this.persist();
+    }
+  }
+
+  private persist() {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    fs.writeFileSync(`${this.file}.tmp`, JSON.stringify({ ...this.s, salt: this.salt }));
+    fs.renameSync(`${this.file}.tmp`, this.file);
+  }
 }
