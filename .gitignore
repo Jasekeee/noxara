@@ -37,3 +37,6 @@ relayer/data/
 # local Lighthouse reports
 docs/lighthouse/
 docs/screens/demo-frame-*.jpg
+
+# trailer renders, posters and contact sheets (never committed)
+docs/video/
