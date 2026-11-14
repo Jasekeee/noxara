@@ -16,7 +16,8 @@
     "make-record": "node tools/make-record.ts",
     "capture": "node tools/capture.ts",
     "lighthouse": "node tools/lighthouse.ts",
-    "verify": "node tools/verify.ts"
+    "verify": "node tools/verify.ts",
+    "verify:testnet": "node tools/verify.ts --testnet"
   },
   "dependencies": {
     "@hot-labs/near-connect": "0.12.0",
