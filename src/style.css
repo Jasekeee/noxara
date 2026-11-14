@@ -121,7 +121,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--cyan); outline-
   background: var(--storm); padding: 7px 12px; border-radius: 8px;
   animation: blink .6s steps(2) infinite;
 }
-.storm-warn.soft { background: #b8741a; animation: none; }
+.storm-warn.soft { background: #8a4f00; animation: none; }
 .spec { font: 800 12px/1 var(--font); letter-spacing: .12em; background: rgba(21,17,43,.78); padding: 7px 12px; border-radius: 8px; }
 .spec b { color: var(--gold); }
 @keyframes blink { 50% { opacity: .55; } }
@@ -1067,4 +1067,4 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .mark-pill { font: 900 12px/1 var(--display); letter-spacing: .08em; color: #2a1a00; background: var(--gold); padding: 6px 12px; border-radius: 999px; max-width: min(86vw, 420px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
 .mark-pill.taken { background: rgba(255,255,255,.9); color: #333; }
 .mark-pill.hidden { display: none; }
-@media (max-width: 720px) { .mark-pill { font-size: 10px; padding: 5px 9px; } }
+@media (max-width: 720px) { .mark-pill { font-size: 10px; padding: 5px 9px; position: fixed; left: 50%; top: calc(124px + var(--safe-t)); transform: translateX(-50%); z-index: 5; } }

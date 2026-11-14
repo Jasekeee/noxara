@@ -1455,7 +1455,7 @@ function frame(now: number) {
         countShown = n;
       }
     }
-    if (pendingHints && phase === "playing" && !starting && introT <= 0) {
+    if (pendingHints && phase === "playing" && !starting && introT <= 0 && st.tick > SPAWN_PROTECT) {
       pendingHints = false;
       hud.showHints(touchy());
     }
@@ -1497,7 +1497,7 @@ function frame(now: number) {
     placeTags();
     // off-screen bounty marker
     updateBountyArrow(st.fighters.find((f) => f.bounty && f.alive && f.idx !== watch) ?? null);
-    updateMarkPill(st.fighters.find((f) => f.bounty && f.alive) ?? null, phase === "playing" && !starting && introT <= 0, time);
+    updateMarkPill(st.fighters.find((f) => f.bounty && f.alive) ?? null, phase === "playing" && !starting && introT <= 0 && st.tick > SPAWN_PROTECT, time);
     // local player in bush: semi-transparent self too
     meBush.x = views[0].pos.x; meBush.z = views[0].pos.z; meBush.inBush = me.inBush;
     world.update(dt, time, me.alive ? meBush : null, rustlers);
