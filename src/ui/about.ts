@@ -38,7 +38,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
   const steps = h("ol", "ab-steps");
   const step = (t: string, text: string) => steps.appendChild(h("li", "ab-step", undefined, h("div", "", undefined, h("b", "", t), h("p", "", text))));
   step("Move, aim, shoot", "WASD or the left stick moves you. Aim with the mouse or the right stick and shoot where you aim. There is no auto-aim: every shot is yours.");
-  step("Hide and loot", "Bushes hide you from everyone outside arm's reach. Crates and chests hold health, ammo and cash. Keep moving, the storm shrinks the island.");
+  step("Hide and loot", "Bushes hide you from everyone outside arm's reach. Crates with a gold beam hold a better weapon (blaster, shotgun, sniper or grenades); green crosses heal. Keep moving: the storm shrinks the island.");
   step("Outlast the storm", "The richest fighter carries the bounty and wears the crown. Last one standing takes the pot.");
   sec("How to play", steps);
 
