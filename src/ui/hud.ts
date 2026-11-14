@@ -1,6 +1,7 @@
 // DOM HUD: top chips, storm, kill feed, weapon card, hp, popups, damage numbers, minimap, hints.
 import type { FighterState, Match, WeaponKind } from "../sim/types";
-import { MATCH_TICKS, TICK_HZ } from "../sim/types";
+import { TICK_HZ } from "../sim/types";
+import { matchTicksFor } from "../sim/rules";
 import { WEAPON_LABEL } from "../render/palette";
 import { IDLE_RELOAD, WEAPONS } from "../sim/rules";
 
@@ -119,7 +120,7 @@ export class Hud {
     this.set("kills", me.kills, () => {
       this.kills.textContent = String(me.kills);
     });
-    const left = Math.max(0, MATCH_TICKS - st.tick);
+    const left = Math.max(0, matchTicksFor(m.cfg) - st.tick);
     const secs = Math.ceil(left / TICK_HZ);
     this.set("time", secs, () => (this.matchTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
     if (st.storm.r < this.lastR) this.shrinkTick = st.tick;

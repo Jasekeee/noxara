@@ -772,3 +772,8 @@ a.acct:hover { text-decoration: underline; opacity: 1; }
 /* training island entry */
 .train-btn { margin-top: 10px; display: inline-flex; flex-direction: column; align-items: center; gap: 2px; }
 .train-btn small { font-size: 0.68rem; opacity: 0.75; letter-spacing: 0.04em; text-transform: none; }
+
+/* big island entry (own element so other title-screen mode buttons merge cleanly) */
+.mode-entry { display: flex; justify-content: center; }
+.big-btn { margin-top: 6px; }
+.big-btn.soon { opacity: 0.55; cursor: default; }
