@@ -127,7 +127,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   const s = failed ? null : s0;
   if (s === "pending" || s === null) {
     // never guess the payee before the chain says so (guests' wins go to the house, for example)
-    row(ICON.coin, s === "pending" ? "Pot — pending settlement…" : "Pot — not settled", L.start.pot, "pot");
+    row(ICON.coin, s === "pending" ? "Pot ≈ (estimate) — pending settlement…" : "Pot ≈ (estimate) — not settled", L.start.pot, "pot");
     const sum0 = potBreakdown(L.start);
     if (sum0) rows.appendChild(sum0);
     if (L.start.bountyIdx !== null && L.start.bountyValue > 0) {

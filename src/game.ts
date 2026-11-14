@@ -1111,9 +1111,9 @@ function drawLedger() {
         pp.appendChild(d);
       };
       line("WHERE THE POT GOES", "pp-h");
-      line(`Pot <b>${fmt(current.pot)} NOX</b> goes to the last one standing, minus a small burn and the House cut.`);
+      line(`Pot <b>≈ ${fmt(current.pot)} NOX</b> (estimate — the settle tx has the final split) goes to the last one standing, minus a small burn and the House cut.`);
       const bi = current.bountyIdx;
-      if (bi !== null && current.bountyValue > 0) line(`Bounty <b>${fmt(current.bountyValue)} NOX</b> goes to whoever eliminates ${displayId(current.cfg.fighters[bi].id, current.cfg.fighters[bi].name)}.`);
+      if (bi !== null && current.bountyValue > 0) line(`Bounty <b>≈ ${fmt(current.bountyValue)} NOX</b> goes to whoever eliminates ${displayId(current.cfg.fighters[bi].id, current.cfg.fighters[bi].name)}.`);
       line("XP is added when the match ends.", "pp-xp");
       el.appendChild(pp);
     }
