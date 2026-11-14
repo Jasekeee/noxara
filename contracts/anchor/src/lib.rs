@@ -4,6 +4,8 @@
 //!   get(input = "YYYY-MM-DD") -> record bytes       (view; empty if none)
 //!   last() -> "YYYY-MM-DD" of the latest record      (view; empty if none)
 //! No near-sdk, no allocator, no JSON parsing: the contract stores bytes and enforces who/when/once.
+//! "When": a record's day must be a real calendar date between (block day − 2) and the block day, so even a
+//! leaked writer key can add at most one bogus record per real day and can never block future days.
 #![no_std]
 
 #[panic_handler]
@@ -19,6 +21,7 @@ extern "C" {
     fn current_account_id(register_id: u64);
     fn predecessor_account_id(register_id: u64);
     fn attached_deposit(balance_ptr: u64);
+    fn block_timestamp() -> u64;
     fn storage_write(key_len: u64, key_ptr: u64, value_len: u64, value_ptr: u64, register_id: u64) -> u64;
     fn storage_read(key_len: u64, key_ptr: u64, register_id: u64) -> u64;
     fn storage_has_key(key_len: u64, key_ptr: u64) -> u64;
@@ -47,10 +50,32 @@ unsafe fn reg(dst: *mut u8, cap: usize) -> usize {
     n
 }
 
-fn valid_day(d: &[u8]) -> bool {
-    d.len() == DAY
-        && d.iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() })
+fn num(d: &[u8]) -> i64 {
+    d.iter().fold(0i64, |a, c| a * 10 + (c - b'0') as i64)
 }
+
+/// "YYYY-MM-DD" -> days since 1970-01-01 (proleptic Gregorian; H. Hinnant's days_from_civil), None if not a real date.
+fn day_number(d: &[u8]) -> Option<i64> {
+    if d.len() != DAY || !d.iter().enumerate().all(|(i, c)| if i == 4 || i == 7 { *c == b'-' } else { c.is_ascii_digit() }) {
+        return None;
+    }
+    let (y, m, dd) = (num(&d[0..4]), num(&d[5..7]), num(&d[8..10]));
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let dim = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if !(1..=12).contains(&m) || dd < 1 || dd > dim[(m - 1) as usize] {
+        return None;
+    }
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + dd - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(era * 146_097 + doe - 719_468)
+}
+
+/// How many days back a record may still be written (a missed day can be filled the next day).
+const BACKFILL_DAYS: i64 = 2;
 
 #[no_mangle]
 pub extern "C" fn anchor() {
@@ -73,8 +98,15 @@ pub extern "C" fn anchor() {
         input(0);
         let n = reg(core::ptr::addr_of_mut!(BUF) as *mut u8, MAX + DAY);
         let buf = &*core::ptr::addr_of!(BUF);
-        if n <= DAY || !valid_day(&buf[..DAY]) {
+        if n <= DAY {
             fail("input: YYYY-MM-DD then the record");
+        }
+        // the day must be a real date, not in the future, and at most BACKFILL_DAYS old (tied to block time)
+        let today = (block_timestamp() / 86_400_000_000_000) as i64;
+        match day_number(&buf[..DAY]) {
+            Some(d) if d <= today && d + BACKFILL_DAYS >= today => {}
+            Some(_) => fail("day must be today or up to 2 days back"),
+            None => fail("input: YYYY-MM-DD then the record"),
         }
         let key = &buf[..DAY];
         if storage_has_key(DAY as u64, key.as_ptr() as u64) == 1 {

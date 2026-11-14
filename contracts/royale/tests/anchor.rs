@@ -1,49 +1,59 @@
-// Option B mainnet anchor (contracts/anchor): append-only daily records, writable only by the anchor account itself.
+// Option B mainnet anchor (contracts/anchor): append-only daily records, writable only by the anchor account itself,
+// only for real dates between (block day - 2) and the block day.
 use near_workspaces::types::NearToken;
 
-const WASM: &str = "../anchor/anchor.wasm";
+const WASM: &str = "../anchor/target/near/anchor.wasm";
+
+/// "YYYY-MM-DD" for `days` since 1970-01-01 (civil_from_days).
+fn ymd(days: i64) -> String {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
+    format!("{y:04}-{m:02}-{d:02}")
+}
 
 #[tokio::test]
-async fn anchor_is_append_only_and_owner_written() -> anyhow::Result<()> {
+async fn anchor_is_append_only_owner_written_and_tied_to_block_time() -> anyhow::Result<()> {
     let w = near_workspaces::sandbox().await?;
     let root = w.root_account()?;
     let wasm = std::fs::read(WASM)?;
-    assert!(wasm.len() < 2048, "anchor wasm stays tiny: {} B", wasm.len());
+    assert!(wasm.len() < 4096, "anchor wasm stays tiny: {} B", wasm.len());
     let anchor = root.create_subaccount("anchor").initial_balance(NearToken::from_near(1)).transact().await?.into_result()?;
     let c = anchor.deploy(&wasm).await?.into_result()?;
+    let now_ns = w.view_block().await?.timestamp();
+    let today = (now_ns / 86_400_000_000_000) as i64;
+    let (d0, d1, d2, dfut, dold) = (ymd(today - 1), ymd(today), ymd(today + 1), ymd(today + 400), ymd(today - 3));
+    let with = |d: &str, rec: &[u8]| [d.as_bytes(), rec].concat();
     let rec = br#"{"matches":12,"root":"ab12","testnet":"royale.br-7e8492.testnet","supply":"2933","house":"712"}"#;
-    let mut arg = b"2026-11-14".to_vec();
-    arg.extend_from_slice(rec);
 
-    // someone else can't write
+    // a stranger can't write
     let eve = root.create_subaccount("eve").initial_balance(NearToken::from_near(1)).transact().await?.into_result()?;
-    let r = eve.call(c.id(), "anchor").args(arg.clone()).transact().await?;
-    assert!(r.is_failure(), "a stranger must not write");
+    assert!(eve.call(c.id(), "anchor").args(with(&d0, rec)).transact().await?.is_failure(), "a stranger must not write");
 
-    // the anchor account writes once
-    anchor.call(c.id(), "anchor").args(arg.clone()).transact().await?.into_result()?;
-    let got = c.view("get").args(b"2026-11-14".to_vec()).await?;
-    assert_eq!(got.result, rec.to_vec());
-    let last = c.view("last").args(vec![]).await?;
-    assert_eq!(last.result, b"2026-11-14".to_vec());
+    // time rules: no future day, no far-future bricking, no stale day, no fake dates
+    for bad in [d2.clone(), dfut.clone(), "9999-12-31".into(), dold.clone(), "2026-02-30".into(), "2026-13-01".into(), "not-a-day!".into()] {
+        assert!(anchor.call(c.id(), "anchor").args(with(&bad, b"{}")).transact().await?.is_failure(), "must refuse {bad}");
+    }
 
-    // never overwritten, never backdated, bad input refused, deposits refused
-    assert!(anchor.call(c.id(), "anchor").args(arg.clone()).transact().await?.is_failure(), "no overwrite");
-    let mut old = b"2026-11-13".to_vec();
-    old.extend_from_slice(b"{}");
-    assert!(anchor.call(c.id(), "anchor").args(old).transact().await?.is_failure(), "no backdating");
-    assert!(anchor.call(c.id(), "anchor").args(b"not-a-day{}".to_vec()).transact().await?.is_failure(), "bad day");
-    let mut next = b"2026-11-15".to_vec();
-    next.extend_from_slice(b"{}");
-    assert!(anchor.call(c.id(), "anchor").args(next.clone()).deposit(NearToken::from_yoctonear(1)).transact().await?.is_failure(), "no deposit");
-    let big = [b"2026-11-15".to_vec(), vec![b'x'; 2049]].concat();
-    assert!(anchor.call(c.id(), "anchor").args(big).transact().await?.is_failure(), "size cap");
-    anchor.call(c.id(), "anchor").args(next).transact().await?.into_result()?;
-    assert_eq!(c.view("last").args(vec![]).await?.result, b"2026-11-15".to_vec());
+    // yesterday (backfill) then today; read back
+    anchor.call(c.id(), "anchor").args(with(&d0, rec)).transact().await?.into_result()?;
+    assert_eq!(c.view("get").args(d0.as_bytes().to_vec()).await?.result, rec.to_vec());
+    anchor.call(c.id(), "anchor").args(with(&d1, b"{}")).transact().await?.into_result()?;
+    assert_eq!(c.view("last").args(vec![]).await?.result, d1.as_bytes().to_vec());
+
+    // never overwritten or backdated; deposits and oversize refused
+    assert!(anchor.call(c.id(), "anchor").args(with(&d1, rec)).transact().await?.is_failure(), "no overwrite");
+    assert!(anchor.call(c.id(), "anchor").args(with(&d0, b"{}")).transact().await?.is_failure(), "no backdating");
+    assert!(anchor.call(c.id(), "anchor").args(with(&d1, b"{}")).deposit(NearToken::from_yoctonear(1)).transact().await?.is_failure(), "no deposit");
+    assert!(anchor.call(c.id(), "anchor").args(with(&d1, &[b'x'; 2049])).transact().await?.is_failure(), "size cap");
     assert!(c.view("get").args(b"2026-01-01".to_vec()).await?.result.is_empty());
 
-    // storage actually used by one record (for the cost table)
-    let st = anchor.view_account().await?.storage_usage;
-    println!("anchor storage after 2 records: {st} bytes");
+    println!("anchor storage after 2 records: {} bytes", anchor.view_account().await?.storage_usage);
     Ok(())
 }

@@ -8,18 +8,25 @@ import crypto from "node:crypto";
 const repo = path.join(import.meta.dirname, "..");
 const crate = path.join(repo, "contracts/royale");
 
-/** sha256 over Cargo.toml, Cargo.lock and src/*.rs except tests.rs (tests don't change the wasm). */
-export function sourcesHash(): string {
+/** The build recipe: the post-build wasm-opt flags, the pinned binaryen version (lockfile) and the toolchain. */
+const RECIPE = ["scripts/build-contract.ts", "scripts/package-lock.json"];
+
+/**
+ * sha256 over a crate's Cargo.toml, Cargo.lock (if any), rust-toolchain.toml and src/*.rs except tests.rs, plus the
+ * build recipe — so "built from the current sources" also means "with the current recipe".
+ */
+export function sourcesHash(dir = crate): string {
   const h = crypto.createHash("sha256");
-  const files = ["Cargo.toml", "Cargo.lock", ...fs.readdirSync(path.join(crate, "src")).filter((f) => f.endsWith(".rs") && f !== "tests.rs").sort().map((f) => `src/${f}`)];
-  for (const f of files) h.update(f).update("\0").update(fs.readFileSync(path.join(crate, f))).update("\0");
+  const files = ["Cargo.toml", "Cargo.lock", "rust-toolchain.toml", ...fs.readdirSync(path.join(dir, "src")).filter((f) => f.endsWith(".rs") && f !== "tests.rs").sort().map((f) => `src/${f}`)].filter((f) => fs.existsSync(path.join(dir, f)));
+  for (const f of files) h.update(f).update("\0").update(fs.readFileSync(path.join(dir, f))).update("\0");
+  for (const f of RECIPE) h.update(f).update("\0").update(fs.readFileSync(path.join(repo, f))).update("\0");
   return h.digest("hex");
 }
 
-export function checkWasm(wasmPath: string): { bytes: number; sha256: string } {
+export function checkWasm(wasmPath: string, dir = crate): { bytes: number; sha256: string } {
   const side = `${wasmPath}.src-sha256`;
   const built = fs.existsSync(side) ? fs.readFileSync(side, "utf8").trim() : "";
-  if (built !== sourcesHash()) {
+  if (built !== sourcesHash(dir)) {
     throw new Error(`stale wasm: ${path.relative(repo, wasmPath)} was not built from the current contract sources — run \`node scripts/build-contract.ts\` first`);
   }
   const buf = fs.readFileSync(wasmPath);
