@@ -27,7 +27,8 @@
       "Bash(gh run view *)",
       "Bash(near * network-config testnet *)",
       "Bash(rm *)",
-      "Edit(./**)"
+      "Edit(~/Developer/bounty-royale/**)",
+      "Edit(~/Developer/br-wt/**)"
     ],
     "ask": [],
     "deny": [
