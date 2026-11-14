@@ -68,6 +68,10 @@ export interface PacingReport {
   deathTicks: number[];
   /** longest stretch (ticks) without any fighter-vs-fighter damage, after spawn protection */
   longestQuiet: number;
+  /** per fighter: first tick it dealt or took fighter damage (-1: never) */
+  firstFight: number[];
+  /** per fighter: longest stretch (ticks) alive without dealing or taking fighter damage */
+  quietAlive: number[];
   /** bots that stayed inside STUCK_R for > STUCK_TICKS while alive, wanting to move and not fighting */
   stuck: { idx: number; tick: number; x: number; y: number; mode: string }[];
 }
@@ -90,17 +94,25 @@ export function pacingReport(cfg: MatchConfig): PacingReport {
   const flagged = new Set<number>();
   let firstContact = -1, lastHit = 0, longestQuiet = 0, kills = 0, stormDeaths = 0;
   const deathTicks: number[] = [];
+  const firstFight: number[] = new Array(n).fill(-1), lastFight: number[] = new Array(n).fill(60), quietAlive: number[] = new Array(n).fill(0);
   while (!m.state.over) {
     const ev = m.step(new Map());
     const t = m.state.tick;
     for (const e of ev) {
       if (e.t === "hit" && e.by >= 0) {
         if (firstContact < 0) firstContact = t;
+        for (const i of [e.who, e.by]) {
+          if (firstFight[i] < 0) firstFight[i] = t;
+          quietAlive[i] = Math.max(quietAlive[i], t - lastFight[i]);
+          lastFight[i] = t;
+        }
         longestQuiet = Math.max(longestQuiet, t - Math.max(lastHit, 60));
         lastHit = t;
       }
       if (e.t === "kill") {
         deathTicks.push(t);
+        quietAlive[e.who] = Math.max(quietAlive[e.who], t - lastFight[e.who]);
+        lastFight[e.who] = 1e9;
         if (e.by === null) stormDeaths++;
         else kills++;
       }
@@ -121,5 +133,6 @@ export function pacingReport(cfg: MatchConfig): PacingReport {
     }
   }
   longestQuiet = Math.max(longestQuiet, m.state.tick - Math.max(lastHit, 60));
-  return { seed: cfg.seed, ticks: m.state.tick, winner: m.state.winner, kills, stormDeaths, firstContact, deathTicks, longestQuiet, stuck };
+  for (let i = 0; i < n; i++) if (lastFight[i] < 1e9) quietAlive[i] = Math.max(quietAlive[i], m.state.tick - lastFight[i]);
+  return { seed: cfg.seed, ticks: m.state.tick, winner: m.state.winner, kills, stormDeaths, firstContact, deathTicks, longestQuiet, firstFight, quietAlive, stuck };
 }

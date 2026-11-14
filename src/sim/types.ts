@@ -163,6 +163,18 @@ export interface MapData {
   obstacles: Obstacle[];
   bushes: Bush[];
   spawns: { x: number; y: number }[]; // FIGHTERS entries
+  /**
+   * Big Island only: walled ruins (square of "wall" obstacles, centre x/y, half-size h, FP) and the centres
+   * of their wall openings, so bots can path through a doorway. Absent on the standard island.
+   */
+  ruins?: Ruin[];
+}
+
+export interface Ruin {
+  x: number;
+  y: number;
+  h: number;
+  openings: { x: number; y: number }[];
 }
 
 export interface MatchState {

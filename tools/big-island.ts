@@ -1,6 +1,6 @@
 // Big Island QA: N bot-only matches on cfg.map = "big" — pacing (length, kills, first contact, quiet
 // stretches) and the stuck check (a bot that stays within 2 u for > 10 s while trying to move).
-//   node tools/big-island.ts [matches=50] [--from 1]
+//   node tools/big-island.ts [matches=50] [--from 1] [--std]   (--std: the same report for the standard island)
 // Exit 1 if any bot got stuck, a match had no winner, or a match hit the clock.
 import "./ts-resolve.ts";
 
@@ -17,7 +17,7 @@ const rows: ReturnType<typeof pacingReport>[] = [];
 let ms = 0;
 for (let k = 0; k < N; k++) {
   const t0 = performance.now();
-  rows.push(pacingReport({ seed: from + k, fighters: botOnlyRoster(), map: "big" }));
+  rows.push(pacingReport(args.includes("--std") ? { seed: from + k, fighters: botOnlyRoster() } : { seed: from + k, fighters: botOnlyRoster(), map: "big" }));
   ms += performance.now() - t0;
 }
 const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / Math.max(1, xs.length);
@@ -36,6 +36,11 @@ console.log(`  kills    mean ${avg(rows.map((r) => r.kills)).toFixed(1)} by figh
 const fc = rows.map((r) => s(r.firstContact)).filter((x) => x >= 0);
 console.log(`  first contact (first damage between fighters) mean ${avg(fc).toFixed(0)} s, median ${med(fc).toFixed(0)} s`);
 console.log(`  longest quiet stretch (no fighter damage) mean ${avg(rows.map((r) => s(r.longestQuiet))).toFixed(0)} s, max ${Math.max(...rows.map((r) => s(r.longestQuiet))).toFixed(0)} s`);
+const ff = rows.flatMap((r) => r.firstFight.filter((x) => x >= 0).map(s));
+const qa = rows.flatMap((r) => r.quietAlive.map(s));
+console.log(`  per fighter: first fight mean ${avg(ff).toFixed(0)} s, median ${med(ff).toFixed(0)} s; longest quiet stretch while alive mean ${avg(qa).toFixed(0)} s, median ${med(qa).toFixed(0)} s, 90th pct ${sorted(qa)[Math.floor(qa.length * 0.9)].toFixed(0)} s`);
+const lifeMin = rows.flatMap((r) => r.deathTicks.map(s));
+console.log(`  time alive of the fallen: median ${med(lifeMin).toFixed(0)} s`);
 console.log(`  deaths per minute (avg per match): ${perMin.map((v, i) => `${i}-${i + 1}m ${(v / N).toFixed(1)}`).join(" · ")}`);
 console.log(`  finished by clock ${clock}, no winner ${noWin}`);
 console.log(`  stuck bots: ${stuck.length}${stuck.length ? " — " + stuck.slice(0, 10).map((x) => `seed ${x.seed} #${x.idx} @${s(x.tick)}s (${(x.x / 1000).toFixed(1)},${(x.y / 1000).toFixed(1)}) ${x.mode}`).join("; ") : ""}`);

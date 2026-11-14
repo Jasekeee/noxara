@@ -328,6 +328,9 @@ export class Hud {
     c.beginPath(); c.arc(0, 0, R * s - 3, 0, Math.PI * 2); c.fill();
     c.fillStyle = "#3f8d34";
     for (const b of m.map.bushes) { c.beginPath(); c.arc(b.x * s, b.y * s, Math.max(2, b.r * s), 0, Math.PI * 2); c.fill(); }
+    // ruin walls (Big Island only: the standard island has no "wall" obstacles) as landmarks
+    c.fillStyle = "#d8ccb0";
+    for (const o of m.map.obstacles) if (o.kind === "wall") c.fillRect(o.x * s - 1.5, o.y * s - 1.5, 3, 3);
     const st = m.state;
     // storm
     c.fillStyle = "rgba(138,60,255,.45)";

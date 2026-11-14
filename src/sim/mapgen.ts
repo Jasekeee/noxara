@@ -1,5 +1,5 @@
 // Seeded island generation: obstacles, bushes, chests, heals and spawns. Pure + deterministic.
-import { FIGHTERS, type Bush, type Chest, type Heal, type MapData, type Obstacle, type ObstacleKind, type WeaponKind } from "./types";
+import { FIGHTERS, type Ruin, type Bush, type Chest, type Heal, type MapData, type Obstacle, type ObstacleKind, type WeaponKind } from "./types";
 import { FP, Rng, dist2, icos, isin, isqrt, mixSeed } from "./fixed";
 import {
   BIG_BUSHES,
@@ -176,7 +176,10 @@ function generateBigWorld(seed: number): GeneratedWorld {
     if (ruins.some((q) => dist2(q.x, q.y, p.x, p.y) < sq(q.h + h + 14 * FP))) continue;
     ruins.push({ x: p.x, y: p.y, h });
   }
+  const ruinInfo: Ruin[] = [];
   for (const ru of ruins) {
+    const openings: { x: number; y: number }[] = [];
+    ruinInfo.push({ x: ru.x, y: ru.y, h: ru.h, openings });
     const n = Math.trunc((2 * ru.h + POST_STEP - 1) / POST_STEP); // posts per side (corner included)
     const step = Math.trunc((2 * ru.h) / n); // <= POST_STEP: neighbouring posts overlap
     // doorways: two opposite sides always, the other two often
@@ -186,11 +189,17 @@ function generateBigWorld(seed: number): GeneratedWorld {
       // posts 0..n-1 along this side (the next side's post 0 is this side's end corner)
       const doorAt = doors[side] ? rng.range(1, n - 4) : -99; // posts doorAt..doorAt+2 removed: a 3.5 u gap
       const breakAt = !doors[side] && rng.chance(35) ? rng.range(1, n - 3) : -99; // a 2.3 u breach
+      const at = (u: number) => (side === 0 ? [u, -ru.h] : side === 1 ? [ru.h, u] : side === 2 ? [-u, ru.h] : [-ru.h, -u]);
+      const gap = doorAt >= 0 ? -ru.h + (doorAt + 1) * step : breakAt >= 0 ? -ru.h + breakAt * step + Math.trunc(step / 2) : null;
+      if (gap !== null) {
+        const [gx, gy] = at(gap);
+        openings.push({ x: ru.x + gx, y: ru.y + gy });
+      }
       for (let k = 0; k < n; k++) {
         if (k >= doorAt && k <= doorAt + 2) continue;
         if (k >= breakAt && k <= breakAt + 1) continue;
         const u = -ru.h + k * step;
-        const [dx, dy] = side === 0 ? [u, -ru.h] : side === 1 ? [ru.h, u] : side === 2 ? [-u, ru.h] : [-ru.h, -u];
+        const [dx, dy] = at(u);
         obstacles.push({ kind: "wall", x: ru.x + dx, y: ru.y + dy, r: POST_R });
       }
     }
@@ -314,5 +323,5 @@ function generateBigWorld(seed: number): GeneratedWorld {
     heals.push({ id: i, x: p.x, y: p.y, taken: false, amount: HEAL_AMOUNT });
   }
 
-  return { map: { radius: R, obstacles, bushes, spawns }, chests, heals };
+  return { map: { radius: R, obstacles, bushes, spawns, ruins: ruinInfo }, chests, heals };
 }

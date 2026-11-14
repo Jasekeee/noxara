@@ -138,8 +138,8 @@ export type StormX = Storm & { tx: number; ty: number };
 // 10-minute clock. Everything below only applies when cfg.map === "big"; standard matches are untouched.
 
 export const BIG_ISLAND_R = 58 * FP;
-/** spawns on a ring at 40 u (±1.5 u): neighbours start ~25 u apart */
-export const BIG_SPAWN_RING = 40 * FP;
+/** spawns on a ring at 34 u (±1.5 u): neighbours start ~21 u apart, well beyond any bot's vision */
+export const BIG_SPAWN_RING = 34 * FP;
 export { BIG_MATCH_SECONDS, BIG_MATCH_TICKS } from "./types";
 /** 1 central + 1 near each spawn + the rest in ruins / scattered */
 export const BIG_N_CHESTS = 30;
