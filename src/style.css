@@ -337,8 +337,10 @@ kbd {
 .fcard.wanted { background: linear-gradient(#f3e3bf, #e2c992); color: #2a1a0c; border-color: #8a5a22; box-shadow: 0 0 0 2px rgba(255,201,60,.5), 0 0 26px rgba(255,201,60,.55), 0 4px 0 rgba(20,17,43,.5); transform: rotate(-1.5deg); }
 .fcard.wanted:hover { transform: rotate(0) translateY(-4px); }
 .fc-wanted { font: 900 15px/1 var(--display); letter-spacing: .18em; color: #7a1c10; border-bottom: 2px solid #7a1c10; padding-bottom: 2px; margin-bottom: 2px; }
-.fcard.wanted .fc-name { color: #2a1a0c; }
-.fcard.wanted .fc-bal, .fcard.wanted .fc-rec, .fcard.wanted .fc-pers { color: #4a2e12; opacity: 1; }
+.fcard.bounty.wanted .fc-name { color: #2a1a0c; }
+.fcard.bounty.wanted .fc-bal, .fcard.bounty.wanted .fc-rec, .fcard.bounty.wanted .fc-pers { color: #4a2e12; opacity: 1; }
+.fcard.bounty.wanted .fc-bal .ic { fill: #8a5a22; }
+.fcard.bounty.wanted .pips i { background: rgba(74,46,18,.25); } .fcard.bounty.wanted .pips i.on { background: #7a1c10; }
 .fcard.wanted .fc-acct { color: #4a2e12; }
 .fc-reward { display: flex; flex-direction: column; align-items: center; margin-top: 2px; padding: 3px 8px; border: 2px dashed #7a1c10; border-radius: 6px; }
 .fc-reward small { font: 900 9px/1 var(--font); letter-spacing: .16em; color: #7a1c10; }
@@ -833,3 +835,4 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .jg-h { margin: 6px 0; font: 900 14px/1 var(--font); letter-spacing: .12em; }
 .jg-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .jg-links .near-link span { overflow-wrap: anywhere; }
+.jg-h + .jg-links:empty { display: none; } #page-body .btn-chip + .sc-note { margin-top: 10px; }
