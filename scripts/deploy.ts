@@ -78,8 +78,8 @@ const plan = {
     onRoot
       ? `1. ONE tx signed by ${root} to itself: DeployContract(royale.wasm, ${wasm.length} B) + new(owner=${owner}, server=${server}, guest_parent=${relay}, teardown_beneficiary=${beneficiary})`
       : `1. ONE tx by ${root}: CreateAccount(${contract}) + Transfer(${fund} NEAR) + AddKey(root key) + DeployContract(${wasm.length} B) + new(owner=${owner}, server=${server}, guest_parent=${relay}, teardown_beneficiary=${beneficiary})`,
-    `   new() mints the genesis $NOX (9 x 100 to the bots, 2,000 to the house) and creates ${npcs.length} sub-accounts with ${NPC_NEAR} NEAR each and NO access keys`,
-    `2. ${root} creates ${relay} (${relayFund} NEAR: guest budget (RELAYER_BUDGET_NEAR) + gas${onRoot ? " + settlement gas" : ""}) with a fresh key -> .env RELAYER_PRIVATE_KEY${onRoot ? " (= SERVER_PRIVATE_KEY)" : ""}`,
+    `   new() mints the genesis NOX (9 x 100 to the bots, 2,000 to the house) and creates ${npcs.length} sub-accounts with ${NPC_NEAR} NEAR each and NO access keys`,
+    `2. ${root} creates ${relay} (${relayFund} NEAR: guest budget (GUEST_BUDGET_NEAR) + real-account budget (RELAYER_BUDGET_NEAR)${onRoot ? " + settlement gas" : ""}) with a fresh key -> .env RELAYER_PRIVATE_KEY${onRoot ? " (= SERVER_PRIVATE_KEY)" : ""}`,
     `   guests: run the relayer with GUEST_VIA_CONTRACT=1 -> guests are g-<hex>.${contract}, created by the contract's create_guest (callable only by ${relay}); the hosted relayer holds NO key of ${contract}`,
     ...(onRoot ? [] : [`3. ${root} creates ${server} (${serverFund} NEAR; pays settle_match gas) with a fresh key -> .env SERVER_PRIVATE_KEY`]),
     `${onRoot ? 3 : 4}. verify: get_config, get_fighters, ft_metadata (Nox / NOX), 0 access keys on every NPC account`,
@@ -113,12 +113,34 @@ try {
   throw new Error(`${envPath} is not gitignored: refusing to write keys`);
 }
 
-let rootKey = process.env.DEPLOYER_PRIVATE_KEY;
-if (!rootKey) {
-  const f = path.join(os.homedir(), `.near-credentials/${network}/${root}.json`);
-  rootKey = JSON.parse(fs.readFileSync(f, "utf8")).private_key as string;
+// The root key: DEPLOYER_PRIVATE_KEY, else the legacy keychain file <root>.json, else near-cli-rs's
+// per-key layout <root>/<public-key>.json (the one whose public key is a FULL-ACCESS key of <root> on chain).
+// Only the public key is ever printed.
+async function rootKeyFromKeychain(): Promise<string> {
+  const base = path.join(os.homedir(), `.near-credentials/${network}`);
+  const single = path.join(base, `${root}.json`);
+  const cands: string[] = [];
+  if (fs.existsSync(single)) cands.push(JSON.parse(fs.readFileSync(single, "utf8")).private_key as string);
+  const dir = path.join(base, root);
+  if (fs.existsSync(dir) && fs.statSync(dir).isDirectory())
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith(".json")).sort()) cands.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).private_key as string);
+  if (!cands.length) throw new Error(`no key for ${root} in ${base} (${root}.json or ${root}/*.json): import it with \`near account import-account using-web-wallet network-config ${network}\` and choose the legacy keychain`);
+  for (const k of cands) {
+    const pub = parseKey(k).publicKey.toString();
+    const r = (await (await fetch(rpcUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { request_type: "view_access_key", finality: "final", account_id: root, public_key: pub } }) })).json()) as { result?: { permission: unknown } };
+    if (r.result && r.result.permission === "FullAccess") {
+      console.log(`root key: ${pub} (full access on ${root})`);
+      return k;
+    }
+  }
+  throw new Error(`none of the ${cands.length} local key(s) for ${root} is a full-access key on chain`);
 }
+const rootKey = process.env.DEPLOYER_PRIVATE_KEY ?? (await rootKeyFromKeychain());
 const rootPub = parseKey(rootKey).publicKey.toString();
+if (has("check-key")) {
+  console.log(`check-key: ${root} will sign with ${rootPub}; nothing sent`);
+  process.exit(0);
+}
 
 // keep an existing .env (and its keys); a different deployment gets its own file via ENV_FILE
 const envFile = process.env.ENV_FILE ? path.resolve(process.env.ENV_FILE) : envPath;
