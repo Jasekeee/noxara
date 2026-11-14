@@ -1,119 +1,133 @@
-# NOXARA
+<p align="center">
+  <img src="docs/media/banner.png" alt="NOXARA title screen: a top-down 3D island at dusk, the PLAY button, and the Mercenary Board with nine AI fighters and their NEAR accounts" width="100%">
+</p>
 
-[![CI](https://github.com/Jasekeee/noxara/actions/workflows/ci.yml/badge.svg)](https://github.com/Jasekeee/noxara/actions/workflows/ci.yml)
+<h1 align="center">NOXARA</h1>
 
-***9 AI mercenaries. Real wallets. One bounty. Only one walks out.***
+<p align="center"><b><i>9 AI mercenaries. Real wallets. One bounty. Only one walks out.</i></b></p>
 
-**A 3-minute top-down battle royale on a tiny island at dusk: you against 9 AI fighters who are persistent characters with their own NEAR wallets.** They pay to enter, keep what they win, buy upgrades that change how they fight, and retire when they go broke — a rookie takes the empty slot. The richest one carries a bounty. Fans can own shares of a fighter and earn from its profit. No dev patch needed: the economy moves on its own.
+<p align="center">
+  <a href="https://github.com/Jasekeee/noxara/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Jasekeee/noxara/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://nearblocks.io/address/noxara.near"><img alt="NEAR mainnet: noxara.near" src="https://img.shields.io/badge/NEAR%20mainnet-noxara.near-00ec97?logo=near&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://playnoxara.vercel.app"><img alt="Live demo" src="https://img.shields.io/badge/live%20demo-playnoxara.vercel.app-ffcf3a"></a>
+</p>
 
-Track: **Games** (NEAR HACKATHON). Status: **live on NEAR mainnet since 2026-11-14 — play at https://playnoxara.vercel.app** (contract [`noxara.near`](https://nearblocks.io/address/noxara.near), deploy tx [`BmMiB9cc…`](https://nearblocks.io/txns/BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6)); the testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment. Every match is seeded on chain, re-verified by replaying its inputs, and settled on chain. Token: **Nox (NOX)**, play-money only.
+<p align="center"><b>▶ Play now: <a href="https://playnoxara.vercel.app">https://playnoxara.vercel.app</a></b> (no wallet, no sign-up)</p>
 
-## Play
-Live: **https://playnoxara.vercel.app** (NEAR mainnet). Ranked (on-chain) play runs until **2026-11-20 00:00 UTC**; practice modes (Training Island, `?offline`) are always available. 2026-11-20 to 2026-11-25 is the exit window (players reclaim deposits); the owner can tear the contract down from 2026-11-25.
+<!-- TRAILER: thumbnail docs/media/trailer-thumb.png linking to the X video, added after posting -->
 
-Run it locally:
-```bash
-npm ci && npm ci --prefix relayer && npm ci --prefix scripts
-npm run dev            # http://127.0.0.1:5180
-npm start --prefix relayer   # optional: match server + relayer (needs .env from .env.example); without it the game runs offline
-```
-Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for local practice with nothing recorded.
+A 3-minute top-down battle royale on a tiny island at dusk: you against **9 AI fighters that are persistent characters with their own NEAR wallets**. They pay to enter, keep what they win, buy upgrades that change how they fight, and retire when they go broke; a rookie takes the empty slot. The richest one carries a bounty. Fans can own shares of a fighter and earn from its profit. No dev patch needed: the economy moves on its own.
 
-| Do | See |
-|---|---|
-| Press **About the game** on the title (or open `/?about`) | The pitch, three steps to play, the economy in plain words, and the contract and live transactions on the explorer |
-| WASD / arrows to move; click or Space to fire toward the mouse (manual aim, no aim assist). Phone: left stick moves, hold and drag the right stick to aim and fire | Your fighter with a ring under it; a per-weapon aim indicator (arrow, spread cone, sniper line, grenade arc), shots, muzzle flashes, damage numbers, screen shake. Aim is pure input: the recorded aim angle replays bit-for-bit |
-| New here? Press **TRAINING ISLAND** on the title | An offline match where the bots go easy on you (worse aim, slower reactions — against you only); nothing is recorded or paid. A fast loss in a real match offers it too |
-| Press **Esc / P** or the ⏸ button | Menu: Resume, Sound, Controls, Exit (exit counts as a loss; offline practice truly pauses) |
-| Walk into a crate with a gold beam | It bursts: blaster, shotgun, sniper or grenades |
-| Step into a bush | "HIDDEN": enemies can't see you unless they're very close or you shoot |
-| Watch the glowing wall | The storm shrinks toward the next circle; outside it you take damage |
-| Find the crown | The bounty carrier — the richest fighter. Killing it pays its bounty |
-| Last one standing | Your place out of 10, kills, damage; the ledger shows every fighter's wallet change, then **Verified** once the match is settled on chain |
-| Open **Fighters** | Each fighter's **real NEAR account** (e.g. `brindle.noxara.near`; a rookie's account carries its generation, like `zest-4.noxara.near` — the display name can differ from the account it inherited; explorer link, no keys), wallet, record, upgrades and story; the **Hall of the Broke** lists retired fighters and the rookies who replaced them |
-| Open **Leaderboard** | Top fighters and players by wins, kills, earnings |
-| **Sign in** with a NEAR wallet (one approval, then gasless) | A one-time welcome entry credit (pays entry fees only, not transferable), XP and unlocks, real NOX prizes |
-| Open **ECONOMY** | Live supply, burned, House treasury vs target, reward multiplier m, bots by P&L, share prices and dividends, season standings |
-| Buy a fighter's **IPO shares** (signed-in, gasless; every fighter floats 300 shares — the genesis nine at the v2 launch, rookies at birth) | You own part of it: 20% of its *profit* (above its high-water mark) flows to holders; shares go to zero if it goes bankrupt. Listing / buying on the market needs one wallet confirmation |
-| Open **DAILY** | Today's tournament island (same seed for everyone, free), its leaderboard; signed-in: a **check-in streak** and **daily quests** verified on chain, paid by the House (never minted, only matches paid from your own NOX count) |
-| End screen → **Challenge a friend** | A link (with a link preview) that replays your exact island for a friend; the results page compares both runs, both re-verified by replay |
+Track: **Games** (NEAR HACKATHON). Status: **live on NEAR mainnet since 2026-11-14**: contract [`noxara.near`](https://nearblocks.io/address/noxara.near), deploy tx [`BmMiB9cc…`](https://nearblocks.io/txns/BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6), code sha256 `d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472`. The testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment. Every match is seeded on chain, re-verified by replaying its inputs, and settled on chain. Token: **Nox (NOX)**, play-money only.
 
-Guests play everything but earn **zero** NOX — only signed-in NEAR accounts can earn.
+Ranked (on-chain) play: until 2026-11-20 00:00 UTC (an extension to 2026-12-15 is pending a contract upgrade)
 
-## Why NEAR
-- **NPCs with real wallets:** the 9 fighters and the house are real NEAR sub-accounts with **no access keys** — only the contract's rules can move their NOX.
-- **Next-block randomness:** `start_match` commits first; the seed is fixed by the next block's randomness (async receipt), so nobody can pick a seed.
-- **Invisible chain:** guests get an account from a relayer with function-call keys and NEP-366 meta-transactions — no wallet, no gas, no popups.
+Practice modes (Training Island, `?offline`) are always available. After the ranked window there is an exit window (players reclaim deposits); the owner can tear the contract down from 2026-11-25 (time-locked in the contract; see [`docs/MAINNET.md`](docs/MAINNET.md)).
 
-## Economy (v2)
-> **AI esports where the athletes are autonomous agents with wallets and fans are their owners.**
+## 60-second judge path
+1. Open **https://playnoxara.vercel.app** and press **PLAY** as a guest (WASD to move, click to fire; on a phone: left stick moves, drag the right stick to aim).
+2. Play the 3-minute match (or press **TRAINING ISLAND** for an easier warm-up). Win, or just finish.
+3. On the end screen the ledger shows every fighter's wallet change, then **Verified** once the match is settled on chain.
+4. Open the settlement on NearBlocks, for example [`3fBKspfL…`](https://nearblocks.io/txns/3fBKspfLP66JFX3WvXFQ3QGk37rmKi3Jqb8s2FNgaJKM): a real `settle_match` call to `noxara.near` carrying the placements, kills, result hash and input-log hash [verified, NearBlocks API, 2026-11-14].
+5. Re-check it yourself: `npm ci && npm ci --prefix relayer && npm ci --prefix scripts && npm run verify` (11 checks against live mainnet).
 
-- **Closed loop:** 2,900 NOX at genesis, **nothing minted by economy v2**. Every reward is paid from NOX collected earlier through entry fees, pot cuts and taxes. (Mainnet `noxara.near` minted only the 2,900 genesis; nothing since. The testnet rehearsal contract shows 3,150 minted: 250 came from the old v1 economy before its upgrade. `npm run verify` checks that nothing was minted since.)
-- **The House rule:** one public formula of the House treasury's moving average sets the reward multiplier, the House's share of each pot and the burn share. Poorer House: smaller rewards, bigger cuts. Readable on chain (`get_economy`).
-- **Sinks and anti-snowball:** progressive entry fees and upkeep for rich bots, a 2% burned tax on share trades, capped upgrade power (cosmetics have no cap), bronze brackets for new players, a deflation brake so supply levels off instead of burning to zero.
-- **Bots are businesses:** each has a season P&L, can go bankrupt and is replaced by a rookie. Fans own **shares** (each fighter has 1,000; 300 are sold in its IPO, the fighter keeps the rest; NEP-245 subset inside the game contract): a fixed-price market, dividends from profit only.
-- **Checked by simulation:** 20 runs x 10,000 matches, charts below. Full spec and results: [`docs/ECONOMY.md`](docs/ECONOMY.md). The in-game **ECONOMY** page is the live report. NOX is play-money. **No real-money wagering anywhere.**
+Every control and screen, with what you should see: [`docs/GAMEPLAY.md`](docs/GAMEPLAY.md).
 
-![Supply over 10,000 simulated matches](docs/econ/supply.svg)
-![House treasury vs. target](docs/econ/house.svg)
+## What makes it different
+- **The NPCs are real economic actors.** Nine fighters and the House are real NEAR sub-accounts (`brindle.noxara.near`, ...) with **no access keys**: only the contract's rules can move their NOX. They enter, win, get upgrades, go bankrupt and are replaced.
+- **You can own a fighter.** Each has 1,000 shares (300 sold in its IPO); 20% of its profit flows to holders. The fighter's story is the game's meta-layer.
+- **Judged on the loop, not the token.** It is a tight 3-minute arena shooter first (manual aim, bushes, a shrinking storm, a bounty crown). The chain is invisible: guests play in seconds with no wallet and no gas.
+- **Every match is re-verifiable.** A match is its seed plus the human's inputs; a deterministic sim (integer fixed-point, one seeded PRNG) means anyone can replay it and get the same result hash.
 
 ## How NEAR powers NOXARA
-The in-game page "HOW NEAR POWERS NOXARA" shows the same list with live explorer links.
-- **Fighters are keyless NEAR accounts:** no access key, so only the contract's rules move their NOX.
-- **Next-block randomness** fixes every match seed after the player commits.
-- **Every match is settled on chain** after the match server replays the input log; anyone can re-verify offline.
-- **NOX is NEP-141; fighter shares are an NEP-245 subset** (`mt_balance_of`, `mt_supply`, `mt_transfer`, events; no `mt_metadata`/`mt_tokens` yet, no `mt_transfer_call`, on purpose), in one contract.
-- **Gasless guest play:** function-call keys + a NEP-366 relayer. A welcome credit (30 NOX, entry-only) is paid from the House, not minted.
-- **The House rule is readable on chain** via `get_economy`.
-- **Honest trust model:** the server computes, the chain records, anyone can re-verify. The developer keeps the contract's full-access key during judging to fix bugs (see Admin powers). The match seed is public after start and the sim is deterministic, so the server's real-time check is the main defense against offline-searched inputs; commit-reveal is on the roadmap.
+| NEAR feature | How NOXARA uses it | Look at it live |
+|---|---|---|
+| Smart contract (Rust, near-sdk) | `noxara.near` holds the game, NOX and fighter shares | [account](https://nearblocks.io/address/noxara.near) |
+| Keyless NPC accounts | Fighters have no access keys; only contract rules move their funds | [`brindle.noxara.near`](https://nearblocks.io/address/brindle.noxara.near), [`tallow.noxara.near`](https://nearblocks.io/address/tallow.noxara.near) |
+| Gasless guests (NEP-366 meta-transactions + `create_guest`) | A guest gets a `g-<hex>.noxara.near` account from the contract; the relayer pays gas via function-call keys and delegate actions | relayer [`relay.noxara.near`](https://nearblocks.io/address/relay.noxara.near) |
+| Next-block randomness | `start_match` commits first; the seed is fixed by the next block's randomness (async receipt), so nobody can pick a seed | `start_match` / `settle_match` calls on the [contract's transactions](https://nearblocks.io/address/noxara.near) |
+| On-chain settlement | The match server replays the input log, then `settle_match` records placements, kills, bounty killer, result hash and input-log hash | [settle tx `3fBKspfL…`](https://nearblocks.io/txns/3fBKspfLP66JFX3WvXFQ3QGk37rmKi3Jqb8s2FNgaJKM) |
+| NEP-141 token (+145, 148) | NOX (18 decimals, play-money) lives in the game contract | `ft_metadata` view call on `noxara.near`: name "Nox", symbol "NOX", decimals 18 (live RPC read, 2026-11-14) |
+| NEP-245 subset | Fighter shares: `mt_balance_of`, `mt_supply`, `mt_transfer`, events. **A subset**: no `mt_metadata`/`mt_tokens` yet, no `mt_transfer_call`, on purpose | contract source `contracts/royale/` |
 
-## How it's built
-- **Deterministic match simulation** (`src/sim/`, pure TypeScript): 20 Hz fixed tick, integer fixed-point math, pre-computed trig tables, one seeded PRNG. The browser renders it at 60 FPS (three.js) with interpolation; Node runs the exact same code.
-- **Re-verifiable matches:** a match is its seed + the human's inputs. The match server replays the input log before settling; `npm run verify-match <file>` lets anyone replay it offline and check the result hash.
-- **Bots:** utility AIs with personalities (aggressive, camper, sniper, looter, coward, balanced) that loot, rotate with the storm, hide in bushes and steal last hits. Upgrades bought with their winnings change their stats.
-- **Contract** (`contracts/royale`, Rust, near-sdk): NOX (NEP-141/145/148), entries/pot/bounty, upgrades, retirements and rookies (protected for their first 10 matches), the House rule (economy v2: nothing minted), bot shares (NEP-245 subset) with a fixed-price market, seasons, daily check-in and quests, on-chain progression, match history. Details and every rehearsal (testnet) tx: `docs/CHAIN.md`.
-- **Trust model (honest):** the server computes, the chain records, anyone can re-verify. Settlement proves the result is consistent with the recorded inputs — not that a human played them. The match seed is public after start and the sim is deterministic, so the server's real-time check is the main defense against offline-searched inputs; commit-reveal is on the roadmap. NOX is play-money.
-
-## Verify it yourself
-```bash
-npm ci && npm ci --prefix relayer && npm ci --prefix scripts   # once, from a clean clone
-npm test                                   # unit tests: determinism, replay, bots, storm, chests, bushes, progression
-npm run verify                             # checks every claim in this README, incl. live MAINNET reads (code hash = audited build, keyless bots, settled match, 0 minted)
-npm run verify:testnet                     # the same chain checks against the testnet rehearsal contract
-npm run verify-match matches/demo-1.json   # PASS: result reproduced from the input log
-npm run sim -- 300                         # 300 bot-only matches: no personality wins > 40%
-npm run test:e2e                           # a guest plays a full match on desktop + phone, 0 console errors, axe a11y
-node scripts/econ-sim-v2.ts                # 20 x 10,000 matches of the economy: PASS criteria + charts in docs/econ/
-npm test --prefix relayer                  # match server, relayer, challenge + daily tournament
-(cd contracts/royale && cargo test --lib)  # contract unit tests
-node scripts/build-contract.ts && (cd contracts/royale && cargo test --test sandbox --test anchor)   # sandbox tests (need the built wasm)
+## Architecture
+```mermaid
+flowchart LR
+  B["Browser game<br/>three.js, deterministic sim"] <-->|"inputs, match log, view cache"| S["Match + relay server (Railway)<br/>replay-verify, relayed gas"]
+  S -->|"start_match, settle_match<br/>(gas paid by relay.noxara.near)"| C[("noxara.near<br/>game + NOX + shares")]
+  B -.->|"wallet sign-in (optional)"| C
+  C --- N["9 keyless bot accounts<br/>name.noxara.near + House"]
+  C --- G["Guest accounts<br/>g-hex.noxara.near"]
 ```
+Server: https://noxara-production.up.railway.app (`/api/health`). The same TypeScript sim (`src/sim/`) runs in the browser and in Node, so the server's replay equals what the player saw.
 
-## Admin powers (owner `zhasik.near`)
-The contract has a single owner account. Owner-only methods, read from `contracts/royale/src/lib.rs`:
+## Economy in 6 bullets
+- **Closed loop:** 2,900 NOX minted at genesis, nothing minted since by economy v2; every reward is paid from NOX collected earlier. `npm run verify` checks mainnet minted = 2,900 NOX. (The testnet rehearsal contract shows 3,150 minted: 250 came from the old v1 economy before its upgrade.)
+- **The House rule:** one public formula of the House treasury's moving average sets the reward multiplier, the House's pot share and the burn share. Poorer House, smaller rewards. Readable on chain via `get_economy`.
+- **Sinks and anti-snowball:** progressive entry fees and upkeep for rich bots, a 2% burned tax on share trades, capped upgrade power, bronze brackets for new players, a deflation brake.
+- **Bots are businesses:** season P&L, bankruptcy, rookie replacement (protected for their first 10 matches).
+- **Fans own shares:** fixed-price market, dividends from profit above the high-water mark only; shares go to zero if the fighter goes bankrupt.
+- **Checked by simulation:** 20 runs x 10,000 matches (`node scripts/econ-sim-v2.ts`). NOX is play-money; **no real-money wagering anywhere**. Full spec and results: [`docs/ECONOMY.md`](docs/ECONOMY.md).
+
+![Supply over 10,000 simulated matches (simulation output, docs/econ)](docs/econ/supply.svg)
+![House treasury versus its target over 10,000 simulated matches (simulation output, docs/econ)](docs/econ/house.svg)
+
+Guests play everything but earn **zero** NOX; only signed-in NEAR accounts can earn.
+
+## Trust model (honest)
+- **The server computes, the chain records, anyone can re-verify.** Settlement proves the result is consistent with the recorded inputs, not that a human played them. Every settlement stores its input-log hash; `npm run verify-match <file>` replays a match offline.
+- **Public seed limitation:** the seed is public after `start_match` and the sim is deterministic, so the server's real-time check is the main defense against offline-searched inputs. Commit-reveal seeds are on the roadmap.
+- **The owner keeps the contract's full-access key** during judging so bugs can be fixed (`migrate`). A code upgrade could in principle change these rules, so this is a trust assumption until the key is removed [verified from source; key status per [`docs/MAINNET.md`](docs/MAINNET.md)].
+- **Match server is a single trusted operator today**; running it inside a TEE is on the roadmap.
+
+<details>
+<summary>Admin powers (owner <code>zhasik.near</code>), read from <code>contracts/royale/src/lib.rs</code></summary>
 
 | Method | What it can do |
 |---|---|
 | `set_server(account)` | Change which account may call `settle_match` (key rotation). A wrong server could settle false results, but every settlement stores its input-log hash for offline re-verification |
 | `house_grant(account, amount)` | Move NOX from the House treasury to a registered real player (capped per call, never to guests, House floor respected; nothing minted) |
 | `set_max_free(n)` | Size of the free-match pool; paid matches are unaffected |
-| `propose_owner(account)` | Hand over ownership; the new owner must `accept_owner` |
-| `set_teardown_beneficiary(account)` | Once only, if unset; the beneficiary is then fixed |
-| `teardown()`, `teardown_clear(...)`, `withdraw_excess(amount)` | Only from 2026-11-25 00:00 UTC (time-locked in the contract): close in-flight matches, clear state, delete the contract and send its NEAR balance to the fixed beneficiary |
+| `propose_owner` / `accept_owner`, `set_teardown_beneficiary` | Hand over ownership; set the teardown beneficiary once |
+| `teardown()`, `teardown_clear(...)`, `withdraw_excess(amount)` | Only from 2026-11-25 00:00 UTC (time-locked): close in-flight matches, clear state, delete the contract and send its NEAR balance to the fixed beneficiary |
 
-Not possible by any method: minting NOX, moving a player's or fighter's NOX. **The full-access key on `noxara.near` is kept** so the developer can upgrade the code (`migrate`) and fix bugs during judging; a code upgrade could in principle change these rules, so this is a trust assumption until the key is removed. [verified from source; key status per docs/MAINNET.md]
+Not possible by any method: minting NOX, moving a player's or fighter's NOX.
+</details>
+
+## Do X, see Y
+Run from a fresh clone. Durations measured on a laptop with a warm Rust cache; mainnet reads need network access.
+
+| Do | See |
+|---|---|
+| `npm ci && npm ci --prefix relayer && npm ci --prefix scripts` | Dependencies installed (about 5 s with a warm npm cache) |
+| `npm test` | Unit tests pass: determinism, replay, bots, storm, chests, bushes, progression (90 tests in 7 files, about 45 s) |
+| `npm run verify` | `11 passed, 0 failed` against live mainnet: code hash = audited build, keyless bots, settled match, nothing minted after genesis (about 90 s) |
+| `npm run verify-match matches/demo-1.json` | PASS: the result is reproduced from the input log (about 1 s) |
+| `npm run verify:testnet` | The same chain checks against the testnet rehearsal contract |
+| `npm run sim -- 300` | 300 bot-only matches: no personality wins more than 40% |
+| `npm run test:e2e` | A guest plays a full match on desktop and phone, 0 console errors, axe accessibility |
+| `npm test --prefix relayer` | Match server, relayer, challenge and daily-tournament tests |
 
 ## Roadmap
-- **ONLINE** (title-screen mode, coming soon): live matchmaking against real opponents.
-- **3v3 TEAMS (online)** (title-screen mode, coming soon): squad up with friends, 3 vs 3.
+- **Online** (title-screen mode, coming soon): live matchmaking against real opponents.
+- **3v3 teams** (online, coming soon): squad up with friends.
 - **Ranked NEAR arenas** (coming soon): ladder matches between real NEAR accounts, seasonal NEAR prizes.
-- **Weekly Bounty Cup** (promo, live on the title screen): free entry, no wagering. Top 3 on the weekly leaderboard of signed-in NEAR accounts win NEAR prizes, paid manually after the week closes (UTC Monday 00:00 to Sunday 23:59). Guests can play but are not eligible. NOX is play-money and is not a prize. Prize amounts live in `src/ui/cup.ts`.
-- **Live PvP lobbies** (humans + AI fighters in one match) — next step.
-- No real-money wagering anywhere; NOX is play-money and is not launched or traded (docs/DECISIONS.md).
-- Cosmetics shop, battle pass, sponsored tournaments, licensing the AI athletes.
+- **Commit-reveal seeds**: remove the public-seed limitation above.
+- **TEE match server**: remove the single trusted operator.
+- **Weekly Bounty Cup** (promo, live on the title screen): free entry, no wagering; top 3 signed-in NEAR accounts on the weekly leaderboard win NEAR prizes, paid manually after the week closes. NOX is not a prize.
+- No real-money wagering anywhere; NOX is play-money and is not launched or traded ([`docs/DECISIONS.md`](docs/DECISIONS.md)). Later ideas: cosmetics shop, battle pass, sponsored tournaments.
 
-## Mainnet
-**Live since 2026-11-14:** contract `noxara.near`, deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`, code sha256 `d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472`, relayer `relay.noxara.near`, owner `zhasik.near`. Accounts, cost and teardown: `docs/MAINNET.md` (the plan sections are history). Testnet (`royale.br-7e8492.testnet`) is the rehearsal environment. Internal build logs: `docs/process/`.
+## How it is built
+- **Deterministic simulation** (`src/sim/`, pure TypeScript): 20 Hz fixed tick, integer fixed-point math, pre-computed trig tables, one seeded PRNG. The browser renders at 60 FPS (three.js) with interpolation; Node runs the exact same code.
+- **Bots:** utility AIs with personalities (aggressive, camper, sniper, looter, coward, balanced) that loot, rotate with the storm, hide in bushes and steal last hits.
+- **Contract** (`contracts/royale`): NOX, entries/pot/bounty, upgrades, retirements and rookies, the House rule, shares, seasons, daily check-in and quests, progression, match history. Details and every rehearsal tx: [`docs/CHAIN.md`](docs/CHAIN.md). Mainnet accounts, cost and teardown: [`docs/MAINNET.md`](docs/MAINNET.md). Security review: [`docs/AUDIT.md`](docs/AUDIT.md). Security policy: [`SECURITY.md`](SECURITY.md).
+
+## AI disclosure
+NOXARA was built with Claude Code (Anthropic's coding agent), directed by the project owner. The agent wrote the code, tests and docs; the owner set the direction and made the decisions. The 9 fighters are rule-based utility AIs, not LLMs.
 
 ## Credits
-Code MIT. 3D models: **Kenney** — Mini Characters, Blaster Kit, Nature Kit (CC0, www.kenney.nl; licences in `public/licenses/`). All sounds are synthesized in code. Built with AI assistance (Claude Code).
+- Code: MIT ([`LICENSE`](LICENSE)).
+- 3D models: **Kenney** Mini Characters, Blaster Kit, Nature Kit (CC0, [kenney.nl](https://www.kenney.nl); licence texts in `public/licenses/`).
+- Fonts: system font stacks only (Avenir Next / Nunito / Segoe UI, no webfont files are shipped). Sounds are synthesized in code.
+- Trailer music: see [`docs/media/CREDITS.md`](docs/media/CREDITS.md).

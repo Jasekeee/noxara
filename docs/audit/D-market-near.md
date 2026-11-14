@@ -1,8 +1,8 @@
 # D — Market + NEAR depth audit of NOXARA (2026-11-14, ~13:50 UTC)
-Read-only. Sources: ~/Developer/near-competitors/out (leaderboards.md, projects.csv, screens), competitor READMEs/sites (curl), NOXARA live site (Playwright, no match played), free.rpc.fastnear.com views, api.nearblocks.io, repo ~/Developer/bounty-royale. Tags: [verified] = I saw it myself this session; [assumed] = inferred/not checked.
+Read-only. Sources: a local competitor-screener export (leaderboards.md, projects.csv, screens), competitor READMEs/sites (curl), NOXARA live site (Playwright, no match played), free.rpc.fastnear.com views, api.nearblocks.io, repo ~/Developer/bounty-royale. Tags: [verified] = I saw it myself this session; [assumed] = inferred/not checked.
 
 ## 1. Competitor comparison (games track)
-Their own screener scores (/70, from near-competitors, snapshot 11-12/13): KEYFALL 56, Hearthmarket 49, Bluffalo 48, Bouncer 44, Farmverse 42. Crownfall is NOT in their top 5 (stage1 "LIKELY FAIL", 22.5) but is a real threat (see below). NOXARA's own cold judge #5 = 56/70 [verified in docs/JUDGE_LOG.md; self-run, not independent].
+Their own screener scores (/70, from competitor screener, snapshot 11-12/13): KEYFALL 56, Hearthmarket 49, Bluffalo 48, Bouncer 44, Farmverse 42. Crownfall is NOT in their top 5 (stage1 "LIKELY FAIL", 22.5) but is a real threat (see below). NOXARA's own cold judge #5 = 56/70 [verified in docs/JUDGE_LOG.md; self-run, not independent].
 
 | Project | What it is | NEAR depth | Visual / feel | Strongest selling point | Where NOXARA is WEAKER | Where NOXARA is STRONGER |
 |---|---|---|---|---|---|---|
@@ -12,7 +12,7 @@ Their own screener scores (/70, from near-competitors, snapshot 11-12/13): KEYFA
 | Crownfall (testnet, crownfall.nerom.site) | 3D medieval realm, houses with coins, 4 LLM rival lords, hippodrome betting, seasons | Contract crownfall-vael.testnet, 6,990 txs, 951 races on chain, **/proof page + proof.json** reads chain live incl. reproducible-build code hash check [verified curl: /proof 200, proof.json] | 3D, shots in README; not seen in screenshots [assumed good] | **Judge-proof page**: one URL shows contract, keys, tx count, code hash == reproducible build, rival wallets | Judge-verification UX (a live /proof page), reproducible-build proof, much higher on-chain volume (6,990 txs vs ~7 matches), 52 CI contract tests, wider economy (4 AI lords + betting) | Mainnet, a combat game people actually play for 3 min, keyless bots (Crownfall has 1 full-access key too), replay verification of inputs |
 | Bouncer / Farmverse | persuasion game in enclave / farming game, gasless email login, NPC traders | testnet; Farmverse site >30 s load (their data) | n/a | n/a | n/a | Load/feel; mainnet |
 
-New 3D/shooter/real-time entries in near-competitors games cluster [verified clusters.md]: Nearverse (drivable 3D hunt), Worldo (3D economy, testnet), Grind District (3D city), DeepSea Hunter (three.js), Pump Rider. None found with a skill-based real-time battle royale + mainnet + replay settlement. NOXARA's niche is the only real-time action loop among leaders [assumed — I did not play all 70].
+New 3D/shooter/real-time entries in competitor screener games cluster [verified clusters.md]: Nearverse (drivable 3D hunt), Worldo (3D economy, testnet), Grind District (3D city), DeepSea Hunter (three.js), Pump Rider. None found with a skill-based real-time battle royale + mainnet + replay settlement. NOXARA's niche is the only real-time action loop among leaders [assumed — I did not play all 70].
 
 Net: NOXARA wins "game loop + feel + mainnet + keyless NPC provability". It loses on "economy actually evolving visibly" (little on-chain activity) and "judge verification packaging" (Crownfall /proof, Hearthmarket judge-guide, KEYFALL badges).
 

@@ -2,7 +2,7 @@
 
 Date: 2026-11-14. Site: https://playnoxara.vercel.app (mainnet build, banner "LIVE · NEAR MAINNET").
 Method: Playwright (Chromium headless) at 1440x900 and 390x844 (isMobile, touch). I played 10 matches with scripted input: 8 practice (`?offline`, Training Island, 390 px) and 2 LIVE (the allowed maximum). I did not sign in with a wallet. Guest creation was blocked while I browsed the menus, so it only happened in the 2 live matches.
-Screenshots: `/private/tmp/claude-501/-Users-zhasulanmedetkhan-Developer-hoard/ea5ce53e-0141-4556-8b3a-38c6a2448fa3/scratchpad/audit/B-shots/` (file names are listed below as `B-shots/<file>`).
+Screenshots: a local scratch folder (not in the repo) (file names are listed below as `B-shots/<file>`).
 Limits: the browser was headless, so I could not hear the sound. My input was scripted (keys + mouse driven from the game state), not a human. Its aim never landed a hit (0 damage in all 10 matches), so "core loop fun" is judged mostly from the screens and the numbers.
 
 ## Measurements [verified]
