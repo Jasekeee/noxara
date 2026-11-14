@@ -1,7 +1,8 @@
 // npm run verify — one command, PASS/FAIL per README claim. Offline-capable: the chain checks print SKIP
 // when the NEAR RPC is unreachable. Exit 1 on any FAIL.
-//   node tools/verify.ts
-//   env BR_RPC (default https://test.rpc.fastnear.com), BR_CONTRACT (default royale.br-7e8492.testnet)
+//   npm run verify                 the live game: NEAR mainnet, contract noxara.near
+//   npm run verify -- --testnet    the testnet rehearsal contract (royale.br-7e8492.testnet)
+//   env BR_RPC / BR_CONTRACT override either
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,8 +10,14 @@ import { fileURLToPath } from "node:url";
 import { scanSim } from "./scan.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const RPC = process.env.BR_RPC ?? "https://test.rpc.fastnear.com";
-const CONTRACT = process.env.BR_CONTRACT ?? "royale.br-7e8492.testnet";
+const TESTNET = process.argv.includes("--testnet");
+const NET = TESTNET ? "testnet" : "mainnet";
+const RPC = process.env.BR_RPC ?? (TESTNET ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
+const CONTRACT = process.env.BR_CONTRACT ?? (TESTNET ? "royale.br-7e8492.testnet" : "noxara.near");
+/** sha256 of the audited release wasm deployed on mainnet (docs/MAINNET.md; rebuild: node scripts/build-contract.ts) */
+const MAINNET_WASM_SHA256 = "d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472";
+/** mainnet: nothing was ever minted beyond genesis (9 × 100 to the bots + 2,000 to the House) */
+const GENESIS = 2900n * 10n ** 18n;
 const BALANCE_N = 300;
 /** total_minted when the testnet contract was upgraded to economy v2 (2026-11-13): genesis 2,900 + 250 minted by v1 top-ups */
 const MINTED_AT_V2 = 3150n * 10n ** 18n; // smaller samples are noisy around the 40% line
@@ -91,21 +98,39 @@ await check("Economy v2: simulated matches pass every criterion (no minting afte
 });
 
 await check("Match server: signature checks, replay judge, relay policy (relayer node tests)", () => {
-  if (!existsSync(join(ROOT, "relayer", "node_modules")))
-    return ["FAIL", "relayer dependencies missing: run `cd relayer && npm ci` first"];
+  if (!existsSync(join(ROOT, "relayer", "node_modules"))) {
+    // fresh clone: install the match server's dependencies (lockfile, no scripts) instead of failing
+    console.log("      installing relayer dependencies (npm ci --prefix relayer)…");
+    const inst = spawnSync("npm", ["ci", "--prefix", "relayer", "--no-audit", "--no-fund", "--ignore-scripts"], { cwd: ROOT, encoding: "utf8" });
+    if (inst.status !== 0) return ["FAIL", `could not install relayer dependencies: ${lastLines(inst.stderr ?? "", 2)}`];
+  }
   const r = run(process.execPath, ["--import", "./relayer/src/ts-resolve.ts", "--test", "relayer/test/*.test.ts"]);
   const n = (k: string) => r.out.match(new RegExp(`ℹ ${k} (\\d+)`))?.[1] ?? "?";
   return [r.ok ? "PASS" : "FAIL", `node --test: ${n("pass")} pass, ${n("fail")} fail`];
 });
 
-// ---------------------------------------------------------------- chain (read-only, testnet)
-async function rpc<T>(params: Record<string, unknown>): Promise<T> {
+// ---------------------------------------------------------------- chain (read-only; mainnet by default)
+console.log(`\nchain checks: ${NET}, contract ${CONTRACT}, RPC ${RPC}`);
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+/** base58 of the bytes given as hex (NEAR's code_hash = base58(sha256(wasm))) */
+function base58Hex(hex: string): string {
+  let n = BigInt(`0x${hex}`), s = "";
+  while (n > 0n) { s = B58[Number(n % 58n)] + s; n /= 58n; }
+  for (let i = 0; i < hex.length && hex.slice(i, i + 2) === "00"; i += 2) s = `1${s}`;
+  return s;
+}
+async function rpc<T>(params: Record<string, unknown>, tries = 4): Promise<T> {
   const res = await fetch(RPC, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "query", params: { finality: "final", ...params } }),
     signal: AbortSignal.timeout(10_000),
   });
+  if (res.status === 429 && tries > 1) {
+    // the free public RPC rate-limits bursts: back off and retry
+    await new Promise((r) => setTimeout(r, 1500 * (5 - tries)));
+    return rpc<T>(params, tries - 1);
+  }
   const j = (await res.json()) as { result?: T & { error?: string }; error?: { cause?: { name?: string }; message?: string } };
   if (j.error) throw new Error(j.error.cause?.name ?? j.error.message ?? "rpc error");
   if (j.result?.error) throw new Error(j.result.error);
@@ -130,23 +155,32 @@ try {
   online = !/fetch failed|timeout|abort|ENOTFOUND|ECONN|network/i.test(`${(e as Error).message} ${(e as Error).name}`);
 }
 const CHAIN_CLAIMS = [
-  `Contract ${CONTRACT} is deployed on testnet`,
+  TESTNET ? `Contract ${CONTRACT} is deployed on testnet` : `Contract ${CONTRACT} is live on NEAR mainnet and runs the audited build (code hash = sha256 ${MAINNET_WASM_SHA256.slice(0, 12)}…)`,
   "Every bot fighter account has 0 access keys (only the contract's rules move its NOX)",
   "The latest settled match is recorded on chain with its input-log hash",
-  "Economy v2 mints nothing: total minted is unchanged since the v2 upgrade (only burns move supply)",
+  TESTNET ? "Economy v2 mints nothing: total minted is unchanged since the v2 upgrade (only burns move supply)" : "Nothing is minted after genesis: total minted = 2,900 NOX and supply = minted − burned",
 ];
 if (!online) {
   for (const c of CHAIN_CLAIMS) report("SKIP", c, `offline: ${RPC} unreachable`, 0);
 } else {
   await check(CHAIN_CLAIMS[0], async () => {
     const a = await rpc<{ code_hash: string; storage_usage: number }>({ request_type: "view_account", account_id: CONTRACT });
-    return a.code_hash === "11111111111111111111111111111111"
-      ? ["FAIL", "account exists but has no contract code"]
-      : ["PASS", `code_hash ${a.code_hash}, storage ${a.storage_usage} bytes`];
+    if (a.code_hash === "11111111111111111111111111111111") return ["FAIL", "account exists but has no contract code"];
+    if (TESTNET) return ["PASS", `code_hash ${a.code_hash}, storage ${a.storage_usage} bytes`];
+    // NEAR's code_hash is base58(sha256(wasm)): compare with the audited release build
+    const want = base58Hex(MAINNET_WASM_SHA256);
+    return a.code_hash === want
+      ? ["PASS", `code_hash ${a.code_hash} = sha256 ${MAINNET_WASM_SHA256.slice(0, 16)}… (rebuild with node scripts/build-contract.ts to compare yourself)`]
+      : ["FAIL", `code_hash ${a.code_hash} ≠ the audited build ${want}`];
   });
   await check(CHAIN_CLAIMS[1], async () => {
     const fighters = await view<{ account: string; name: string }[]>("get_fighters");
-    const counts = await Promise.all(fighters.map((f) => keyCount(f.account)));
+    // one at a time: the free public RPC rate-limits parallel bursts
+    const counts: number[] = [];
+    for (const f of fighters) {
+      counts.push(await keyCount(f.account));
+      await new Promise((r) => setTimeout(r, 250));
+    }
     const keyed = fighters.flatMap((f, i) => (counts[i] > 0 ? [`${f.account} (${counts[i]} keys)`] : []));
     return keyed.length || !fighters.length
       ? ["FAIL", keyed.length ? `accounts with keys: ${keyed.join(", ")}` : "get_fighters() returned no fighters"]
@@ -168,8 +202,9 @@ if (!online) {
   await check(CHAIN_CLAIMS[3], async () => {
     const e = await view<{ minted: string; burned: string; supply: string }>("get_economy");
     const minted = BigInt(e.minted), burned = BigInt(e.burned), supply = BigInt(e.supply);
-    const ok = minted === MINTED_AT_V2 && supply === minted - burned;
-    return [ok ? "PASS" : "FAIL", `minted ${Number(minted / 10n ** 16n) / 100} (= ${Number(MINTED_AT_V2 / 10n ** 16n) / 100} at the v2 upgrade), burned ${Number(burned / 10n ** 16n) / 100}, supply = minted − burned: ${supply === minted - burned}`];
+    const expect = TESTNET ? MINTED_AT_V2 : GENESIS;
+    const ok = minted === expect && supply === minted - burned;
+    return [ok ? "PASS" : "FAIL", `minted ${Number(minted / 10n ** 16n) / 100} (expected ${Number(expect / 10n ** 16n) / 100}${TESTNET ? " at the v2 upgrade" : " = genesis"}), burned ${Number(burned / 10n ** 16n) / 100}, supply = minted − burned: ${supply === minted - burned}`];
   });
 }
 
