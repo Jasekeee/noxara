@@ -1,6 +1,6 @@
 // Post-match LEDGER: who won, where the pot and the bounty went, what the bots did with their money.
 import type { SettleResult, StartResult } from "../net/api";
-import { acctTag, isChainAcct } from "./acct";
+import { acctTag, isChainAcct, shortAcct } from "./acct";
 import { h, icon, ICON, fmt } from "./dom";
 
 export interface LedgerInput {
@@ -63,6 +63,12 @@ export function moneyFlow(pot: number, legs: { label: string; sub: string; amoun
   return wrap;
 }
 
+/** display name: the real (middle-truncated) chain id when the fighter has one, else the roster name */
+function dn(L: LedgerInput, i: number): string {
+  const a = L.accounts[i];
+  return L.chain && isChainAcct(a) ? shortAcct(a) : L.names[i];
+}
+
 function link(text: string, href: string): HTMLAnchorElement {
   const a = h("a", "near-link", undefined, icon(ICON.link), h("span", "", text));
   a.href = href;
@@ -85,7 +91,7 @@ export function potBreakdown(start: StartResult): HTMLElement | null {
 export function renderLedger(el: HTMLElement, L: LedgerInput) {
   el.textContent = "";
   const w = L.winner;
-  const wName = w === null ? "Nobody" : w === 0 ? "You" : L.names[w];
+  const wName = w === null ? "Nobody" : w === 0 ? "You" : dn(L, w);
   // winner
   const face = h("img", "lg-face");
   face.alt = "";
@@ -110,7 +116,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   if (!L.chain || !L.start || L.start.matchId.startsWith("local-")) {
     // offline: local results, no amounts
     const order = L.placements.map((p, i) => [p, i] as const).filter(([p]) => p > 0).sort((a, b) => a[0] - b[0]).slice(0, 3);
-    for (const [p, i] of order) row(p === 1 ? ICON.crown : ICON.star, `#${p} ${i === 0 ? "You" : L.names[i]} — ${L.kills[i]} kill${L.kills[i] === 1 ? "" : "s"}`);
+    for (const [p, i] of order) row(p === 1 ? ICON.crown : ICON.star, `#${p} ${i === 0 ? "You" : dn(L, i)} — ${L.kills[i]} kill${L.kills[i] === 1 ? "" : "s"}`);
     el.appendChild(rows);
     el.appendChild(h("p", "lg-note", "Practice match (offline) — results stay on this device."));
     return;
@@ -126,7 +132,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     if (sum0) rows.appendChild(sum0);
     if (L.start.bountyIdx !== null && L.start.bountyValue > 0) {
       const bi = L.start.bountyIdx;
-      row(ICON.crown, L.placements[bi] === 1 ? `${L.names[bi]} kept the bounty` : `Bounty on ${L.names[bi]}`, L.start.bountyValue, "bounty");
+      row(ICON.crown, L.placements[bi] === 1 ? `${dn(L, bi)} kept the bounty` : `Bounty on ${dn(L, bi)}`, L.start.bountyValue, "bounty");
     }
     el.appendChild(rows);
     if (s === "pending") el.appendChild(h("p", "lg-pending", "Settling on NEAR… the server is re-running your match to check it"));
@@ -143,7 +149,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
       if (bonus) rows.appendChild(h("li", "small", `${fmt(L.start.bountyValue)} from the carrier's wallet + ${fmt(Math.round((p.amount - L.start.bountyValue) * 100) / 100)} House bonus`));
     }
     if (!s.payouts.some((x) => x.reason === "bounty") && L.start.bountyIdx !== null) {
-      const carrier = L.names[L.start.bountyIdx];
+      const carrier = dn(L, L.start.bountyIdx);
       // the bounty is paid only for a fighter's last hit on the carrier: say what actually happened
       row(ICON.crown, w === L.start.bountyIdx ? `${carrier} won and kept the bounty` : `Nobody claimed ${carrier}'s bounty (no fighter landed the last hit)`, null, "bounty");
     }

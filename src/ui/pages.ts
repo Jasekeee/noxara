@@ -506,7 +506,7 @@ export class Pages {
           img.alt = "";
           if (f) img.src = this.d.portrait(f);
           const tr = h("tr", i < 3 ? `top${i + 1}` : "");
-          tr.append(h("td", "rank", String(i + 1)), h("td", "", undefined, f ? img : h("span", "lb-dot")), h("td", "nm", r.name, acctTag(r.account, c0?.explorerAccount(r.account)) ?? false), h("td", "", String(r.wins)), h("td", "", String(r.kills)), h("td", "", String(r.matches)), h("td", "gold", fmt(r.earnings)));
+          tr.append(h("td", "rank", String(i + 1)), h("td", "", undefined, f ? img : h("span", "lb-dot")), h("td", "nm", r.bot || r.name === "You" || !isChainAcct(r.account) ? r.name : "", acctTag(r.account, c0?.explorerAccount(r.account)) ?? false), h("td", "", String(r.wins)), h("td", "", String(r.kills)), h("td", "", String(r.matches)), h("td", "gold", fmt(r.earnings)));
           if (f) {
             tr.tabIndex = 0;
             tr.classList.add("link");

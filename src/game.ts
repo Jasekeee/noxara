@@ -3,10 +3,9 @@ import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
-import { isChainAcct } from "./ui/acct";
+import { isChainAcct, shortAcct } from "./ui/acct";
 import { PauseMenu } from "./ui/menu";
 import { AimLine } from "./render/aimline";
-import { saveAimAssist } from "./input/input";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
 import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
@@ -378,7 +377,7 @@ async function refreshAccount() {
   const wel = $("welcome");
   wel.classList.add("hidden");
   if (t3 && !guest) {
-    $("acct-name").textContent = await c.account().catch(() => "");
+    { const id = await c.account().catch(() => ""); const el = $("acct-name"); el.textContent = id ? shortAcct(id) : ""; el.title = id; if (id) el.setAttribute("aria-label", id); }
     const b = await c.balance().catch(() => 0);
     $("acct-bal").textContent = `${fmt(b)} NOX`;
     // welcome credit: play-money that only pays match entries (never transferable)
@@ -853,19 +852,19 @@ function stepSim() {
   } else if (me.alive && controls.enabled) {
     const rangeW = WEAPONS[me.weapon].range / 1000;
     controls.touchRange = rangeW;
-    // aim help input: visible enemies within weapon range (never ones hidden in bushes)
-    controls.targets.length = 0;
+    // coaching only: visible enemies within weapon range (never ones hidden in bushes)
+    let inRange = 0;
     let nearVisible = Infinity;
     for (const f of st.fighters) {
       if (f.idx === 0 || !f.alive || !match.canSee(0, f.idx)) continue;
       const tx = f.x * U, tz = f.y * U;
       const d = Math.hypot(tx - views[0].pos.x, tz - views[0].pos.z);
       if (d < nearVisible) nearVisible = d;
-      if (d <= rangeW) controls.targets.push({ x: tx, z: tz });
+      if (d <= rangeW) inRange++;
     }
     controls.read(views[0].pos.x, views[0].pos.z, humanInput);
     // first-match coaching (HUD only): firing with nothing to hit
-    if (coach.active && humanInput.fire && controls.targets.length === 0 && st.tick > SPAWN_PROTECT) {
+    if (coach.active && humanInput.fire && inRange === 0 && st.tick > SPAWN_PROTECT) {
       if (nearVisible < Infinity) coach.cue("range", "Out of range — move closer to shoot", time, { gapMs: 4000 });
       else coach.cue("notarget", "No target in range", time, { gapMs: 4000 });
     }
@@ -1076,8 +1075,6 @@ const menu = new PauseMenu({
   training: () => inTraining,
   muted: () => sfx.muted,
   toggleMute: () => toggleMute(),
-  aimAssist: () => controls.aimAssist,
-  setAimAssist: (on) => { controls.aimAssist = on; saveAimAssist(on); },
   exit: () => {
     const chain = !current?.matchId.startsWith("local-") && !!client && client.mode === "chain";
     toLobby();
@@ -1283,7 +1280,7 @@ function frame(now: number) {
       {
         const pv = controls.preview;
         const show = phase === "playing" && me.alive && controls.enabled && !controls.blocked && pv.active && !AUTOPLAY && introT <= 0;
-        aimLine.update(show, views[0].pos.x, views[0].pos.z, pv.ang, Math.min(pv.dist, WEAPONS[me.weapon].range / 1000), pv.locked, pv.tx, pv.tz, time);
+        aimLine.update(show, views[0].pos.x, views[0].pos.z, pv.ang, pv.dist, me.weapon, rdt);
       }
       hud.updateHints(controls.used, time - matchStartT, touchy());
       miniT -= rdt;

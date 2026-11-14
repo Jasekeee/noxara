@@ -3,6 +3,7 @@ import type { FighterState, Match, WeaponKind } from "../sim/types";
 import { MATCH_TICKS, TICK_HZ } from "../sim/types";
 import { WEAPON_LABEL } from "../render/palette";
 import { IDLE_RELOAD, WEAPONS } from "../sim/rules";
+import { shortAcct } from "./acct";
 
 /** 0..1 reload progress (empty mag: until readyTick; partial mag: idle refill), or null when not reloading. */
 const rlStart = new Map<number, number>();
@@ -242,12 +243,12 @@ export class Hud {
     if (opts.bounty) li.className = "bounty";
     else if (opts.me) li.className = "me";
     const k = document.createElement("span");
-    k.textContent = killer ?? "";
+    k.textContent = killer && opts.kAcct && killer !== "You" ? shortAcct(opts.kAcct) : killer ?? "";
     const icon = weapon === "storm" ? Object.assign(document.createElement("span"), { className: "storm", textContent: "STORM" }) : Object.assign(document.createElement("img"), { src: this.icons[weapon] ?? "", alt: weapon });
     const v = document.createElement("span");
-    v.textContent = victim;
-    if (opts.kAcct) k.title = opts.kAcct;
-    if (opts.vAcct) v.title = opts.vAcct;
+    v.textContent = opts.vAcct && victim !== "You" ? shortAcct(opts.vAcct) : victim;
+    if (opts.kAcct) { k.title = opts.kAcct; k.setAttribute("aria-label", opts.kAcct); }
+    if (opts.vAcct) { v.title = opts.vAcct; v.setAttribute("aria-label", opts.vAcct); }
     if (killer) li.append(k);
     li.append(icon, v);
     if (opts.bounty) li.append(Object.assign(document.createElement("span"), { className: "crown", textContent: "BOUNTY!" }));

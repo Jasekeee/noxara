@@ -836,3 +836,10 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .jg-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .jg-links .near-link span { overflow-wrap: anywhere; }
 .jg-h + .jg-links:empty { display: none; } #page-body .btn-chip + .sc-note { margin-top: 10px; }
+/* title: not-yet-built modes (disabled, no backend) */
+.soon-row { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 10px; }
+.soon-btn { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-height: 44px; cursor: not-allowed; border-style: dashed; background: rgba(21,17,43,.45); }
+.soon-btn:hover { background: rgba(21,17,43,.45); }
+.soon-btn small { font-size: 0.7rem; letter-spacing: 0.03em; text-transform: none; color: #cfc9e6; }
+.soon-t { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.soon-badge { font-style: normal; font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: #ffd34d; color: #1b1330; font-weight: 800; }

@@ -1,4 +1,4 @@
-// In-match menu: ⏸ button + Esc/P overlay (Resume, Sound, Aim assist, Controls, Exit to lobby).
+// In-match menu: ⏸ button + Esc/P overlay (Resume, Sound, Controls, Exit to lobby).
 // Chain matches keep ticking underneath (honest note); offline practice really pauses (game.ts reads `paused`).
 import { h } from "./dom";
 
@@ -11,8 +11,6 @@ export interface MenuDeps {
   training?(): boolean;
   muted(): boolean;
   toggleMute(): void;
-  aimAssist(): boolean;
-  setAimAssist(on: boolean): void;
   /** leave the match (game decides what that means for chain matches: left unsettled) */
   exit(): void;
   onChange(open: boolean): void;
@@ -137,14 +135,13 @@ export class PauseMenu {
       return b;
     };
     const sound = toggle("SOUND", () => !this.d.muted(), () => this.d.toggleMute());
-    const assist = toggle("AIM ASSIST", () => this.d.aimAssist(), () => this.d.setAimAssist(!this.d.aimAssist()));
     const help = h("div", "pause-help hidden");
     help.id = "pause-help";
     help.append(
       h("h3", "", "Desktop"),
-      h("p", "", "WASD / arrows move. Mouse aims. Click or Space fires. Hold fire and keep the mouse still to auto-aim at the nearest enemy you can see. M mutes, Esc or P opens this menu."),
+      h("p", "", "WASD / arrows move. Mouse aims. Click or Space fires in the direction of the mouse. M mutes, Esc or P opens this menu."),
       h("h3", "", "Touch"),
-      h("p", "", "Left thumb moves. Tap the right side to auto-aim and fire at the nearest visible enemy; drag the right thumb to aim by hand (it nudges onto a target that is close to your line)."),
+      h("p", "", "Left thumb moves. Hold and drag the right thumb to aim; the shot fires in that direction while you hold."),
     );
     const hb = this.btnEl("CONTROLS", "btn-ghost", () => {
       const hidden = help.classList.toggle("hidden");
@@ -153,7 +150,7 @@ export class PauseMenu {
     hb.setAttribute("aria-expanded", "false");
     hb.setAttribute("aria-controls", "pause-help");
     const exit = this.btnEl("EXIT TO LOBBY", "btn-ghost danger", () => this.confirm());
-    c.append(title, note, resume, sound, assist, hb, help, exit);
+    c.append(title, note, resume, sound, hb, help, exit);
     resume.focus();
   }
 

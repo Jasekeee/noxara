@@ -18,7 +18,7 @@ Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends c
 | Do | See |
 |---|---|
 | New player? **TRAINING ISLAND** | An offline match where bots go easy on you — learn to move, aim and hide; nothing is recorded |
-| Open the game and press **PLAY** | You're in a match within seconds, no wallet. Tap/click fires with auto-aim; drag aims manually |
+| Open the game and press **PLAY** | You're in a match within seconds, no wallet. Click fires toward the mouse; on a phone drag the right stick to aim and fire |
 | Finish a match | Every fighter's wallet +/−, then **Verified** (replayed and settled on chain) |
 | **FIGHTERS** | Each fighter's real account (`brindle.royale.br-7e8492.testnet`), wallet, record, upgrades; the Hall of the Broke |
 | **ECONOMY** | Live supply, burned, House treasury vs target, reward multiplier m, bots by P&L, share prices and dividends, season standings |
@@ -32,7 +32,7 @@ Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends c
 |---|---|---|
 | 0–4 s | Title at dusk, NOXARA wordmark (desktop 1440×900) | *Only one walks out.* |
 | 4–10 s | Click PLAY → in the match | No wallet. No gas. Just play. |
-| 10–30 s | Auto-aim tap on a bot, bush ambush, grenade, storm closing (phone 390 px cut for 4 s) | 10 fighters. 3 minutes. One island. |
+| 10–30 s | Manual-aim shot on a bot, bush ambush, grenade, storm closing (phone 390 px cut for 4 s) | 10 fighters. 3 minutes. One island. |
 | 30–38 s | Kill the crown carrier → BOUNTY in the kill feed | The richest fighter carries a bounty. |
 | 38–48 s | End screen → ledger → **Verified** | Every match is replayed and settled on NEAR. |
 | 48–60 s | ECONOMY page: supply, House vs target, m, bots by P&L | One public rule runs the economy. Nothing is minted. |

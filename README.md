@@ -16,9 +16,9 @@ Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for 
 
 | Do | See |
 |---|---|
-| WASD / arrows to move; click or Space to fire — keep the mouse still and it **auto-aims** at the nearest visible enemy, move the mouse to aim yourself (light ±8° assist). Phone: left stick moves, **tap** the right side to auto-aim and fire, drag it to aim | Your fighter with a ring under it; an aim line (red ring on a locked target), shots, muzzle flashes, damage numbers, screen shake. Aim assist is only input: the recorded aim angle replays bit-for-bit |
+| WASD / arrows to move; click or Space to fire toward the mouse (manual aim, no aim assist). Phone: left stick moves, hold and drag the right stick to aim and fire | Your fighter with a ring under it; a per-weapon aim indicator (arrow, spread cone, sniper line, grenade arc), shots, muzzle flashes, damage numbers, screen shake. Aim is pure input: the recorded aim angle replays bit-for-bit |
 | New here? Press **TRAINING ISLAND** on the title | An offline match where the bots go easy on you (worse aim, slower reactions — against you only); nothing is recorded or paid. A fast loss in a real match offers it too |
-| Press **Esc / P** or the ⏸ button | Menu: Resume, Sound, Aim assist, Controls, Exit (exit counts as a loss; offline practice truly pauses) |
+| Press **Esc / P** or the ⏸ button | Menu: Resume, Sound, Controls, Exit (exit counts as a loss; offline practice truly pauses) |
 | Walk into a crate with a gold beam | It bursts: blaster, shotgun, sniper or grenades |
 | Step into a bush | "HIDDEN": enemies can't see you unless they're very close or you shoot |
 | Watch the glowing wall | The storm shrinks toward the next circle; outside it you take damage |
@@ -81,6 +81,8 @@ npm test --prefix relayer                  # match server, relayer, challenge + 
 ```
 
 ## Roadmap
+- **ONLINE** (title-screen button, coming soon): live matchmaking against real opponents.
+- **3v3 TEAMS (online)** (title-screen button, coming soon): squad up with friends, 3 vs 3.
 - **Live PvP lobbies** (humans + AI fighters in one match) — next step.
 - No real-money wagering anywhere; NOX is play-money and is not launched or traded (docs/DECISIONS.md).
 - Cosmetics shop, battle pass, sponsored tournaments, licensing the AI athletes.

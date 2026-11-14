@@ -183,4 +183,13 @@ export class Session {
   }
 }
 
-export const shortName = (id: string) => (id.startsWith("g-") ? `guest ${id.slice(2, 6)}` : id.split(".")[0].slice(0, 14));
+/** Real account id, middle-truncated, always ending in its suffix (guests included). Mirrors src/net/acctname.ts. */
+export function shortName(id: string, max = 26): string {
+  if (id.length <= max) return id;
+  if (/^[0-9a-f]{64}$/.test(id)) return `${id.slice(0, 8)}…${id.slice(-6)}`;
+  const labels = id.split(".");
+  let tail = labels.length >= 3 ? labels.slice(-2).join(".") : id.slice(-Math.min(id.length - 4, Math.max(8, Math.floor(max / 2))));
+  if (tail.length > 18) tail = tail.slice(-18);
+  const head = id.slice(0, Math.max(3, max - tail.length - 1));
+  return head.length + 1 + tail.length >= id.length ? id : `${head}…${tail}`;
+}
