@@ -728,6 +728,7 @@ async function startMatch() {
   } else if (c) start = await withTimeout(c.startMatch(), 3000);
   const fellBack = chainTry && !forced && (!start || start.matchId.startsWith("local-"));
   current = start ?? localStart();
+  matchWallStart = Date.now(); // the server only accepts a result after the match could have been played in real time
   $("dropping").classList.add("hidden");
   settleState = null;
   buildMatch(current.cfg);
@@ -806,6 +807,18 @@ function acctOf(i: number | null): string | undefined {
 
 // ------------------------------------------------------------------ events
 const _v3 = new THREE.Vector3();
+/** wall-clock ms when the current match began (see the settle delay below) */
+let matchWallStart = 0;
+/**
+ * The match server refuses a result submitted faster than the match could be played in real time
+ * (relayer/src/settle.ts: ≥ 90 % of the match length since start_match). WATCH THE PAYOUT (4× spectate) and
+ * MAIN MENU (finish in the background) end the sim early, so wait until real time has caught up.
+ */
+function realtimeDelayMs(ticks: number): number {
+  const need = (ticks * 1000) / TICK_HZ + 1500; // full length + a margin (the chain's start_ms is earlier than our start)
+  return Math.max(0, matchWallStart + need - Date.now());
+}
+
 /** true while the rest of a match is simulated instantly (the player left after dying): no sounds, banners or feed */
 let silent = false;
 /**
@@ -1054,8 +1067,9 @@ function stepSim() {
     social.matchOver(rec);
     if (client && cur && !cur.matchId.startsWith("local-")) {
       settleState = "pending";
-      client
-        .settle(cur.matchId, rec)
+      const wait = realtimeDelayMs(match?.state.tick ?? 0);
+      new Promise<void>((r) => setTimeout(r, wait))
+        .then(() => client!.settle(cur.matchId, rec))
         .then((r) => {
           if (current !== cur) return;
           settleState = r;
