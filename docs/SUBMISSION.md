@@ -17,6 +17,7 @@ Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends c
 ## 2. What judges should try (do X → see Y)
 | Do | See |
 |---|---|
+| New player? **TRAINING ISLAND** | An offline match where bots go easy on you — learn to move, aim and hide; nothing is recorded |
 | Open the game and press **PLAY** | You're in a match within seconds, no wallet. Tap/click fires with auto-aim; drag aims manually |
 | Finish a match | Every fighter's wallet +/−, then **Verified** (replayed and settled on chain) |
 | **FIGHTERS** | Each fighter's real account (`brindle.royale.br-7e8492.testnet`), wallet, record, upgrades; the Hall of the Broke |
@@ -38,7 +39,7 @@ Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends c
 | 60–72 s | FIGHTERS: real keyless account → explorer tab with 0 keys | The fighters are real NEAR accounts with no keys. |
 | 72–82 s | Sign in → buy IPO shares → a win → dividends claimed | Own a fighter. Earn only when it profits. |
 | 82–90 s | Challenge-a-friend link + DAILY leaderboard | Play the same match as your friends. |
-Capture: `npm run capture` (desktop) + a 390 px pass; captions burned in; game audio only.
+Capture: `node tools/demo-video.ts` records an ~80 s captioned draft of this shot list (`docs/screens/demo-draft.webm`, local only, with review stills `demo-frame-*.jpg`); the final cut adds a real end screen with **Verified** and a signed-in share purchase. Game audio only.
 
 ## 4. X thread (DRAFT — post only with the owner's "yes")
 1. NOXARA — *Only one walks out.* A 3-minute battle royale where your 9 rivals are AI fighters with their own NEAR wallets. They pay entries, buy upgrades, go bankrupt. The richest wears a bounty. Play as a guest in seconds. [link] [video]
