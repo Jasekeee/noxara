@@ -17,6 +17,7 @@ Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends c
 ## 2. What judges should try (do X → see Y)
 | Do | See |
 |---|---|
+| **FOR JUDGES · 60 S** (title, or `/?judges`) | The whole core in three steps: training → real match → Verified settle tx → Economy |
 | New player? **TRAINING ISLAND** | An offline match where bots go easy on you — learn to move, aim and hide; nothing is recorded |
 | Open the game and press **PLAY** | You're in a match within seconds, no wallet. Click fires toward the mouse; on a phone drag the right stick to aim and fire |
 | Finish a match | Every fighter's wallet +/−, then **Verified** (replayed and settled on chain) |
