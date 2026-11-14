@@ -843,3 +843,8 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .soon-btn small { font-size: 0.7rem; letter-spacing: 0.03em; text-transform: none; color: #cfc9e6; }
 .soon-t { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; }
 .soon-badge { font-style: normal; font-size: 0.62rem; letter-spacing: 0.06em; text-transform: uppercase; padding: 2px 7px; border-radius: 99px; background: #ffd34d; color: #1b1330; font-weight: 800; }
+/* merge fix: card rows never shrink (names were collapsing); coming-soon modes sit side by side */
+.fcard > * { flex-shrink: 0; }
+.soon-row { flex-direction: row; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
+.fcard.bounty.wanted .fc-up, .fcard.bounty.wanted .fc-rec { display: none; }
+.fcard.bounty.wanted .fc-top { width: 66px; height: 66px; } .fcard.bounty.wanted .fc-face { width: 66px; height: 66px; }
