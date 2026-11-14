@@ -78,7 +78,8 @@ The in-game page "HOW NEAR POWERS NOXARA" shows the same list with live explorer
 ```bash
 npm ci && npm ci --prefix relayer && npm ci --prefix scripts   # once, from a clean clone
 npm test                                   # unit tests: determinism, replay, bots, storm, chests, bushes, progression
-npm run verify                             # checks every claim in this README, incl. live chain reads
+npm run verify                             # checks every claim in this README, incl. live MAINNET reads (code hash = audited build, keyless bots, settled match, 0 minted)
+npm run verify:testnet                     # the same chain checks against the testnet rehearsal contract
 npm run verify-match matches/demo-1.json   # PASS: result reproduced from the input log
 npm run sim -- 300                         # 300 bot-only matches: no personality wins > 40%
 npm run test:e2e                           # a guest plays a full match on desktop + phone, 0 console errors, axe a11y
