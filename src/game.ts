@@ -261,6 +261,18 @@ async function refreshLobby() {
   await refreshAccount();
 }
 
+// ------------------------------------------------------------------ one-time "this is the Mark" hint
+const BOUNTY_HINT = "noxara.hint.bounty";
+function seenBountyHint(): boolean {
+  try {
+    if (localStorage.getItem(BOUNTY_HINT)) return true;
+    localStorage.setItem(BOUNTY_HINT, "1");
+  } catch {
+    /* storage blocked: show it (once per page) */
+  }
+  return false;
+}
+
 // ------------------------------------------------------------------ rivalry (offline modes): "<name> remembers you"
 const RIVAL_KEY = "noxara.rival";
 function rememberRival(name: string) {
@@ -1200,6 +1212,32 @@ addEventListener("pointerdown", themeOnce, true);
 addEventListener("keydown", themeOnce, true);
 controls.onMute = toggleMute;
 
+// ------------------------------------------------------------------ name tags that never overlap
+type TagSpot = { v: FighterView; x: number; y: number; me: boolean };
+const tagSpots: TagSpot[] = [];
+/**
+ * Tags are anchored above each head (bottom-centre at x,y). Fighters standing close would stack their names,
+ * "HIDDEN" and HP bars on top of each other: the player's tag keeps its spot, then from the bottom of the
+ * screen up each tag that collides with an already placed one moves just above it. Sizes are read for all
+ * tags first, then every transform is written (one layout read per frame, no thrashing).
+ */
+function placeTags() {
+  const order = [...tagSpots].sort((a, b) => (a.me === b.me ? b.y - a.y : a.me ? -1 : 1));
+  const sizes = order.map((t) => ({ w: t.v.tag.offsetWidth || 60, h: t.v.tag.offsetHeight || 20 }));
+  const placed: { x: number; y: number; w: number; h: number }[] = [];
+  order.forEach((t, i) => {
+    const { w, h } = sizes[i];
+    let y = t.y;
+    for (let pass = 0; pass < 8; pass++) {
+      const hit = placed.find((q) => Math.abs(q.x - t.x) < (q.w + w) / 2 + 4 && y > q.y - q.h - 3 && y - h < q.y + 3);
+      if (!hit) break;
+      y = hit.y - hit.h - 4; // just above the tag it collided with
+    }
+    placed.push({ x: t.x, y, w, h });
+    t.v.tag.style.transform = `translate(${t.x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -100%)`;
+  });
+}
+
 // ------------------------------------------------------------------ frame loop
 let last = performance.now();
 const fpsBuf = new Float32Array(60);
@@ -1271,6 +1309,13 @@ function frame(now: number) {
           else if (countShown > 0) {
             hud.popup("GO!");
             sfx.countTick(true);
+            // the first match ever: point at the Mark once
+            const bi = st.fighters.findIndex((f) => f.bounty && f.alive);
+            if (bi > 0 && !seenBountyHint()) {
+              const bv = current?.bountyValue ?? 0;
+              const paid = !!current && current.playerPaid > 0 && !inTraining;
+              setTimeout(() => coach.show(bv > 0 && paid ? `${nameOf(bi)} is the richest. Take them out for +${fmt(bv)} NOX.` : `${nameOf(bi)} is the richest — the crown. Take them out for the bounty.`, 5200), 1500);
+            }
             const r = match.cfg.rival;
             if (r !== undefined && st.fighters[r]) setTimeout(() => hud.banner(`${nameOf(r)} REMEMBERS YOU`, "hot"), 900);
           }
@@ -1291,6 +1336,7 @@ function frame(now: number) {
     const hudTop = mobileHud ? 140 : 92;
     const hudBottom = mobileHud ? 70 : 96;
     rustlers.length = 0;
+    tagSpots.length = 0;
     for (const f of st.fighters) {
       const v = views[f.idx];
       v.update(dt, alpha, f, st.tick);
@@ -1309,9 +1355,10 @@ function frame(now: number) {
       // never draw a tag over the HUD bands (top chips, bottom panels, minimap corner)
       if (p && (p.y < hudTop || p.y > innerHeight - hudBottom || (p.x > innerWidth - 190 && (mobileHud ? p.y < 130 : p.y > innerHeight - 200)))) {
         if (v.tag.style.transform !== "translate(-9999px, 0px)") v.tag.style.transform = "translate(-9999px, 0px)";
-      } else if (p) v.tag.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -100%)`;
+      } else if (p) tagSpots.push({ v, x: p.x, y: p.y, me: f.idx === 0 });
       else if (v.tag.style.transform !== "translate(-9999px, 0px)") v.tag.style.transform = "translate(-9999px, 0px)";
     }
+    placeTags();
     // off-screen bounty marker
     updateBountyArrow(st.fighters.find((f) => f.bounty && f.alive && f.idx !== watch) ?? null);
     // local player in bush: semi-transparent self too

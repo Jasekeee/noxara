@@ -43,7 +43,7 @@ test("about: /?about opens the page and the title link opens it", async ({ page 
   await page.goto(offlineUrl("about"));
   await requireHook(page);
   await expect(page.getByRole("heading", { name: "ABOUT THE GAME" })).toBeVisible();
-  await expect(page.locator(".page-lede")).toContainText("Only one walks out. Hunt the richest. Take the bounty.");
+  await expect(page.locator(".page-lede")).toContainText("Only one walks out. Take out the richest mercenary. Claim the bounty.");
   await expect(page.getByText("X post: coming soon")).toBeVisible();
   await page.goto(offlineUrl());
   await requireHook(page);

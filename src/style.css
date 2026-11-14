@@ -973,3 +973,7 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
   .cup { width: 232px; }
 }
 @media (prefers-reduced-motion: reduce) { #play.btn-primary { animation: none; } }
+/* "YOU" is its own marker under the player's feet, never part of the name-tag stack */
+.tag3d.me { position: absolute; }
+.tag3d .you { position: absolute; left: 50%; top: calc(100% + 78px); transform: translateX(-50%); white-space: nowrap; }
+.tag3d .bv span { white-space: nowrap; }

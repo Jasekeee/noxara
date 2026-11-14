@@ -34,7 +34,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
     s.append(h("h3", "ab-h", title), ...kids);
     body.appendChild(s);
   };
-  body.appendChild(h("p", "page-lede", "Only one walks out. Hunt the richest. Take the bounty."));
+  body.appendChild(h("p", "page-lede", "Only one walks out. Take out the richest mercenary. Claim the bounty."));
 
   const steps = h("ol", "ab-steps");
   const step = (t: string, text: string) => steps.appendChild(h("li", "ab-step", undefined, h("div", "", undefined, h("b", "", t), h("p", "", text))));

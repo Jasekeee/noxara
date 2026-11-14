@@ -71,6 +71,17 @@ export class Coach {
     return false;
   }
 
+  /** Show a message now regardless of the first-matches gate (one-off hints). */
+  show(text: string, ms = 4200) {
+    this.el.textContent = text;
+    this.el.classList.remove("hidden");
+    this.el.classList.remove("show");
+    void this.el.offsetWidth;
+    this.el.classList.add("show");
+    clearTimeout(this.hideT);
+    this.hideT = window.setTimeout(() => this.hide(), ms);
+  }
+
   hide() {
     clearTimeout(this.hideT);
     this.el.classList.add("hidden");
