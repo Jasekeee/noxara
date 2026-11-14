@@ -104,6 +104,8 @@ Run from a fresh clone. Durations measured on a laptop with a warm Rust cache; m
 | `npm test` | Unit tests pass: determinism, replay, bots, storm, chests, bushes, progression (90 tests in 7 files, about 45 s) |
 | `npm run verify` | `11 passed, 0 failed` against live mainnet: code hash = audited build, keyless bots, settled match, nothing minted after genesis (about 90 s) |
 | `npm run verify-match matches/demo-1.json` | PASS: the result is reproduced from the input log (about 1 s) |
+| `(cd contracts/royale && cargo test --lib)` | `115 passed; 0 failed` (about 8 s of tests; a first cold build of the dependencies took about 6 min) |
+| `node scripts/build-contract.ts`, then `(cd contracts/royale && cargo test --test sandbox --test anchor)` | The contract builds (about 40 s); sandbox tests pass: 17 passed + 1 passed, 0 failed (about 3 min) |
 | `npm run verify:testnet` | The same chain checks against the testnet rehearsal contract |
 | `npm run sim -- 300` | 300 bot-only matches: no personality wins more than 40% |
 | `npm run test:e2e` | A guest plays a full match on desktop and phone, 0 console errors, axe accessibility |
