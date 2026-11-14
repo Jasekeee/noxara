@@ -16,7 +16,7 @@ the owner's literal reply **"yes, deploy"**.
 
 **Deadline rule:** if mainnet is not live and stable by 2026-11-14 15:00 UTC, the testnet version is submitted. **Keys:** the contract's full-access key is NOT removed (fixes during judging, teardown after 2026-11-25); the README lists every admin method.
 
-**Latest build (main, 2026-11-13 22:30 UTC):** wasm 504,653 bytes, sha256 `a087c20ab651358ac67ca9ca5c89c422f844a3adb898e818cb7f227a181a6f06` (economy v2 + daily check-in/quests + rookie protection; audits #4, #5, #6 GO; unit 104/104, sandbox 14/14), live on testnet since tx `3ovpnnJoVTsPU2UymyfxEAKT5Bv9q3BF8CbthCBsAjdF`.
+**Latest build (main, 2026-11-14 07:20 UTC):** wasm 524,292 bytes, sha256 `9cf9a98585c2f8128559a550b28ad51d36205b7cdfe3edd37d03525dd977e4b4` (sources `ce6bbdd9…`; adds the daily login reward with split pools and `create_guest`; audit #7 GO for testnet and mainnet after the M-1/L-1/L-2 fixes; unit 115/115, sandbox 17/17), live on testnet since tx `EzfE6CMCiP2P7oGpa4sbVWMxjbL9Uti41KkxNjGLaYNa` (supply unchanged). Previous: 504,653 B `a087c20a…` (tx `3ovpnnJo…`).
 
 **Economy v2 release candidate (branch `main` after the econ-v2 merge):** audits #4 (1 HIGH, 2 MEDIUM — fixed with regression tests) and #5 (GO); unit 99/99, sandbox 14/14; wasm 491,729 bytes, sha256 `3f8113a2a0e254a004660547bf7c3716c10384e3694136218456a42d752795ad` (sources `8bb89e2a4523`), live on testnet since tx `Cee2iTn4tY1ViFucoT4j8qfQ4gkX2i7wfuGmW4B2EJSA`. Fallback: `release/v1` (economy v1, audit #3 GO, sha256 `a6377e2e…063ca`).
 
