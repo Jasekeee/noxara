@@ -36,3 +36,18 @@ test("title: Enter on the focused PLAY button starts the match", async ({ page }
   await expect.poll(() => phase(page), { timeout: 10_000 }).toBe("playing");
   expect(chainCalls, "offline page made no relayer/RPC calls").toEqual([]);
 });
+
+test("about: /?about opens the page and the title link opens it", async ({ page }) => {
+  const errors = collectErrors(page);
+  await isolateFromChain(page);
+  await page.goto(offlineUrl("about"));
+  await requireHook(page);
+  await expect(page.getByRole("heading", { name: "ABOUT THE GAME" })).toBeVisible();
+  await expect(page.getByText("9 AI mercenaries. Real wallets. One bounty. Only one walks out.")).toBeVisible();
+  await expect(page.getByText("X post: coming soon")).toBeVisible();
+  await page.goto(offlineUrl());
+  await requireHook(page);
+  await page.getByRole("button", { name: "About the game" }).click();
+  await expect(page.getByRole("heading", { name: "ABOUT THE GAME" })).toBeVisible();
+  expect(errors).toEqual([]);
+});

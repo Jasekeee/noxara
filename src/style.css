@@ -825,17 +825,19 @@ a.acct:hover { text-decoration: underline; opacity: 1; }
 a.lg-verified { text-decoration: none; cursor: pointer; }
 a.lg-verified:hover { background: rgba(62,240,192,.24); }
 
-/* round 3: for judges page */
-.btn-chip.judges { background: var(--gold); color: var(--ink); border-color: var(--gold); }
-.jg-steps { list-style: none; margin: 10px 0 14px; padding: 0; display: grid; gap: 10px; }
-.jg-step { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border-radius: 12px; background: rgba(21,17,43,.6); border: 1.5px solid rgba(255,255,255,.12); }
-.jg-step b { font: 900 16px/1.2 var(--display); }
-.jg-step p { margin: 4px 0 8px; font: 600 13px/1.4 var(--font); opacity: .85; }
-.jg-n { flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--gold); color: var(--ink); font: 900 16px/1 var(--display); }
-.jg-h { margin: 6px 0; font: 900 14px/1 var(--font); letter-spacing: .12em; }
-.jg-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
-.jg-links .near-link span { overflow-wrap: anywhere; }
-.jg-h + .jg-links:empty { display: none; } #page-body .btn-chip + .sc-note { margin-top: 10px; }
+/* about page */
+.ab-sec { margin: 0 0 18px; }
+.ab-h { margin: 6px 0 8px; font: 900 14px/1 var(--font); letter-spacing: .12em; }
+.ab-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; counter-reset: ab; }
+.ab-step { counter-increment: ab; display: flex; gap: 12px; padding: 12px; border-radius: 12px; background: rgba(21,17,43,.6); border: 1.5px solid rgba(255,255,255,.12); }
+.ab-step::before { content: counter(ab); flex: none; width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: var(--gold); color: var(--ink); font: 900 16px/1 var(--display); }
+.ab-step b { font: 900 16px/1.2 var(--display); }
+.ab-step p, .ab-p { margin: 4px 0 8px; font: 600 14px/1.45 var(--font); opacity: .9; max-width: 720px; }
+.ab-links { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.ab-links .near-link span { overflow-wrap: anywhere; }
+.lobby-about { margin: 4px 2px 8px; font: 700 13px/1 var(--font); }
+.lobby-about .link-btn { opacity: .9; font-size: 13px; }
+#page-body .btn-chip + .sc-note { margin-top: 10px; }
 /* title: not-yet-built modes (disabled, no backend) */
 .soon-row { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-top: 10px; }
 .soon-btn { display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-height: 44px; cursor: not-allowed; border-style: dashed; background: rgba(21,17,43,.45); }

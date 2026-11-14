@@ -1079,17 +1079,13 @@ const startTraining = () => {
   void startMatch();
 };
 $("training").addEventListener("click", startTraining);
-const openJudges = () => {
+const openAbout = () => {
   sfx.start();
   sfx.ui();
-  pages.judges({
-    training: startTraining,
-    play: () => $("play").click(),
-    sampleBot: () => fighters.find((f) => f.status === "active" && isChainAcct(f.account))?.account ?? null,
-  });
+  pages.about();
 };
-$("nav-judges").addEventListener("click", openJudges);
-if (new URLSearchParams(location.search).has("judges")) setTimeout(openJudges, 400);
+$("nav-about").addEventListener("click", openAbout);
+if (new URLSearchParams(location.search).has("about")) setTimeout(openAbout, 400);
 {
   // BIG ISLAND entry (its own element in index.html); behind BIG_ISLAND_ENABLED (else a "coming soon" badge)
   const bigBtn = $("big-island") as HTMLButtonElement;

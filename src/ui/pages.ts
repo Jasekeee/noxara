@@ -15,7 +15,7 @@ export interface PageDeps {
   sfx(kind: "ui" | "coin"): void;
 }
 
-import { renderJudges, type JudgeDeps } from "./judges";
+import { renderAbout } from "./about";
 const isT3 = (c: GameClient | null): c is GameClientT3 => !!c && "signIn" in c;
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -437,21 +437,14 @@ export class Pages {
     this.show("ECONOMY", render);
   }
 
-  // ---------------------------------------------------------------- FOR JUDGES — 60 SECONDS
-  judges(deps: Omit<JudgeDeps, "client" | "economy" | "near">) {
+  // ---------------------------------------------------------------- ABOUT THE GAME
+  about() {
     const render = () => {
-      $("page-title").textContent = "FOR JUDGES — 60 SECONDS";
+      $("page-title").textContent = "ABOUT THE GAME";
       $("page-tabs").textContent = "";
-      renderJudges($("page-body"), {
-        ...deps,
-        client: () => this.d.client(),
-        economy: () => this.economy(),
-        near: () => this.near(),
-        training: () => { this.close(); deps.training(); },
-        play: () => { this.close(); deps.play(); },
-      });
+      renderAbout($("page-body"), { client: () => this.d.client(), economy: () => this.economy(), near: () => this.near() });
     };
-    this.show("FOR JUDGES — 60 SECONDS", render);
+    this.show("ABOUT THE GAME", render);
   }
 
   // ---------------------------------------------------------------- HOW NEAR POWERS NOXARA

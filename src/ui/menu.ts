@@ -149,8 +149,11 @@ export class PauseMenu {
     });
     hb.setAttribute("aria-expanded", "false");
     hb.setAttribute("aria-controls", "pause-help");
+    // opens in a new tab so the running match is untouched
+    const about = this.btnEl("ABOUT THE GAME", "btn-ghost", () => { window.open(`${location.pathname}?about`, "_blank", "noopener"); });
+    about.setAttribute("aria-label", "About the game (opens in a new tab)");
     const exit = this.btnEl("EXIT TO LOBBY", "btn-ghost danger", () => this.confirm());
-    c.append(title, note, resume, sound, hb, help, exit);
+    c.append(title, note, resume, sound, hb, help, about, exit);
     resume.focus();
   }
 

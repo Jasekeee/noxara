@@ -16,7 +16,7 @@ Press **PLAY**. No wallet, no sign-up, no popups. Add `?offline` to the URL for 
 
 | Do | See |
 |---|---|
-| Press **FOR JUDGES · 60 S** on the title (or open `/?judges`) | Three steps — training match → a real match ending in **Verified** (links the settle tx) → the Economy — plus the contract and a keyless fighter on the explorer |
+| Press **About the game** on the title (or open `/?about`) | The pitch, three steps to play, the economy in plain words, and the contract and live transactions on the explorer |
 | WASD / arrows to move; click or Space to fire toward the mouse (manual aim, no aim assist). Phone: left stick moves, hold and drag the right stick to aim and fire | Your fighter with a ring under it; a per-weapon aim indicator (arrow, spread cone, sniper line, grenade arc), shots, muzzle flashes, damage numbers, screen shake. Aim is pure input: the recorded aim angle replays bit-for-bit |
 | New here? Press **TRAINING ISLAND** on the title | An offline match where the bots go easy on you (worse aim, slower reactions — against you only); nothing is recorded or paid. A fast loss in a real match offers it too |
 | Press **Esc / P** or the ⏸ button | Menu: Resume, Sound, Controls, Exit (exit counts as a loss; offline practice truly pauses) |

@@ -14,10 +14,10 @@ NOXARA is a 3-minute top-down battle royale: you against 9 AI fighters on an isl
 
 Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends come only from the fighter's profit; when a fighter goes bankrupt, its shares go to zero. One public rule (`get_economy`) steers the treasury, and nothing is minted after genesis. Matches are seeded by the next block, replayed by the match server from your inputs, and settled on chain. Guests play in seconds with no wallet, no gas and no popups.
 
-## 2. What judges should try (do X → see Y)
+## 2. What to try (do X → see Y)
 | Do | See |
 |---|---|
-| **FOR JUDGES · 60 S** (title, or `/?judges`) | The whole core in three steps: training → real match → Verified settle tx → Economy |
+| **About the game** (title link, in-match menu, or `/?about`) | The pitch, how to play, the economy in plain words, links to the contract and live transactions |
 | New player? **TRAINING ISLAND** | An offline match where bots go easy on you — learn to move, aim and hide; nothing is recorded |
 | Open the game and press **PLAY** | You're in a match within seconds, no wallet. Click fires toward the mouse; on a phone drag the right stick to aim and fire |
 | Finish a match | Every fighter's wallet +/−, then **Verified** (replayed and settled on chain) |
