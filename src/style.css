@@ -1059,3 +1059,6 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .pot-preview .pp-h { font: 900 11px/1 var(--display); letter-spacing: .14em; color: var(--gold); }
 .pot-preview b { color: var(--gold); }
 .pot-preview .pp-xp { opacity: .75; font-size: 12px; }
+
+/* F-19: cached Mercenary Board while the live one loads */
+.roster.updating .fcard { animation: skel 1.2s ease-in-out infinite alternate; }

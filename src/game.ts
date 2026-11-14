@@ -253,6 +253,26 @@ function setNetRetry(show: boolean) {
   $("net-mode").insertAdjacentElement("afterend", b);
 }
 
+/** F-19: paint the last known Mercenary Board instantly (cached from the previous visit) while the live one loads. */
+function showCachedRoster() {
+  try {
+    const raw = localStorage.getItem("noxara.roster.v1");
+    const v = raw ? (JSON.parse(raw) as FighterInfo[]) : null;
+    if (!Array.isArray(v) || v.length < 2 || !v.every((f) => f && f.upgrades && f.record && typeof f.account === "string")) return;
+    const list = $("roster");
+    renderLobby(list, v, portraits, null);
+    list.classList.add("updating");
+    list.title = "Updating…";
+  } catch {
+    /* no cache: the skeleton stays */
+  }
+}
+const rosterFresh = () => {
+  const l = $("roster");
+  l.classList.remove("updating");
+  l.removeAttribute("title");
+};
+
 async function refreshLobby() {
   const mode = $("net-mode");
   if (!mode.classList.contains("chain")) setNet(mode, "Connecting…", "Connecting to the island…");
@@ -261,7 +281,7 @@ async function refreshLobby() {
     setNetRetry(false);
     setNet(mode, "Practice · not ranked", "Practice match: results aren't ranked.");
     if (!fighters.length) fighters = localFighters();
-    if (portraits.length) renderLobby($("roster"), fighters, portraits, null);
+    if (portraits.length) { renderLobby($("roster"), fighters, portraits, null); rosterFresh(); }
     await refreshAccount();
     return;
   }
@@ -282,6 +302,7 @@ async function refreshLobby() {
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
+    rosterFresh();
     void loadSparks(c);
   }
   renderTicker();
@@ -1622,6 +1643,7 @@ const mark = (n: string) => performance.mark(`br:${n}`);
 async function boot() {
   mark("boot");
   lobbySkeleton($("roster"));
+  showCachedRoster();
   void clientP.then(() => refreshLobby());
   const fill = $("loadfill");
   await loadAll((p) => (fill.style.width = `${Math.round(p * 100)}%`));
@@ -1653,6 +1675,7 @@ async function boot() {
   await nextFrame();
   portraits = await makePortraits(renderer);
   hud.portraits = portraits;
+  if (!fighters.length && $("roster").classList.contains("updating")) showCachedRoster(); // re-paint with portraits
   if (fighters.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
     fillSparks($("roster"), sparks);
