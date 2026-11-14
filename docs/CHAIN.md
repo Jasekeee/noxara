@@ -65,6 +65,14 @@ Explorer: `https://testnet.nearblocks.io/address/royale.br-7e8492.testnet`.
 1. **Guest:** `POST /api/guest {publicKey}` → the relayer creates `g-<hex>.relay…` with a function-call key
    (receiver = the game, methods `start_match`, `sweep_match`) and prepays its NEP-145 storage
    (`storage_deposit({account_id})`, 0.02 NEAR).
+   **Mainnet (`GUEST_VIA_CONTRACT=1`):** ONE relayer tx to the game with two calls: `create_guest({id,
+   public_key})` (attached: the 0.003 funding) and `storage_deposit`. The **contract** creates
+   `g-<id>.<contract>` and adds the browser key (receiver = the contract, `start_match,sweep_match`,
+   allowance 0.05 NEAR — constants in the contract, not relayer input). Only the relayer account
+   (`guest_parent`) may call it; ids are 8–32 lowercase hex; an existing account makes the creation
+   fail as a whole (nothing overwritten) and the `on_guest_created` callback refunds the funding to the
+   relayer. So a hosted relayer never needs a key of the contract account. Both forms (`g-*.<relayer>`
+   and `g-*.<contract>`) are guests everywhere (earn 0, no shares, no welcome credit, no dailies).
 2. **Start:** the client signs a delegate action for `start_match` → `POST /api/relay`. The contract:
    - lazily sweeps up to 3 expired free matches; abandons the player's previous unsettled match (see rules);
    - charges each active bot `ENTRY_FEE` (4 $BOUNTY) into escrow (the contract's own token balance);
@@ -288,6 +296,7 @@ kept `z`); `lto`, `codegen-units = 1`, `panic = "abort"` were already set; `over
 | `teardown_clear` | owner, from 2026-11-25 00:00 UTC | close pending matches (8/call) and delete state in bounded batches | run before the lock (release builds can't move it) |
 | `teardown` | owner, from 2026-11-25 00:00 UTC | delete the contract account, all its NEAR to the fixed beneficiary | run earlier; choose another payee |
 | `withdraw_excess` | owner, from 2026-11-25 00:00 UTC | send NEAR above the storage cost (+0.05) to the fixed beneficiary | touch storage-backing NEAR |
+| `create_guest` | only the relayer account (`guest_parent`) | create `g-<8–32 hex>.<contract>` with a fixed function-call key (this contract, `start_match,sweep_match`, 0.05 NEAR allowance), funded by its own attached deposit (≤ 0.01 NEAR); failure refunds the deposit to the relayer | add a full-access key; create any other name; overwrite an existing account; spend the contract's NEAR beyond a refund of what was attached |
 | `close_retired`, `sweep_match` | anyone | settle a retired bot (sponsors get its wallet by share, rest to the house) / refund an expired match | anything else |
 
 No method lets the owner or the server move a player's NOX: transfers out of a player's balance only

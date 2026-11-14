@@ -16,7 +16,26 @@ pub const CHECKIN_MIN_LIFETIME_PAID: u32 = 3;
 /// quests: (id, goal, reward NOX × m)
 pub const QUESTS: [(&str, u32, u128); 3] = [("play 3 matches", 3, ONE), ("finish in the top 3", 1, ONE), ("take down the bounty carrier", 1, 2 * ONE)];
 pub const QUEST_DAILY_CAP: u32 = 300;
-const DAY_MS: u64 = 86_400_000;
+/// Daily LOGIN reward (owner spec 2026-11-14): claimed on entering the game, no match needed. Paid by the House
+/// (never minted) × min(m, 1), never below the floor, real accounts only, once per account per UTC day, and only
+/// 24 h after the account first registered. Two daily pools (audit #7 M-1):
+/// * RESERVED (`LOGIN_RESERVED_CAP`): accounts with a match paid from their OWN NOX in the last
+///   `LOGIN_RESERVED_WINDOW_MS` (welcome-credit matches don't count). They draw from it first and fall back to
+///   OPEN only when it is full, so a sybil farm can't crowd active players out.
+/// * OPEN (`LOGIN_OPEN_CAP`): any other eligible real account (the owner's rule: no match required).
+/// Worst case for the House: (25 + 15) × 0.5 = 20 NOX a day (2% of its target); what an aged sybil farm with no
+/// paid matches can take is bounded by the OPEN pool: 15 × 0.5 = 7.5 NOX a day.
+/// The bigger, streak-growing `check_in` stays reserved for days with a match paid from the player's own NOX.
+pub const LOGIN_REWARD: u128 = ONE / 2;
+pub const LOGIN_RESERVED_CAP: u32 = 25;
+pub const LOGIN_OPEN_CAP: u32 = 15;
+/// a wallet-paid match within this window puts the account in the RESERVED pool
+pub const LOGIN_RESERVED_WINDOW_MS: u64 = 7 * DAY_MS;
+/// claimable LOGIN_MIN_AGE_MS after the account's first registration (re-registering keeps the first time)
+pub const LOGIN_MIN_AGE_MS: u64 = DAY_MS;
+const LOGIN_RESERVED_KEY: &[u8] = b"login_reserved_count";
+const LOGIN_OPEN_KEY: &[u8] = b"login_open_count";
+pub const DAY_MS: u64 = 86_400_000;
 const CHECKIN_COUNT_KEY: &[u8] = b"checkin_day_count";
 const QUEST_COUNT_KEY: &[u8] = b"quest_day_count";
 
@@ -34,6 +53,66 @@ pub struct PlayerDaily {
     pub claimed: u8,
     /// wallet-paid matches ever
     pub lifetime_paid: u32,
+}
+
+/// Per-account login record. Like `PlayerDaily` it outlives `storage_unregister` (its bytes are kept from the
+/// refund), so leaving and re-registering neither resets the registration day nor today's claim.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, Default)]
+pub struct LoginRow {
+    /// block time (ms) of the account's first registration (0 = registered before the login reward existed)
+    pub since_ms: u64,
+    /// UTC day of the last claim (0 = never)
+    pub claimed_day: u32,
+}
+
+/// The two daily login pools (see LOGIN_RESERVED_CAP / LOGIN_OPEN_CAP).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LoginPool {
+    Reserved,
+    Open,
+}
+impl LoginPool {
+    pub fn name(self) -> &'static str {
+        match self {
+            LoginPool::Reserved => "reserved",
+            LoginPool::Open => "open",
+        }
+    }
+    fn key(self) -> &'static [u8] {
+        match self {
+            LoginPool::Reserved => LOGIN_RESERVED_KEY,
+            LoginPool::Open => LOGIN_OPEN_KEY,
+        }
+    }
+    pub fn cap(self) -> u32 {
+        match self {
+            LoginPool::Reserved => LOGIN_RESERVED_CAP,
+            LoginPool::Open => LOGIN_OPEN_CAP,
+        }
+    }
+}
+
+#[near(serializers = [json])]
+pub struct LoginView {
+    pub day: u32,
+    pub claimed_today: bool,
+    pub can_claim: bool,
+    pub why_not: Option<String>,
+    /// what a claim pays right now (× min(m, 1), never below the House floor)
+    pub reward: U128,
+    /// the pool a claim would draw from now: "reserved" (a wallet-paid match in the last 7 days) or "open"
+    pub pool: Option<String>,
+    /// claims left today in that pool
+    pub pool_left: u32,
+    /// does the account qualify for the RESERVED pool (a wallet-paid match in the window)?
+    pub reserved_eligible: bool,
+    pub reserved_left: u32,
+    pub open_left: u32,
+    /// claims today, both pools
+    pub claims_today: u32,
+    /// both caps together
+    pub daily_cap: u32,
 }
 
 #[near(serializers = [json])]
@@ -60,6 +139,9 @@ pub struct DailyView {
 
 fn map() -> StoreMap<AccountId, PlayerDaily> {
     StoreMap::new(Key::PlayerDaily)
+}
+pub(crate) fn login_map() -> StoreMap<AccountId, LoginRow> {
+    StoreMap::new(Key::LoginRow)
 }
 pub fn today() -> u32 {
     (env::block_timestamp_ms() / DAY_MS) as u32
@@ -119,6 +201,60 @@ impl Contract {
         e.season_rewards += amount;
         self.save_econ(&e);
     }
+    /// storage_deposit hook: remember the first registration day of a real account (kept on re-registering)
+    pub(crate) fn note_registration(&mut self, a: &AccountId) {
+        let mut m = login_map();
+        if m.get(a).is_none() {
+            m.insert(a.clone(), LoginRow { since_ms: env::block_timestamp_ms(), claimed_day: 0 });
+            m.flush();
+        }
+    }
+    /// RESERVED-pool eligibility: a match paid from the account's own NOX within LOGIN_RESERVED_WINDOW_MS
+    /// (`last_paid_ms` is only set by `record_daily`, which skips welcome-credit matches and guests).
+    pub(crate) fn login_reserved_eligible(&self, a: &AccountId) -> bool {
+        let last = map().get(a).map(|d| d.last_paid_ms).unwrap_or(0);
+        last > 0 && env::block_timestamp_ms().saturating_sub(last) <= LOGIN_RESERVED_WINDOW_MS
+    }
+    /// The pool `a` would draw from now (RESERVED first if eligible, else / when full OPEN), or None when both are full.
+    fn login_pool(&self, a: &AccountId) -> Option<LoginPool> {
+        let day = today();
+        let left = |p: LoginPool| day_count(p.key(), day) < p.cap();
+        if self.login_reserved_eligible(a) && left(LoginPool::Reserved) {
+            Some(LoginPool::Reserved)
+        } else if left(LoginPool::Open) {
+            Some(LoginPool::Open)
+        } else {
+            None
+        }
+    }
+    /// What `claim_login` would pay `a` now and from which pool, or why it pays nothing.
+    fn login_quote(&self, a: &AccountId) -> Result<(u128, LoginPool), String> {
+        let day = today();
+        if self.load_player(a).is_none() {
+            return Err("sign in with a NEAR account".into());
+        }
+        if self.is_guest(a) {
+            return Err("guests earn no NOX: sign in with a NEAR account".into());
+        }
+        if self.is_game_wallet_pub(a) {
+            return Err("game wallets earn no login reward".into());
+        }
+        let row = login_map().get(a).cloned().unwrap_or_default();
+        if row.claimed_day == day {
+            return Err("already claimed today".into());
+        }
+        if env::block_timestamp_ms() < row.since_ms.saturating_add(LOGIN_MIN_AGE_MS) {
+            return Err("the login reward starts 24 hours after you register".into());
+        }
+        let Some(pool) = self.login_pool(a) else {
+            return Err("today's login rewards are all claimed: come back tomorrow".into());
+        };
+        let paid = self.daily_amount(LOGIN_REWARD);
+        if paid == 0 {
+            return Err("the House can't pay rewards right now".into());
+        }
+        Ok((paid, pool))
+    }
     fn reward_for_streak(streak: u32) -> u128 {
         CHECKIN_REWARDS[(streak.max(1) as usize - 1).min(CHECKIN_REWARDS.len() - 1)]
     }
@@ -165,6 +301,52 @@ impl Contract {
         self.house_reward(&me, paid, "daily quest");
         event("quest", &near_sdk::serde_json::json!({ "player": me, "quest": quest, "paid": U128(paid) }));
         U128(paid)
+    }
+
+    /// Daily login reward: call once when a signed-in real account enters the game. Pays LOGIN_REWARD × min(m, 1)
+    /// from the House (never minted, never below its floor), once per account per UTC day, from the RESERVED pool
+    /// (recent wallet-paid match) or the OPEN pool. Returns 0 and changes nothing when there is nothing to pay
+    /// (guest, game wallet, already claimed, too new, both pools full, House at its floor): the reason is logged.
+    pub fn claim_login(&mut self) -> U128 {
+        let me = env::predecessor_account_id();
+        let (paid, pool) = match self.login_quote(&me) {
+            Ok(q) => q,
+            Err(why) => {
+                env::log_str(&format!("no login reward: {why}"));
+                return U128(0);
+            }
+        };
+        let day = today();
+        bump_day_count(pool.key(), day, pool.cap(), "login reward");
+        let mut m = login_map();
+        let mut row = m.get(&me).cloned().unwrap_or_default();
+        row.claimed_day = day;
+        m.insert(me.clone(), row);
+        m.flush();
+        self.house_reward(&me, paid, "daily login");
+        event("login_reward", &near_sdk::serde_json::json!({ "player": me, "paid": U128(paid), "pool": pool.name(), "pool_today": day_count(pool.key(), day) }));
+        U128(paid)
+    }
+
+    pub fn get_login(&self, account_id: AccountId) -> LoginView {
+        let day = today();
+        let q = self.login_quote(&account_id);
+        let used = |p: LoginPool| day_count(p.key(), day);
+        let pool = q.as_ref().ok().map(|(_, p)| *p);
+        LoginView {
+            day,
+            claimed_today: login_map().get(&account_id).is_some_and(|r| r.claimed_day == day),
+            can_claim: q.is_ok(),
+            reward: U128(q.as_ref().map(|(p, _)| *p).unwrap_or(0)),
+            pool: pool.map(|p| p.name().to_string()),
+            pool_left: pool.map(|p| p.cap().saturating_sub(used(p))).unwrap_or(0),
+            reserved_eligible: self.login_reserved_eligible(&account_id),
+            reserved_left: LOGIN_RESERVED_CAP.saturating_sub(used(LoginPool::Reserved)),
+            open_left: LOGIN_OPEN_CAP.saturating_sub(used(LoginPool::Open)),
+            claims_today: used(LoginPool::Reserved) + used(LoginPool::Open),
+            daily_cap: LOGIN_RESERVED_CAP + LOGIN_OPEN_CAP,
+            why_not: q.err(),
+        }
     }
 
     pub fn get_daily(&self, account_id: AccountId) -> DailyView {

@@ -370,7 +370,9 @@ impl Contract {
         // the check-in/quest row also outlives the account (re-registering must not reset today's claims)
         // PlayerDaily row: key (1 + 4 + len) + value (8 + 4 + 4 + 4 + 12 + 1 + 4) + 40 overhead
         let b = if StoreMap::<AccountId, crate::daily::PlayerDaily>::new(Key::PlayerDaily).get(id).is_some() { 40 + 5 + id.len() as u128 + 37 } else { 0 };
-        (a + b) * env::storage_byte_cost().as_yoctonear()
+        // the login row (registration time + last claim day) outlives it too: key (1 + 4 + len) + value (8 + 4) + 40
+        let c = if crate::daily::login_map().get(id).is_some() { 40 + 5 + id.len() as u128 + 12 } else { 0 };
+        (a + b + c) * env::storage_byte_cost().as_yoctonear()
     }
 
     pub(crate) fn player_prize_bps(&mut self, player: &AccountId) -> u128 {
@@ -945,6 +947,9 @@ impl Contract {
         let mut pd = StoreMap::<AccountId, crate::daily::PlayerDaily>::new(Key::PlayerDaily);
         pd.remove(a);
         pd.flush();
+        let mut lr = crate::daily::login_map();
+        lr.remove(a);
+        lr.flush();
     }
 
     pub(crate) fn clear_econ_globals(&mut self) {

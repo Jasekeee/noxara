@@ -137,6 +137,13 @@ pub const GUEST_STORAGE_BYTES: u64 = 1_514; // measured 1,261 (worst-case names)
 /// NEAR given to every bot / house sub-account the contract creates (they have NO access keys).
 pub const NPC_NEAR: NearToken = NearToken::from_millinear(1);
 const GAS_RESOLVE: Gas = Gas::from_tgas(10);
+/// Guests made by `create_guest` (mainnet): `g-<id>.<this contract>`. Their browser key may call only these
+/// methods of this contract, with this gas allowance (the same key the relayer added to `g-*.<relayer>` guests).
+pub const GUEST_KEY_METHODS: &str = "start_match,sweep_match";
+pub const GUEST_KEY_ALLOWANCE: NearToken = NearToken::from_millinear(50);
+/// Most NEAR the relayer may forward to a new guest account (it pays for the account's own storage).
+pub const MAX_GUEST_FUNDING: NearToken = NearToken::from_millinear(10);
+const GAS_GUEST_CALLBACK: Gas = Gas::from_tgas(5);
 
 pub const PERSONALITIES: [&str; 6] = ["aggressive", "camper", "sniper", "looter", "coward", "balanced"];
 /// The genesis nine for a fresh deploy (= src/sim/roster.ts t1Roster(); skins slot + 1). The live
@@ -186,6 +193,8 @@ enum Key {
     Cosmetics,
     // daily check-in + quests (daily.rs)
     PlayerDaily,
+    // daily login reward (daily.rs): appended, so every earlier prefix stays the same
+    LoginRow,
 }
 
 #[near(serializers = [borsh, json])]
@@ -510,7 +519,8 @@ pub struct Contract {
     owner: AccountId,
     /// the match-server account: the only one allowed to settle
     server: AccountId,
-    /// guests are `g-*.<guest_parent>` (created by the relayer)
+    /// the relayer account: it pays guests' deposits and is the only caller of `create_guest`. Guests are
+    /// `g-*.<guest_parent>` (made by the relayer itself, testnet) or `g-*.<this contract>` (`create_guest`)
     guest_parent: AccountId,
     house: AccountId,
     token: FungibleToken,
@@ -1352,6 +1362,51 @@ impl Contract {
     pub fn is_guest_account(&self, account_id: AccountId) -> bool {
         self.is_guest(&account_id)
     }
+
+    /// Relayer only: create the walletless guest `g-<id>.<this contract>` with the browser's function-call key
+    /// (this contract only, `GUEST_KEY_METHODS`, `GUEST_KEY_ALLOWANCE`). The attached deposit (at most
+    /// `MAX_GUEST_FUNDING`) funds the new account. A hosted relayer then needs no full-access key of the contract
+    /// account. Creating an account that already exists fails as a whole (nothing is overwritten) and
+    /// `on_guest_created` refunds the deposit to the relayer. Registration (storage) stays a separate
+    /// `storage_deposit` call, which the relayer batches into the same transaction.
+    #[payable]
+    pub fn create_guest(&mut self, id: String, public_key: near_sdk::PublicKey) {
+        let relayer = env::predecessor_account_id();
+        require!(relayer == self.guest_parent, "only the relayer creates guests");
+        require!(valid_guest_id(&id), "bad guest id: 8-32 lowercase hex characters");
+        require!(public_key.curve_type() == near_sdk::CurveType::ED25519, "guest keys are ed25519");
+        let account: AccountId = format!("g-{id}.{}", env::current_account_id()).parse().unwrap_or_else(|_| env::panic_str("guest account id too long"));
+        require!(self.is_guest(&account), "not a guest id");
+        let funding = env::attached_deposit();
+        require!(funding <= MAX_GUEST_FUNDING, "too much funding for a guest");
+        let me = env::current_account_id();
+        let _ = Promise::new(account.clone())
+            .create_account()
+            .transfer(funding)
+            .add_access_key_allowance(public_key, near_sdk::Allowance::limited(GUEST_KEY_ALLOWANCE).unwrap(), me.clone(), GUEST_KEY_METHODS)
+            .then(Self::ext(me).with_static_gas(GAS_GUEST_CALLBACK).on_guest_created(account, relayer, U128(funding.as_yoctonear())));
+    }
+
+    /// Callback of `create_guest`: on failure (e.g. the account already exists) the funding goes back to the
+    /// relayer (the failed batch refunds it to this contract first). Logs `guest_created` on success.
+    #[private]
+    pub fn on_guest_created(&mut self, account: AccountId, payer: AccountId, funding: U128) -> bool {
+        let ok = near_sdk::is_promise_success();
+        if ok {
+            event("guest_created", &near_sdk::serde_json::json!({ "account": account }));
+        } else {
+            event("guest_failed", &near_sdk::serde_json::json!({ "account": account, "refund": funding }));
+            if funding.0 > 0 {
+                let _ = Promise::new(payer).transfer(NearToken::from_yoctonear(funding.0));
+            }
+        }
+        ok
+    }
+}
+
+/// `create_guest` ids: 8-32 lowercase hex characters (the relayer uses 10 random hex digits).
+pub fn valid_guest_id(id: &str) -> bool {
+    (8..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
 
 // ---------------------------------------------------------------------- internals
@@ -1410,11 +1465,16 @@ impl Contract {
         FighterView { fighter: f, status, balance, bounty }
     }
 
+    /// Guests are `g-*.<guest_parent>` (made by the relayer itself: the live testnet guests) or `g-*.<this
+    /// contract>` (made by `create_guest`: mainnet). Both forms are restricted the same way everywhere.
     pub(crate) fn is_guest(&self, id: &AccountId) -> bool {
-        id.as_str()
-            .strip_suffix(self.guest_parent.as_str())
-            .and_then(|s| s.strip_suffix('.'))
-            .is_some_and(|local| local.starts_with("g-") && !local.contains('.'))
+        let me = env::current_account_id();
+        [self.guest_parent.as_str(), me.as_str()].iter().any(|parent| {
+            id.as_str()
+                .strip_suffix(parent)
+                .and_then(|s| s.strip_suffix('.'))
+                .is_some_and(|local| local.starts_with("g-") && local.len() > 2 && !local.contains('.'))
+        })
     }
 
     /// Who gets paid for fighter idx `i` of match `m`: the bot's own wallet, the real player who

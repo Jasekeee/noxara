@@ -1,11 +1,21 @@
 {
   "shareReturns": {
-    "medianSingleIpo": -0.5737389124563789,
-    "top10pctSingleIpo": 0.8737150162480067,
-    "shareOfIposInProfit": 0.22681247468610774,
-    "portfolio": -0.14342923105247163
+    "medianSingleIpo": -0.5713800471025654,
+    "top10pctSingleIpo": 0.8635534212961387,
+    "shareOfIposInProfit": 0.2307614109992884,
+    "portfolio": -0.15598632032111626
   },
-  "generatedAt": "2026-11-14T00:15:46.137Z",
+  "login": {
+    "realPerDay": 5.962755656196817,
+    "sybilPerDay": 1.746117377222076,
+    "worstDay": 15.745833487574359,
+    "sybilWorstDay": 4.826551276284504,
+    "bound": 20,
+    "sybilBound": 7.5,
+    "sybil": true,
+    "loginP": 0.5
+  },
+  "generatedAt": "2026-11-14T07:08:26.538Z",
   "matches": 10000,
   "runs": 20,
   "seed": 1,
@@ -87,7 +97,12 @@
     ],
     "ROOKIE_PROTECTED_MATCHES": 10,
     "CHECKIN_DAILY_CAP": 100,
-    "QUEST_DAILY_CAP": 300
+    "QUEST_DAILY_CAP": 300,
+    "LOGIN_REWARD_MILLI": 500,
+    "LOGIN_RESERVED_CAP": 25,
+    "LOGIN_OPEN_CAP": 15,
+    "LOGIN_RESERVED_WINDOW_DAYS": 7,
+    "LOGIN_MIN_AGE_HOURS": 24
   },
   "assumptions": {
     "HUMAN_WIN": 0.08,
@@ -98,7 +113,9 @@
     "MATCHES_PER_DAY": 300,
     "IPO_BUY_P": 0.6,
     "TRADE_P": 0.05,
-    "COSMETIC_P": 0.02
+    "COSMETIC_P": 0.02,
+    "LOGIN_P": 0.5,
+    "SYBIL": true
   },
   "checks": [
     {
@@ -119,17 +136,17 @@
     {
       "name": "house median within target ±30%",
       "ok": true,
-      "value": "median 714 vs target 1000"
+      "value": "median 712 vs target 1000"
     },
     {
       "name": "reward multiplier within 0–1.5, smooth",
       "ok": true,
-      "value": "range 0.13–0.94, max step 0.036"
+      "value": "range 0.13–0.91, max step 0.036"
     },
     {
       "name": "median bot life 30–150 matches",
       "ok": true,
-      "value": "median 56 (n=18561)"
+      "value": "median 56 (n=18781)"
     },
     {
       "name": "≥25% of the top-3 at 20% fall out by 40%",
@@ -139,17 +156,22 @@
     {
       "name": "≥20% of rookies reach the top-3 within 300 matches",
       "ok": true,
-      "value": "85%"
+      "value": "84%"
     },
     {
       "name": "Gini of bot wealth 0.20–0.50 (2nd half)",
       "ok": true,
-      "value": "0.242"
+      "value": "0.243"
+    },
+    {
+      "name": "daily login reward bounded by its caps; the sybil farm only reaches the OPEN pool",
+      "ok": true,
+      "value": "worst day 15.75 NOX ≤ 20 (2.0% of target); farm worst day 4.83 ≤ 7.5 (OPEN pool); mean real 5.96 + farm 1.75 NOX/day"
     },
     {
       "name": "share portfolio ROI (every IPO bought) −30%…+40%",
       "ok": true,
-      "value": "-14% (median single IPO -57%: most rookies fail, a few pay off)"
+      "value": "-16% (median single IPO -57%: most rookies fail, a few pay off)"
     }
   ],
   "pass": true

@@ -239,6 +239,8 @@ export interface GameClientDaily {
   daily(): Promise<DailyInfo>;
   checkIn(): Promise<{ tx: string | null; paid: number }>;
   claimQuest(id: number): Promise<{ tx: string | null; paid: number }>;
+  /** Daily login reward (real accounts, once per UTC day, House-paid): NOX paid, 0 when nothing was due. */
+  claimLogin?(): Promise<number>;
 }
 
 /** Implemented by Agent C in src/net/client.ts. */

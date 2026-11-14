@@ -38,6 +38,11 @@ const IPO_BUY_P = arg("ipo-buy-p", 0.6); // chance players buy a rookie's IPO bl
 const TRADE_P = arg("trade-p", 0.05); // chance per match of one secondary share trade
 const COSMETIC_P = arg("cosmetic-p", 0.02); // chance per match a rich player buys a cosmetic
 const BOT_SKIN_P = 0.3; // chance a bot with maxed upgrades and spare cash buys a skin at a settle
+// daily login reward (daily.rs claim_login): LOGIN_P of the real players log in each day; with --sybil 1 (default:
+// the worst case) a farm of aged real accounts with no paid matches claims whatever is left of the OPEN pool EVERY
+// day and hoards it (it can't reach the RESERVED pool, which needs a wallet-paid match in the last 7 days)
+const LOGIN_P = arg("login-p", 50) / 100;
+const SYBIL = arg("sybil", 1) === 1;
 
 const balance = JSON.parse(fs.readFileSync(path.join(repo, "docs/balance.json"), "utf8")) as {
   perPersonality: { personality: string; winRatePerFighter: number }[];
@@ -92,6 +97,7 @@ type RunOut = {
   supply: number[]; burned: number[]; house: number[]; m: number[]; gini: number[];
   lifespans: number[]; richFell: number; richN: number; rookieRose: number; rookieN: number; shareRoi: number[];
   minted: number; floorStreakMax: number; retired: number;
+  loginReal: number; loginSybil: number; loginDays: number; loginMaxDay: number; loginSybilMaxDay: number;
 };
 
 function gini(xs: number[]) {
@@ -110,7 +116,7 @@ function run(seed: number): RunOut {
   let house = P.HOUSE_GENESIS;
   let burned = 0;
   const minted = 0; // v2: nothing is minted after genesis (the contract test asserts the same)
-  const players = Array.from({ length: PLAYERS }, () => ({ bal: 0, credit: P.WELCOME_CREDIT, winsDay: -1, wins: 0, statDay: -1, paid: 0, top3: 0, bounty: 0, streak: 0, lastCheck: -2 }));
+  const players = Array.from({ length: PLAYERS }, () => ({ bal: 0, credit: P.WELCOME_CREDIT, winsDay: -1, wins: 0, statDay: -1, paid: 0, top3: 0, bounty: 0, streak: 0, lastCheck: -2, lastPaidDay: -1 }));
   /** House-paid daily rewards (check-in + quests): m-scaled, never below the floor (econ v3, daily.rs) */
   const houseReward = (pl: { bal: number }, base: number, m: number) => {
     const amt = Math.min(base * Math.min(m, 1), Math.max(0, house - P.HOUSE_FLOOR)); // m capped at 1 for dailies (audit #6)
@@ -119,9 +125,10 @@ function run(seed: number): RunOut {
     return amt;
   };
   let dailyPaid = 0;
-  const supplyOf = () => house + bots.reduce((s, b) => s + b.bal, 0) + players.reduce((s, p) => s + p.bal, 0);
+  let farm = 0; // the sybil farm's hoard of login rewards (counted in the supply)
+  const supplyOf = () => house + bots.reduce((s, b) => s + b.bal, 0) + players.reduce((s, p) => s + p.bal, 0) + farm;
   const genesis = supplyOf();
-  const out: RunOut = { portCost: 0, portBack: 0, supply: [], burned: [], house: [], m: [], gini: [], lifespans: [], richFell: 0, richN: 0, rookieRose: 0, rookieN: 0, shareRoi: [], minted, floorStreakMax: 0, retired: 0 };
+  const out: RunOut = { portCost: 0, portBack: 0, supply: [], burned: [], house: [], m: [], gini: [], lifespans: [], richFell: 0, richN: 0, rookieRose: 0, rookieN: 0, shareRoi: [], minted, floorStreakMax: 0, retired: 0, loginReal: 0, loginSybil: 0, loginDays: 0, loginMaxDay: 0, loginSybilMaxDay: 0 };
   let floorStreak = 0;
   let richAt2k: number[] = [];
   const rookieWatch: { id: number; until: number; rose: boolean }[] = [];
@@ -162,6 +169,33 @@ function run(seed: number): RunOut {
   for (let t = 0; t < N; t++) {
     const day = Math.floor(t / MATCHES_PER_DAY);
     ema += (house - ema) / P.EMA_DIV;
+    // ---- daily login reward at the start of each UTC day (accounts registered on day 0 are 24 h old from day 1).
+    // Two pools (audit #7 M-1): RESERVED for accounts with a wallet-paid match in the last 7 days (they fall back
+    // to OPEN when it is full), OPEN for everyone else. The sybil farm never pays entries: it only reaches OPEN.
+    if (t % MATCHES_PER_DAY === 0 && day >= 1) {
+      const lm = houseRule(ema).m;
+      const pay = () => { const amt = Math.min(P.LOGIN_REWARD_MILLI / 1000 * Math.min(lm, 1), Math.max(0, house - P.HOUSE_FLOOR)); house -= amt; return amt; };
+      let reserved = 0, open = 0, today = 0, sybilToday = 0;
+      for (const p of players) {
+        if (R() >= LOGIN_P) continue;
+        const recent = p.lastPaidDay >= 0 && day - p.lastPaidDay <= P.LOGIN_RESERVED_WINDOW_DAYS;
+        const pool = recent && reserved < P.LOGIN_RESERVED_CAP ? "r" : open < P.LOGIN_OPEN_CAP ? "o" : null;
+        if (!pool) continue;
+        const a = pay();
+        if (a <= 0) break; // the House at its floor: nothing paid, nothing consumed
+        if (pool === "r") reserved++; else open++;
+        p.bal += a; out.loginReal += a; today += a;
+      }
+      while (SYBIL && open < P.LOGIN_OPEN_CAP) {
+        const a = pay();
+        if (a <= 0) break;
+        open++;
+        farm += a; out.loginSybil += a; today += a; sybilToday += a;
+      }
+      out.loginDays++;
+      out.loginMaxDay = Math.max(out.loginMaxDay, today);
+      out.loginSybilMaxDay = Math.max(out.loginSybilMaxDay, sybilToday);
+    }
     const { m, houseBps, burnBps } = houseRule(ema);
     // ---- start: entries (10% of each entry burns), retirement of bots that can't pay
     for (let i = 0; i < bots.length; i++) {
@@ -265,6 +299,7 @@ function run(seed: number): RunOut {
     for (const p of players) if (p.bal >= 150 && R() < COSMETIC_P * (p.bal / 150)) { const price = p.bal >= 400 ? 200 : p.bal >= 250 ? 100 : 50; p.bal -= price; burn(price); }
     // ---- daily check-in + quests (only matches paid from the player's own wallet count)
     if (pl && walletPaid) {
+      pl.lastPaidDay = day;
       if (pl.statDay !== day) { pl.statDay = day; pl.paid = 0; pl.top3 = 0; pl.bounty = 0; }
       pl.paid++;
       if (winner === -1 || R() < 0.2) pl.top3++;
@@ -321,6 +356,17 @@ const roi = median(runs.flatMap((r) => r.shareRoi));
 const allRoi = runs.flatMap((r) => r.shareRoi).sort((a, b) => a - b);
 const top10 = allRoi.length ? allRoi[Math.floor(allRoi.length * 0.9)] : NaN;
 const winners = allRoi.filter((x) => x > 0).length / Math.max(1, allRoi.length);
+const loginDays = runs.reduce((s, r) => s + r.loginDays, 0);
+const login = {
+  realPerDay: runs.reduce((s, r) => s + r.loginReal, 0) / Math.max(1, loginDays),
+  sybilPerDay: runs.reduce((s, r) => s + r.loginSybil, 0) / Math.max(1, loginDays),
+  worstDay: Math.max(...runs.map((r) => r.loginMaxDay)),
+  sybilWorstDay: Math.max(...runs.map((r) => r.loginSybilMaxDay)),
+  bound: (P.LOGIN_RESERVED_CAP + P.LOGIN_OPEN_CAP) * P.LOGIN_REWARD_MILLI / 1000,
+  sybilBound: P.LOGIN_OPEN_CAP * P.LOGIN_REWARD_MILLI / 1000,
+  sybil: SYBIL,
+  loginP: LOGIN_P,
+};
 const portRoi = runs.reduce((s, r) => s + r.portBack, 0) / Math.max(1e-9, runs.reduce((s, r) => s + r.portCost, 0)) - 1;
 
 const checks: [string, boolean, string][] = [
@@ -333,6 +379,7 @@ const checks: [string, boolean, string][] = [
   ["≥25% of the top-3 at 20% fall out by 40%", richFell >= 0.25, `${(richFell * 100).toFixed(0)}%`],
   ["≥20% of rookies reach the top-3 within 300 matches", rookieRose >= 0.2, `${(rookieRose * 100).toFixed(0)}%`],
   ["Gini of bot wealth 0.20–0.50 (2nd half)", giniHalf >= 0.2 && giniHalf <= 0.5, giniHalf.toFixed(3)],
+  ["daily login reward bounded by its caps; the sybil farm only reaches the OPEN pool", login.worstDay <= login.bound + 1e-9 && login.sybilWorstDay <= login.sybilBound + 1e-9 && login.bound <= 0.05 * P.HOUSE_TARGET, `worst day ${login.worstDay.toFixed(2)} NOX ≤ ${login.bound} (${(login.bound / P.HOUSE_TARGET * 100).toFixed(1)}% of target); farm worst day ${login.sybilWorstDay.toFixed(2)} ≤ ${login.sybilBound} (OPEN pool); mean real ${login.realPerDay.toFixed(2)} + farm ${login.sybilPerDay.toFixed(2)} NOX/day`],
   ["share portfolio ROI (every IPO bought) −30%…+40%", portRoi >= -0.3 && portRoi <= 0.4, `${(portRoi * 100).toFixed(0)}% (median single IPO ${(roi * 100).toFixed(0)}%: most rookies fail, a few pay off)`],
 ];
 
@@ -365,7 +412,7 @@ const charts: Record<string, string> = {
 for (const [f, c] of Object.entries(charts)) fs.writeFileSync(path.join(OUT, f), c);
 const pass = checks.every((c) => c[1]);
 const shareReturns = { medianSingleIpo: roi, top10pctSingleIpo: top10, shareOfIposInProfit: winners, portfolio: portRoi };
-const summary = { shareReturns, generatedAt: new Date().toISOString(), matches: N, runs: RUNS, seed: SEED0, params: P, assumptions: { HUMAN_WIN, EDGE, BOUNTY_KILL_P, GUEST_P, PLAYERS, MATCHES_PER_DAY, IPO_BUY_P, TRADE_P, COSMETIC_P }, checks: checks.map(([name, ok, value]) => ({ name, ok, value })), pass };
+const summary = { shareReturns, login, generatedAt: new Date().toISOString(), matches: N, runs: RUNS, seed: SEED0, params: P, assumptions: { HUMAN_WIN, EDGE, BOUNTY_KILL_P, GUEST_P, PLAYERS, MATCHES_PER_DAY, IPO_BUY_P, TRADE_P, COSMETIC_P, LOGIN_P, SYBIL }, checks: checks.map(([name, ok, value]) => ({ name, ok, value })), pass };
 fs.writeFileSync(path.join(OUT, "summary.json"), JSON.stringify(summary, null, 2) + "\n");
 if (!QUIET) {
   console.log(`NOXARA economy v2 — ${RUNS} runs × ${N} matches (seed ${SEED0})`);

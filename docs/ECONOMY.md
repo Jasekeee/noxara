@@ -18,6 +18,7 @@ asserts that its constants equal that file, and `scripts/econ-sim-v2.ts` simulat
 | Genesis | 2,000 NOX to the House and 100 to each of the 9 bots, so **2,900 NOX in total. Nothing is ever minted after genesis** (a test checks this). |
 | Rookie grant | When a bot goes bankrupt, the House pays its replacement 100 NOX. This only happens while the House is above its floor; otherwise the slot waits. |
 | Welcome credit | 30 NOX of entry-only credit, once per real NEAR account, with a daily cap. The House pays these entries; no NOX is minted for them. |
+| Daily login | `0.5 × min(m, 1)` NOX from the House, once per real account per UTC day, from two capped daily pools: 25 reserved for recently active players + 15 open (§11). |
 | Pot top-up | `25 × m` from the House, never more than the House holds above its floor. |
 | Bounty bonus | `5 × m` from the House, paid on top of the bounty. |
 
@@ -87,19 +88,20 @@ Entry fees are progressive for bots **and** players: `4 + 2%` of the wallet abov
 - **Diminishing daily rewards:** a player's first 3 paid wins in a UTC day pay 100% of the prize, the next 3 pay 50%, and later wins pay 25%. The rest goes to the House.
 
 ## 8. Simulation results
-`node scripts/econ-sim-v2.ts` runs 20 runs × 10,000 matches. Charts: `docs/econ/*.svg`; numbers: `docs/econ/summary.json`. The model includes rookie protection and the House-paid daily check-in and quests (§11).
+`node scripts/econ-sim-v2.ts` runs 20 runs × 10,000 matches. Charts: `docs/econ/*.svg`; numbers: `docs/econ/summary.json`. The model includes rookie protection, the House-paid daily check-in and quests, and the daily login reward with a sybil farm (aged accounts, no paid matches) that claims whatever is left of the OPEN login pool every day and hoards it (§11).
 
 | Check | Result |
 |---|---|
 | Minting after genesis | 0 |
 | Supply | levels off at 79% of genesis (the brake), drift over the last 10% of matches ≈ 0 |
-| House | never below its floor; median 714 against a target of 1,000 (within ±30%) |
-| Reward multiplier m | 0.13–0.94; largest change between two matches 0.036 (smooth) |
+| House | never below its floor; median 712 against a target of 1,000 (within ±30%) |
+| Reward multiplier m | 0.13–0.91; largest change between two matches 0.036 (smooth) |
 | Bot life | median 56 matches |
 | Rich bots fall | 100% of the top-3 at match 2k are out of the top-3 by 4k |
-| Rookies rise | 85% reach the top-3 within 300 matches |
+| Rookies rise | 84% reach the top-3 within 300 matches |
+| Daily login (sybil farm takes the rest of the OPEN pool every day) | worst day 15.75 NOX (bound 20 = 2% of the House target); the farm's worst day 4.83 NOX (bound 7.5: the OPEN pool); mean 5.96 NOX/day to real players + 1.75 to the farm |
 | Gini of bot wealth | 0.24 |
-| Shares | median single IPO −57%, top 10% of IPOs +87%, 23% of IPOs end in profit; buying every IPO returns −14%. Real risk on purpose: shares go to zero on bankruptcy, and NOX is play-money. |
+| Shares | median single IPO −57%, top 10% of IPOs +86%, 23% of IPOs end in profit; buying every IPO returns −16%. Real risk on purpose: shares go to zero on bankruptcy, and NOX is play-money. |
 
 The results hold across seeds, a guest share of 50–90%, 200 players, a stronger human player and heavy share trading.
 
@@ -125,5 +127,6 @@ Cosmetics shop, battle pass, licensing AI athletes, sponsored tournaments, live 
 | Check-in (once per UTC day) | streak days 1–7 pay 1, 1, 1, 2, 2, 2, 3 NOX × min(m, 1), from the House, never below its floor |
 | Daily quests (verified on chain from settled matches) | play 3 matches → 1 NOX; finish in the top 3 → 1 NOX; take down the bounty carrier → 2 NOX (× min(m, 1)) |
 | Anti-sybil | real accounts only; only matches paid from your own NOX count (welcome-credit matches don't); check-in needs a wallet-paid match that same day and 3 in the account's lifetime; global caps of 100 check-ins and 300 quest claims a day; a reward is always smaller than the 4-NOX minimum entry |
+| Daily login (on entering the game, no match needed) | 0.5 NOX × min(m, 1) from the House, never below its floor; once per account per UTC day; real accounts only (guests, game wallets and bots get 0); claimable 24 h after the account first registered. Two daily pools: **reserved** (25) for accounts with a match paid from their own NOX in the last 7 days (welcome-credit matches don't count), which fall back to **open** when it is full; **open** (15) for any other eligible account. Worst case for the House: 20 NOX a day (2% of its target). A refused claim returns 0 and consumes nothing, and the relayer doesn't even send it (it checks `get_login` first). The bigger, growing check-in streak stays tied to days with a wallet-paid match. **Known gap:** the open pool stays farmable by sybil accounts older than 24 h — bounded at 15 × 0.5 = 7.5 NOX a day, and it can't crowd out active players, who have the reserved pool |
 | Rookie protection | a rookie's first 10 matches: the minimum entry (4 NOX), no upkeep, never the bounty carrier |
 | Social quests | follow links with no reward: we only pay for what the chain can verify |

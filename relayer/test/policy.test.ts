@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkDelegate, isGuestAccount, RateLimiter, type RelayPolicy } from "../src/policy.ts";
+import { checkDelegate, preflight, isGuestAccount, isGuestId, RateLimiter, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "../src/policy.ts";
 
 const p: RelayPolicy = { gameContractId: "game.t", guestParentId: "relay.t", allowedMethods: ["start_match", "draw", "leave"], maxGasPerAction: 30n * 10n ** 12n, maxActions: 1 };
 const fc = (methodName: string, deposit = 0n, gas = 15n * 10n ** 12n) => ({ functionCall: { methodName, args: new Uint8Array(), gas, deposit } });
@@ -70,4 +70,48 @@ test("delegate signatures are verified locally", async () => {
   const bad = Buffer.from(payload, "base64");
   bad[10] ^= 1; // tamper with the delegate body
   assert.equal(signatureOk(bad.toString("base64")).ok, false);
+});
+
+test("both guest forms: g-*.<relayer> (testnet) and g-*.<game contract> (create_guest, mainnet)", () => {
+  assert.equal(isGuestAccount("g-ab12.relay.t", "relay.t", "game.t"), true);
+  assert.equal(isGuestAccount("g-00aa11bb22.game.t", "relay.t", "game.t"), true);
+  assert.equal(isGuestAccount("g-00aa11bb22.game.t", "relay.t"), false, "without the contract only the old form");
+  assert.equal(isGuestAccount("g-.game.t", "relay.t", "game.t"), false);
+  assert.equal(isGuestAccount("g-ab.x.game.t", "relay.t", "game.t"), false);
+  assert.equal(isGuestAccount("house.game.t", "relay.t", "game.t"), false);
+  assert.equal(isGuestAccount("alice.t", undefined, "game.t"), false);
+  assert.equal(isGuestAccount("g-ab.relay.t", undefined, undefined), false);
+});
+
+test("create_guest ids mirror the contract's rule", () => {
+  for (const ok of ["00aa11bb", "0123456789", "f".repeat(32)]) assert.equal(isGuestId(ok), true, ok);
+  for (const bad of ["", "0123abc", "0123ABCD", "0123abcg", "g-0123abcd", "0123.abcd", "f".repeat(33)]) assert.equal(isGuestId(bad), false, bad);
+});
+
+test("claim_login is relayed gaslessly (default allow-list, 30 Tgas cap)", () => {
+  assert.ok(GAME_METHODS_DEFAULT.includes("claim_login"));
+  const lp: RelayPolicy = { gameContractId: "game.t", guestParentId: "relay.t", allowedMethods: GAME_METHODS_DEFAULT, maxGasPerAction: 150n * 10n ** 12n, maxActions: 1, methodGas: METHOD_GAS_DEFAULT };
+  const call = (gas: bigint) => ({ senderId: "alice.t", receiverId: "game.t", actions: [{ functionCall: { methodName: "claim_login", args: new Uint8Array(), gas, deposit: 0n } }], maxBlockHeight: 1000n });
+  assert.equal(checkDelegate(call(30n * 10n ** 12n), lp).ok, true);
+  assert.equal(checkDelegate(call(31n * 10n ** 12n), lp).ok, false, "gas capped");
+  assert.equal(checkDelegate({ ...call(30n * 10n ** 12n), receiverId: "other.t" }, lp).ok, false);
+  // guests' own keys never get it (GUEST_METHODS stays start/sweep; the contract fixes create_guest's key too)
+  assert.equal(checkDelegate({ ...call(30n * 10n ** 12n), actions: [{ functionCall: { methodName: "create_guest", args: new Uint8Array(), gas: 30n * 10n ** 12n, deposit: 0n } }] }, lp).ok, false, "create_guest is never relayed");
+});
+
+test("claim_login is relayed only when get_login says it pays (no tx for no-ops)", async () => {
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const view = (answer: unknown) => async (m: string, a: Record<string, unknown>) => {
+    calls.push([m, a]);
+    if (answer instanceof Error) throw answer;
+    return answer;
+  };
+  assert.equal(await preflight(["claim_login"], "alice.t", view({ can_claim: true, pool: "open" })), null);
+  assert.deepEqual(calls[0], ["get_login", { account_id: "alice.t" }]);
+  assert.equal(await preflight(["claim_login"], "alice.t", view({ can_claim: false, why_not: "already claimed today" })), "already claimed today");
+  assert.equal(await preflight(["claim_login"], "alice.t", view(null)), "no login reward to claim");
+  assert.ok(await preflight(["claim_login"], "alice.t", view(new Error("rpc down"))), "fails closed");
+  const n = calls.length;
+  assert.equal(await preflight(["start_match"], "alice.t", view({ can_claim: false })), null, "other methods: no view");
+  assert.equal(calls.length, n);
 });

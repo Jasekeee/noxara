@@ -34,7 +34,7 @@ const STORE_PENDING = "bountyroyale.signin.v1";
 const STORE_XP = "bountyroyale.localxp.v1";
 /** methods the signed-in account's function-call key may call (the relayer allow-lists the same) */
 // NOT list_shares / buy_listing: those need a full wallet signature + 1 yoctoNEAR (a leaked game key must not move shares or NOX)
-const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "cancel_listing", "buy_cosmetic", "prune_listings", "check_in", "claim_quest"];
+const REAL_METHODS = ["start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "cancel_listing", "buy_cosmetic", "prune_listings", "check_in", "claim_quest", "claim_login"];
 const ONE = 10n ** 18n;
 const YOCTO_PER_CENT = 10n ** 16n; // display with 2 decimals
 const START_GAS = 150n * 10n ** 12n; // worst case: retirements + rookie accounts at start (audit #10)
@@ -898,6 +898,27 @@ class Client implements GameClientT3, GameClientEcon {
       streak: d.streak, checkedInToday: d.checked_in_today, canCheckIn: d.can_check_in, whyNot: d.why_not, nextReward: toBounty(d.next_reward),
       quests: d.quests.map((q) => ({ id: q.id, title: q.title, progress: q.progress, goal: q.goal, done: q.done, claimed: q.claimed, reward: toBounty(q.reward) })),
     };
+  }
+  /** Daily login reward (contract `claim_login`): once per UTC day for a signed-in real account, paid by the House.
+   *  Best effort: returns the NOX paid, or 0 (guest, already claimed, too new, cap reached, an old game key without
+   *  the method, network trouble). Checks the view and the key first so it never sends a call that can't pay. */
+  async claimLogin(): Promise<number> {
+    if (this._mode !== "chain" || !this.realSaved) return 0;
+    const acct = this.realSaved.accountId;
+    const v = await this.econView<{ can_claim: boolean } | null>("get_login", { account_id: acct }, null);
+    if (!v?.can_claim) return 0;
+    try {
+      // keys made before the login reward existed don't allow `claim_login`: skip instead of failing on chain
+      const k = await rpc<{ permission: { FunctionCall?: { method_names: string[] } } | string }>(this.rpcUrl, "query", {
+        request_type: "view_access_key", finality: "optimistic", account_id: acct, public_key: this.realSaved.key.publicKey,
+      });
+      const fc = typeof k.permission === "object" ? k.permission.FunctionCall : undefined;
+      if (fc && fc.method_names.length > 0 && !fc.method_names.includes("claim_login")) return 0;
+      const r = await this.relay<string>("claim_login", {}, true, 30n * 10n ** 12n);
+      return toBounty(r.value);
+    } catch {
+      return 0;
+    }
   }
   async checkIn() {
     const r = await this.econCall<string>("check_in", {});

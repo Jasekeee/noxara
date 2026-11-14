@@ -10,6 +10,29 @@ export type RelayPolicy = {
   methodGas?: Record<string, bigint>;
 };
 
+const TGAS = 1_000_000_000_000n;
+/** Game methods the relayer pays gas for (RELAY_METHODS overrides). Guests' own keys allow only start/sweep. */
+export const GAME_METHODS_DEFAULT: readonly string[] = [
+  "start_match", "sweep_match", "sponsor", "unsponsor", "claim_welcome", "buy_ipo", "claim_dividends", "cancel_listing",
+  "buy_cosmetic", "prune_listings", "check_in", "claim_quest", "claim_login",
+];
+export const METHOD_GAS_DEFAULT: Record<string, bigint> = {
+  start_match: 150n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS, claim_welcome: 30n * TGAS, claim_login: 30n * TGAS,
+};
+
+/** Relayed calls that could be paid-for no-ops: ask the contract first and refuse without sending a tx (audit #7
+ *  L-2: `claim_login` returns 0 as a success when nothing is due). Returns the refusal reason, or null to relay. */
+export async function preflight(methods: readonly string[], sender: string, view: (method: string, args: Record<string, unknown>) => Promise<unknown>): Promise<string | null> {
+  if (!methods.includes("claim_login")) return null;
+  let v: { can_claim?: boolean; why_not?: string | null } | null;
+  try {
+    v = (await view("get_login", { account_id: sender })) as typeof v;
+  } catch {
+    return "can't check the login reward right now";
+  }
+  return v?.can_claim === true ? null : (v?.why_not ?? "no login reward to claim");
+}
+
 export type DelegateLike = {
   senderId: string;
   receiverId: string;
@@ -21,11 +44,18 @@ export type PolicyResult = { ok: true; methods: string[]; gas: bigint } | { ok: 
 
 export const GUEST_PREFIX = "g-";
 
-export function isGuestAccount(accountId: string, guestParentId: string): boolean {
-  if (!accountId.endsWith(`.${guestParentId}`)) return false;
-  const local = accountId.slice(0, -(guestParentId.length + 1));
-  return local.startsWith(GUEST_PREFIX) && !local.includes(".");
+/** A guest is `g-<x>.<parent>` for any of the given parents: the relayer (guests it created itself, testnet) or
+ *  the game contract (guests made by its `create_guest`, mainnet). Same rule as the contract's `is_guest`. */
+export function isGuestAccount(accountId: string, ...parents: Array<string | undefined>): boolean {
+  return parents.some((parent) => {
+    if (!parent || !accountId.endsWith(`.${parent}`)) return false;
+    const local = accountId.slice(0, -(parent.length + 1));
+    return local.startsWith(GUEST_PREFIX) && local.length > GUEST_PREFIX.length && !local.includes(".");
+  });
 }
+
+/** `create_guest` ids: 8-32 lowercase hex characters (mirrors the contract's `valid_guest_id`). */
+export const isGuestId = (id: string) => /^[0-9a-f]{8,32}$/.test(id);
 
 export function checkDelegate(d: DelegateLike, p: RelayPolicy, currentHeight?: bigint): PolicyResult {
   if (d.receiverId !== p.gameContractId) return { ok: false, reason: "receiver is not the game contract" };

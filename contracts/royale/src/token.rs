@@ -80,6 +80,10 @@ impl StorageManagement for Contract {
         let deposit_payer = (payer != account).then(|| payer.clone());
         self.save_player(&account, PlayerV2 { guest, storage_paid: U128(need.as_yoctonear()), deposit_payer, ..Default::default() });
         self.ensure_registered(&account);
+        if !guest {
+            // the login reward counts the account's age from its first registration (daily.rs)
+            self.note_registration(&account);
+        }
         // the one-time welcome credit: only when the account registers itself or via the trusted relayer
         // (a third party registering someone else grants nothing and never touches the daily cap)
         if !guest && (payer == account || payer == self.guest_parent) {

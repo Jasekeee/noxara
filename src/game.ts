@@ -364,6 +364,7 @@ function rebuildPreview() {
 
 // ------------------------------------------------------------------ account / level
 let myXp = localXp();
+let loginTried = false;
 async function refreshAccount() {
   const c = client;
   const t3 = isT3(c) && c.mode === "chain";
@@ -377,6 +378,12 @@ async function refreshAccount() {
   const wel = $("welcome");
   wel.classList.add("hidden");
   if (t3 && !guest) {
+    // daily login reward: claimed once per session on entering the game; silent unless it paid
+    const daily = c as unknown as import("./net/api").GameClientDaily;
+    if (!loginTried && daily.claimLogin) {
+      loginTried = true;
+      void daily.claimLogin().then((p) => { if (p > 0) { sfx.coin(4); toast(`+${fmt(p)} NOX daily login`); void refreshAccount(); } }, () => undefined);
+    }
     { const id = await c.account().catch(() => ""); const el = $("acct-name"); el.textContent = id ? shortAcct(id) : ""; el.title = id; if (id) el.setAttribute("aria-label", id); }
     const b = await c.balance().catch(() => 0);
     $("acct-bal").textContent = `${fmt(b)} NOX`;
@@ -481,6 +488,7 @@ const social = new Social({
 $("signin").addEventListener("click", () => void signIn());
 $("signout").addEventListener("click", async () => {
   if (isT3(client)) await client.signOut().catch(() => {});
+  loginTried = false; // the next account to sign in gets its own daily login claim
   await refreshLobby();
 });
 $("nav-fighters").addEventListener("click", () => { sfx.start(); sfx.ui(); pages.fighters(); });
