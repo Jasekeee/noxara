@@ -239,6 +239,7 @@ async function refreshLobby() {
     sim_version_mismatch: "game update pending",
     no_webcrypto: "this browser can't hold a guest key",
     chain_error: "NEAR is busy",
+    guests_closed: "free guest spots are used up — PLAY opens the free Training Island; sign in with NEAR to play for real",
   };
   const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
   mode.textContent = c.mode === "chain" ? `live wallets · NEAR ${NEAR_NETWORK}` : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
@@ -1063,9 +1064,16 @@ addEventListener("keydown", (e) => {
 });
 let bootDone = false;
 let wantPlay = (window as unknown as { __brWantPlay?: boolean }).__brWantPlay === true;
+/** Free guest spots used up (the relayer's small guest budget or today's cap) and no NEAR account: PLAY falls back to the free Training Island. */
+const guestsClosed = () => !!client && client.mode !== "chain" && client.offlineReason === "guests_closed";
 $("play").addEventListener("click", () => {
   if (!bootDone) {
     wantPlay = true; // pressed while loading: start as soon as the island is ready
+    return;
+  }
+  if (guestsClosed()) {
+    toast("Today's free guest spots are taken — enjoy the free Training Island, or sign in with NEAR to play for real");
+    startTraining();
     return;
   }
   void startMatch();
