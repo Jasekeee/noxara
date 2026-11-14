@@ -90,6 +90,20 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
     li.title = `${f.name}${isChainAcct(f.account) ? ` (${f.account})` : ""} — ${f.personality}. Wallet ${fmt(f.balance)} NOX. ${f.record.wins} wins, ${f.record.kills} kills in ${f.record.matches} matches.` + (f.bounty ? ` Carries a ${fmt(f.bountyValue)} NOX bounty.` : "");
     list.appendChild(li);
   }
+  // the bounty carrier (WANTED poster) sits in the middle of the strip
+  const cards = Array.from(list.children) as HTMLElement[];
+  const w = cards.findIndex((c) => c.classList.contains("wanted"));
+  const mid = Math.floor(cards.length / 2);
+  if (w >= 0 && w !== mid) {
+    const [wc] = cards.splice(w, 1);
+    cards.splice(mid, 0, wc);
+    for (const c of cards) list.appendChild(c);
+  }
+  // narrow screens scroll sideways: start with the WANTED card centered
+  requestAnimationFrame(() => {
+    const wc = list.querySelector<HTMLElement>(".wanted");
+    if (wc && list.scrollWidth > list.clientWidth) list.scrollLeft = wc.offsetLeft - (list.clientWidth - wc.offsetWidth) / 2;
+  });
 }
 
 export function lobbySkeleton(list: HTMLElement) {

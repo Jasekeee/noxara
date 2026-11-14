@@ -43,11 +43,60 @@ test("about: /?about opens the page and the title link opens it", async ({ page 
   await page.goto(offlineUrl("about"));
   await requireHook(page);
   await expect(page.getByRole("heading", { name: "ABOUT THE GAME" })).toBeVisible();
-  await expect(page.getByText("9 AI mercenaries. Real wallets. One bounty. Only one walks out.")).toBeVisible();
+  await expect(page.getByText("Only one walks out. Hunt the richest. Take the bounty.")).toBeVisible();
   await expect(page.getByText("X post: coming soon")).toBeVisible();
   await page.goto(offlineUrl());
   await requireHook(page);
   await page.getByRole("button", { name: "About the game" }).click();
   await expect(page.getByRole("heading", { name: "ABOUT THE GAME" })).toBeVisible();
   expect(errors).toEqual([]);
+});
+
+test("title: the mode selector decides what PLAY starts (training, remembered, soon modes disabled)", async ({ page }) => {
+  const errors = collectErrors(page);
+  await isolateFromChain(page);
+  await page.goto(offlineUrl());
+  await requireHook(page);
+
+  const seg = page.locator("#mode-seg");
+  await expect(seg.getByRole("button", { name: /standard/i })).toHaveAttribute("aria-pressed", "true");
+  // coming-soon modes are visibly disabled and never selectable
+  await expect(seg.locator(".seg.soon")).toHaveCount(2);
+  await expect(seg.locator(".seg.soon").first()).toHaveAttribute("aria-disabled", "true");
+  await seg.locator(".seg.soon").first().click({ force: true });
+  await expect(seg.getByRole("button", { name: /standard/i })).toHaveAttribute("aria-pressed", "true");
+
+  // no mode label contains the word "play" (the first /play/i button must be the big PLAY)
+  for (const t of await seg.locator(".seg").allInnerTexts()) expect(t).not.toMatch(/play/i);
+  await expect(page.getByRole("button", { name: /play/i }).first()).toHaveId("play");
+
+  await page.locator("#training").click();
+  await expect(page.locator("#training")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#mode-desc")).toContainText("Easy bots");
+  // remembered across a reload
+  await page.reload();
+  await requireHook(page);
+  await expect(page.locator("#training")).toHaveAttribute("aria-pressed", "true");
+
+  await page.locator("#play").click();
+  await expect.poll(() => phase(page), { timeout: 15_000 }).toBe("playing");
+  const training = await page.evaluate(() => (window.__br!.record?.() as unknown as { cfg?: { training?: boolean } } | undefined)?.cfg?.training);
+  expect(training, "PLAY started a training match").toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test("title: How to play and the cup rules open, close on Esc, and the cup card is there", async ({ page }) => {
+  await isolateFromChain(page);
+  await page.goto(offlineUrl());
+  await requireHook(page);
+  await expect(page.locator("#cup")).toContainText("Free to enter");
+  await expect(page.locator("#cup")).toContainText("Prizes announced soon");
+  await page.locator("#howto-btn").click();
+  await expect(page.getByRole("dialog", { name: "HOW TO PLAY" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".sheet")).toHaveCount(0);
+  await page.locator("#cup-rules").click();
+  await expect(page.getByRole("dialog")).toContainText("Void where prohibited");
+  await page.getByRole("button", { name: "CLOSE" }).click();
+  await expect(page.locator(".sheet")).toHaveCount(0);
 });

@@ -32,6 +32,7 @@ import { specsFromFighters } from "./net/roster";
 import { Social } from "./ui/challenge";
 import { fmt } from "./ui/dom";
 import { BIG_ISLAND_ENABLED } from "./modes";
+import { getMode, setBoardOpener } from "./ui/titlemenu";
 
 const U = 1 / 1000;
 const DT = 1 / TICK_HZ;
@@ -221,11 +222,17 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([p.catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), ms))]);
 }
 
+/** The connection pill: a short label, the full reason in the tooltip. */
+function setNet(el: HTMLElement, text: string, full: string) {
+  el.textContent = text;
+  el.title = full;
+}
+
 async function refreshLobby() {
   const c = await clientP;
   const mode = $("net-mode");
   if (!c) {
-    mode.textContent = "offline practice — results aren't recorded";
+    setNet(mode, "offline · not recorded", "Offline practice. Results aren't recorded.");
     if (!fighters.length) fighters = localFighters();
     if (portraits.length) renderLobby($("roster"), fighters, portraits, null);
     await refreshAccount();
@@ -239,10 +246,11 @@ async function refreshLobby() {
     sim_version_mismatch: "game update pending",
     no_webcrypto: "this browser can't hold a guest key",
     chain_error: "NEAR is busy",
-    guests_closed: "free guest spots are used up — PLAY opens the free Training Island; sign in with NEAR to play for real",
+    guests_closed: "free guest spots are used up. PLAY opens the free Training Island. Sign in with NEAR for real matches",
   };
   const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
-  mode.textContent = c.mode === "chain" ? `live wallets · NEAR ${NEAR_NETWORK}` : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
+  if (c.mode === "chain") setNet(mode, `live wallets · NEAR ${NEAR_NETWORK}`, `Live wallets on NEAR ${NEAR_NETWORK}`);
+  else setNet(mode, "offline · not recorded", `Offline practice. Results aren't recorded${r ? ` (${r})` : ""}.`);
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
@@ -439,7 +447,7 @@ async function signIn() {
   try {
     await c.signIn();
     sfx.chest();
-    toast("Signed in — your matches now earn NOX");
+    toast("Signed in. Your wins now pay NOX.");
   } catch {
     toast("Sign-in was cancelled");
   }
@@ -1094,13 +1102,20 @@ let bootDone = false;
 let wantPlay = (window as unknown as { __brWantPlay?: boolean }).__brWantPlay === true;
 /** Free guest spots used up (the relayer's small guest budget or today's cap) and no NEAR account: PLAY falls back to the free Training Island. */
 const guestsClosed = () => !!client && client.mode !== "chain" && client.offlineReason === "guests_closed";
+/** What PLAY does is chosen by the title's mode selector (standard / training / big island). */
+function applyMode() {
+  const m = getMode();
+  wantTraining = m === "training";
+  wantBig = m === "big" && BIG_ISLAND_ENABLED;
+}
 $("play").addEventListener("click", () => {
+  applyMode();
   if (!bootDone) {
     wantPlay = true; // pressed while loading: start as soon as the island is ready
     return;
   }
-  if (guestsClosed()) {
-    toast("Today's free guest spots are taken — enjoy the free Training Island, or sign in with NEAR to play for real");
+  if (getMode() === "standard" && guestsClosed()) {
+    toast("Free guest spots are taken today. Enjoy the free Training Island, or sign in with NEAR.");
     startTraining();
     return;
   }
@@ -1114,7 +1129,6 @@ const startTraining = () => {
   }
   void startMatch();
 };
-$("training").addEventListener("click", startTraining);
 const openAbout = () => {
   sfx.start();
   sfx.ui();
@@ -1122,23 +1136,7 @@ const openAbout = () => {
 };
 $("nav-about").addEventListener("click", openAbout);
 if (new URLSearchParams(location.search).has("about")) setTimeout(openAbout, 400);
-{
-  // BIG ISLAND entry (its own element in index.html); behind BIG_ISLAND_ENABLED (else a "coming soon" badge)
-  const bigBtn = $("big-island") as HTMLButtonElement;
-  if (!BIG_ISLAND_ENABLED) {
-    bigBtn.setAttribute("aria-disabled", "true");
-    bigBtn.classList.add("soon");
-    bigBtn.querySelector("small")!.textContent = "coming soon";
-  } else
-    bigBtn.addEventListener("click", () => {
-      wantBig = true;
-      if (!bootDone) {
-        wantPlay = true;
-        return;
-      }
-      void startMatch();
-    });
-}
+setBoardOpener(() => { sfx.start(); sfx.ui(); pages.leaderboard("players"); });
 $("again-training").addEventListener("click", () => {
   $("end").classList.add("hidden");
   startTraining();
@@ -1465,6 +1463,7 @@ async function boot() {
   bootDone = true;
   mark("ready");
   wantPlay ||= (window as unknown as { __brWantPlay?: boolean }).__brWantPlay === true;
+  if (wantPlay && !SKIP_TITLE && !AUTOPLAY) applyMode(); // an early PLAY press (before the island was ready) honours the chosen mode
   if (SKIP_TITLE || AUTOPLAY || wantPlay) void startMatch();
   // (no autofocus: Tab from the top of the page reaches PLAY first)
   // after first paint: HUD icons and portraits, one small chunk per frame

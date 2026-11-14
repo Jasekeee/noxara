@@ -34,7 +34,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
     s.append(h("h3", "ab-h", title), ...kids);
     body.appendChild(s);
   };
-  body.appendChild(h("p", "page-lede", "9 AI mercenaries. Real wallets. One bounty. Only one walks out."));
+  body.appendChild(h("p", "page-lede", "Only one walks out. Hunt the richest. Take the bounty."));
 
   const steps = h("ol", "ab-steps");
   const step = (t: string, text: string) => steps.appendChild(h("li", "ab-step", undefined, h("div", "", undefined, h("b", "", t), h("p", "", text))));
@@ -75,6 +75,15 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
     links,
     ...(!MAINNET.contract ? [h("p", "sc-note", "Mainnet links are filled in after the mainnet deploy.")] : []),
     near,
+  );
+
+  sec(
+    "Coming soon",
+    h("ul", "ab-soon", undefined,
+      h("li", "", undefined, h("b", "", "Online. "), document.createTextNode("Live matchmaking against real players.")),
+      h("li", "", undefined, h("b", "", "3v3 Teams. "), document.createTextNode("Squad up with friends.")),
+      h("li", "", undefined, h("b", "", "Ranked NEAR arenas. "), document.createTextNode("Climb the ladder, win NEAR.")),
+    ),
   );
 
   const lk = h("div", "lg-links ab-links");

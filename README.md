@@ -82,8 +82,10 @@ npm test --prefix relayer                  # match server, relayer, challenge + 
 ```
 
 ## Roadmap
-- **ONLINE** (title-screen button, coming soon): live matchmaking against real opponents.
-- **3v3 TEAMS (online)** (title-screen button, coming soon): squad up with friends, 3 vs 3.
+- **ONLINE** (title-screen mode, coming soon): live matchmaking against real opponents.
+- **3v3 TEAMS (online)** (title-screen mode, coming soon): squad up with friends, 3 vs 3.
+- **Ranked NEAR arenas** (coming soon): ladder matches between real NEAR accounts, seasonal NEAR prizes.
+- **Weekly Bounty Cup** (promo, live on the title screen): free entry, no wagering. Top 3 on the weekly leaderboard of signed-in NEAR accounts win NEAR prizes, paid manually after the week closes (UTC Monday 00:00 to Sunday 23:59). Guests can play but are not eligible. NOX is play-money and is not a prize. Prize amounts live in `src/ui/cup.ts`.
 - **Live PvP lobbies** (humans + AI fighters in one match) — next step.
 - No real-money wagering anywhere; NOX is play-money and is not launched or traded (docs/DECISIONS.md).
 - Cosmetics shop, battle pass, sponsored tournaments, licensing the AI athletes.
