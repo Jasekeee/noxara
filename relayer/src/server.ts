@@ -10,6 +10,10 @@
 //                                            -> re-runs the recorded match with the shared simulation, then
 //                                               calls settle_match signed by the match-server key
 //  GET  /api/match/<id>/record              -> the stored record, so anyone can re-verify offline
+//  GET  /api/view?method=<view>&args=<json> (or POST {method, args})
+//                                            -> read-only views of the game contract, allow-listed, cached and
+//                                               coalesced (relayer/src/views.ts), so browsers don't hit the
+//                                               free public RPC directly (audit F-6)
 //  GET  /api/health
 // Keys come only from environment variables (.env locally, hosted env vars in production).
 import http from "node:http";
@@ -18,11 +22,12 @@ import fs from "node:fs";
 import path from "node:path";
 import { Chain } from "./chain.ts";
 import { signatureOk, settleSignatureOk, KeyOwners } from "./verify.ts";
-import { checkDelegate, preflight, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
+import { checkDelegate, normalizeIp, preflight, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
 import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
 import { registerMessage } from "./protocol.ts";
 import { Subsidies } from "./subsidies.ts";
-import { SpendBudget, RESERVE, near as nearToYocto, fmtNear } from "./budget.ts";
+import { SpendBudget, IpDailyCap, RESERVE, near as nearToYocto, fmtNear } from "./budget.ts";
+import { ViewProxy } from "./views.ts";
 import type { ChainMatch } from "./roster.ts";
 import { createSocial, writeReply } from "./social-http.ts";
 import type { MatchRecord } from "../../src/sim/types.ts";
@@ -39,7 +44,9 @@ const relayerId = env("RELAYER_ACCOUNT_ID");
 const gameId = env("GAME_CONTRACT_ID");
 const serverId = process.env.SERVER_ACCOUNT_ID;
 const serverKey = process.env.SERVER_PRIVATE_KEY;
-const rpcUrl = env("NEAR_RPC", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
+// NEAR_RPC may be a comma-separated list: the first one signs/sends; views fail over along the list
+const rpcUrls = env("NEAR_RPC", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com").split(",").map((s) => s.trim()).filter(Boolean);
+const rpcUrl = rpcUrls[0];
 // methods anyone may have relayed / that a guest's function-call key may call
 const GAME_METHODS = env("RELAY_METHODS", GAME_METHODS_DEFAULT.join(",")).split(",");
 const GUEST_METHODS = env("GUEST_METHODS", "start_match,sweep_match").split(",");
@@ -76,6 +83,10 @@ const guestPerIp = new RateLimiter(Number(env("GUEST_PER_IP_PER_HOUR", "10")), 3
 const guestGlobal = new RateLimiter(Number(env("GUEST_GLOBAL_PER_HOUR", "200")), 3_600_000);
 const relayPerSender = new RateLimiter(Number(env("RELAY_PER_SENDER_PER_MIN", "20")), 60_000);
 const relayPerIp = new RateLimiter(Number(env("RELAY_PER_IP_PER_MIN", "60")), 60_000);
+const viewPerIp = new RateLimiter(Number(env("VIEW_PER_IP_PER_MIN", "180")), 60_000);
+// cache misses (upstream RPC calls) one address may cause: well below the global upstream budget
+const viewMissPerIp = new RateLimiter(Number(env("VIEW_MISS_PER_IP_PER_MIN", "40")), 60_000);
+const views = new ViewProxy({ contract: gameId, rpcUrls, upstreamPerMin: Number(env("VIEW_UPSTREAM_PER_MIN", "600")) });
 const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10")), 3_600_000);
 // storage subsidies for signed-in real accounts: once per account ever, at most N per hour (N x 0.02 NEAR)
 // guest budget mode: 1 NEAR total for everything the relayer spends on players, N new guests a day
@@ -85,6 +96,8 @@ const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10
 //  - real accounts: storage registrations and relayed calls of signed-in NEAR accounts (unchanged).
 const guestBudget = new SpendBudget(path.join(DATA_DIR, "../budget-guest.json"), env("GUEST_BUDGET_NEAR", "0.5"), Number(env("DAILY_GUEST_CAP", "18")));
 const budget = new SpendBudget(path.join(DATA_DIR, "../budget.json"), env("RELAYER_BUDGET_NEAR", "1"), Number.MAX_SAFE_INTEGER);
+// new guests per network address per UTC day, persisted (a restart must not reopen it)
+const guestIpDaily = new IpDailyCap(path.join(DATA_DIR, "../guest-ip-daily.json"), Number(env("GUEST_PER_IP_PER_DAY", "3")));
 const budgetFor = (senderId: string) => (isGuest(senderId) ? guestBudget : budget);
 const closedReply = (why: string) => ({ error: why === "daily_cap" ? "today's free guest spots are taken: sign in with NEAR or play offline" : "the free relayer budget is used up: sign in with NEAR or play offline", code: "guests_closed", reason: why });
 const subsidies = new Subsidies(path.join(DATA_DIR, "../subsidised.json"), Number(env("REGISTER_GLOBAL_PER_HOUR", "30")));
@@ -125,12 +138,13 @@ async function readJson(req: http.IncomingMessage, max = 8_192): Promise<Record<
 // Only trust X-Forwarded-For behind a known proxy (TRUST_PROXY=1), and then take the right-most
 // entry (the one our proxy appended), never the client-controlled left-most one.
 const TRUST_PROXY = env("TRUST_PROXY", "0") === "1";
+// Every per-IP limit keys on normalizeIp(): IPv4-mapped IPv6 -> IPv4, IPv6 -> its /64.
 const ipOf = (req: http.IncomingMessage) => {
   if (TRUST_PROXY) {
     const parts = String(req.headers["x-forwarded-for"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
+    if (parts.length) return normalizeIp(parts[parts.length - 1]);
   }
-  return req.socket.remoteAddress ?? "?";
+  return normalizeIp(req.socket.remoteAddress ?? "?");
 };
 
 const panicMessage = (e: unknown) => {
@@ -163,12 +177,34 @@ async function handleSettle(body: Record<string, unknown>) {
     if (!v.ok) return { code: v.status, body: { error: v.reason, code: v.code ?? "refused" } };
     fs.writeFileSync(recordPath(matchId), JSON.stringify({ match_id: matchId, input_log_hash: logHash, record }));
     const r = await chain.settle(v.args);
+    views.invalidate(true);
     if (r.failure) return { code: 409, body: { tx: r.tx, error: r.failure, code: "chain_refused" } };
     console.log(`settled #${matchId}: winner ${v.winner} (replay ${v.ms} ms, kills ${v.killsFrom}), ${r.tgas} Tgas, tx ${r.tx}`);
     return { code: 200, body: { tx: r.tx, result: r.value, events: r.events, verified: true, replay_ms: v.ms, tgas: r.tgas } };
   } finally {
     settling.delete(matchId);
   }
+}
+
+/** Make a walletless guest account for this browser key (the caps and budget were checked by the caller). */
+async function createGuestAccount(publicKey: string): Promise<{ code: number; body: Record<string, unknown> }> {
+  if (GUEST_VIA_CONTRACT) {
+    const hex = crypto.randomBytes(5).toString("hex");
+    if (!isGuestId(hex)) throw new Error("guest id");
+    const g = await chain.createGuestViaContract(hex, publicKey, GUEST_FUNDING, GUEST_STORAGE);
+    // the funding comes back if the account couldn't be created (the contract refunds it); the storage doesn't
+    guestBudget.spend(g.burnt + yoctoOf(GUEST_STORAGE) + (g.created ? nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) : 0n), "guest");
+    if (!g.created || g.failure) return { code: 500, body: { error: `guest: ${g.failure ?? "not created"}` } };
+    owners.add(g.accountId, publicKey);
+    return { code: 200, body: { accountId: g.accountId, tx: g.tx, storageTx: g.tx } };
+  }
+  const id = `${GUEST_PREFIX}${crypto.randomBytes(5).toString("hex")}.${relayerId}`;
+  const r = await chain.createGuest(id, publicKey, GUEST_METHODS, GUEST_FUNDING, GUEST_ALLOWANCE);
+  owners.add(id, publicKey);
+  const s = await chain.storageDeposit(id, GUEST_STORAGE);
+  guestBudget.spend(nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) + yoctoOf(GUEST_STORAGE) + r.burnt + s.burnt, "guest");
+  if (s.failure) return { code: 500, body: { accountId: id, error: `storage: ${s.failure}` } };
+  return { code: 200, body: { accountId: id, tx: r.tx, storageTx: s.tx } };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -184,7 +220,32 @@ const server = http.createServer(async (req, res) => {
     const soc = await social.handle(req, ipOf(req));
     if (soc) return writeReply(res, soc, origin, ORIGINS);
     if (req.method === "GET" && req.url === "/api/health") {
-      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null, ...guestBudget.status(), realRemaining: fmtNear(budget.remaining) }, origin);
+      return send(res, 200, { ok: true, network, relayer: relayerId, game: gameId, server: serverId ?? null, simVersion: SIM_VERSION, height: chain.height?.toString() ?? null, ...guestBudget.status(), realRemaining: fmtNear(budget.remaining), views: views.stats }, origin);
+    }
+    if (req.url === "/api/view" || req.url?.startsWith("/api/view?")) {
+      if (req.method !== "GET" && req.method !== "POST") return send(res, 405, { error: "method not allowed" }, origin);
+      const vip = ipOf(req);
+      // view replies are always HTTP 200 with `status` in the body: a busy RPC is an expected state the page shows
+      // ("live data unavailable, try again"), not a failed resource that browsers log as a console error
+      if (!viewPerIp.take(vip)) return send(res, 200, { status: 429, error: "slow down", code: "rate_limited" }, origin);
+      let method: unknown, args: unknown;
+      if (req.method === "GET") {
+        const q = new URL(req.url, "http://x").searchParams;
+        method = q.get("method");
+        const a = q.get("args");
+        if (a && a.length > 1024) return send(res, 200, { status: 400, error: "args too large", code: "bad_view" }, origin);
+        try {
+          args = a ? JSON.parse(a) : {};
+        } catch {
+          return send(res, 200, { status: 400, error: "args must be JSON", code: "bad_view" }, origin);
+        }
+      } else {
+        const body = await readJson(req, 2_048);
+        method = body.method;
+        args = body.args;
+      }
+      const r = await views.view(method, args, () => viewMissPerIp.take(vip));
+      return send(res, 200, { status: r.status, ...r.body }, origin);
     }
     const rec = req.method === "GET" ? /^\/api\/match\/([0-9]{1,18})\/record$/.exec(req.url ?? "") : null;
     if (rec) {
@@ -199,23 +260,16 @@ const server = http.createServer(async (req, res) => {
       if (!/^ed25519:[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(publicKey)) return send(res, 400, { error: "bad public key" }, origin);
       const shut = guestBudget.closed("guest", RESERVE.guest);
       if (shut) return send(res, 503, closedReply(shut), origin);
-      if (GUEST_VIA_CONTRACT) {
-        const hex = crypto.randomBytes(5).toString("hex");
-        if (!isGuestId(hex)) throw new Error("guest id");
-        const g = await chain.createGuestViaContract(hex, publicKey, GUEST_FUNDING, GUEST_STORAGE);
-        // the funding comes back if the account couldn't be created (the contract refunds it); the storage doesn't
-        guestBudget.spend(g.burnt + yoctoOf(GUEST_STORAGE) + (g.created ? nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) : 0n), "guest");
-        if (!g.created || g.failure) return send(res, 500, { error: `guest: ${g.failure ?? "not created"}` }, origin);
-        owners.add(g.accountId, publicKey);
-        return send(res, 200, { accountId: g.accountId, tx: g.tx, storageTx: g.tx, ms: Math.round(performance.now() - t0) }, origin);
+      const ip = ipOf(req);
+      if (!guestIpDaily.take(ip)) return send(res, 429, { error: "this network already made today's free guests: sign in with NEAR or play offline", code: "guest_ip_daily" }, origin);
+      try {
+        const out = await createGuestAccount(publicKey);
+        views.invalidate();
+        return send(res, out.code, { ...out.body, ms: Math.round(performance.now() - t0) }, origin);
+      } catch (e) {
+        guestIpDaily.release(ip);
+        throw e;
       }
-      const id = `${GUEST_PREFIX}${crypto.randomBytes(5).toString("hex")}.${relayerId}`;
-      const r = await chain.createGuest(id, publicKey, GUEST_METHODS, GUEST_FUNDING, GUEST_ALLOWANCE);
-      owners.add(id, publicKey);
-      const s = await chain.storageDeposit(id, GUEST_STORAGE);
-      guestBudget.spend(nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) + yoctoOf(GUEST_STORAGE) + r.burnt + s.burnt, "guest");
-      if (s.failure) return send(res, 500, { accountId: id, error: `storage: ${s.failure}` }, origin);
-      return send(res, 200, { accountId: id, tx: r.tx, storageTx: s.tx, ms: Math.round(performance.now() - t0) }, origin);
     }
     if (req.method === "POST" && req.url === "/api/relay") {
       if (!relayPerIp.take(ipOf(req))) return send(res, 429, { error: "slow down" }, origin);
@@ -223,10 +277,13 @@ const server = http.createServer(async (req, res) => {
       const payload = String(body.payload ?? "");
       const sd = chain.decode(payload);
       const d = sd.signedDelegate.delegateAction;
+      // audit A-16: never skip the expiry check because no block was fetched yet
+      const height = chain.height ?? (await chain.ensureHeight());
+      if (height === undefined) return send(res, 503, { error: "NEAR is unreachable right now, try again", code: "no_height" }, origin);
       const check = checkDelegate(
         { senderId: d.senderId, receiverId: d.receiverId, actions: d.actions as Array<Record<string, unknown>>, maxBlockHeight: BigInt(d.maxBlockHeight) },
         policy,
-        chain.height,
+        height,
       );
       if (!check.ok) return send(res, 403, { error: check.reason }, origin);
       // authenticate before spending: valid signature by a key the sender actually holds
@@ -253,6 +310,7 @@ const server = http.createServer(async (req, res) => {
         throw e;
       }
       budgetFor(d.senderId).spend(r.burnt);
+      views.invalidate();
       if (r.failure) return send(res, 409, { tx: r.tx, error: r.failure, ms: Math.round(performance.now() - t0) }, origin);
       return send(res, 200, { tx: r.tx, value: r.value, guest: isGuest(d.senderId), ms: Math.round(performance.now() - t0) }, origin);
     }
@@ -284,6 +342,7 @@ const server = http.createServer(async (req, res) => {
         throw e;
       }
       budget.spend(yoctoOf(REAL_STORAGE) + s.burnt);
+      views.invalidate();
       if (s.failure) {
         subsidies.release(accountId);
         return send(res, 500, { error: `storage: ${s.failure}`, code: "chain_refused" }, origin);
@@ -311,6 +370,11 @@ function yoctoOf(amount: string): bigint {
 }
 
 await chain.start();
+// audit A-16: know the block height before serving relays (retry a few times if the RPC is slow at boot)
+for (let i = 0; i < 5 && chain.height === undefined; i++) {
+  await new Promise((r) => setTimeout(r, 1000));
+  await chain.ensureHeight();
+}
 await chain.warm();
 {
   const cfg = await chain.view<{ storage_deposit: string; guest_storage_deposit?: string }>("get_config").catch(() => null);

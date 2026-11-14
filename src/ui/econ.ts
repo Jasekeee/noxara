@@ -87,8 +87,9 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   const x: Ctx = { ...ctx, c, signedIn: !guest };
   const loading = h("p", "muted", "Loading live economy from NEAR…");
   body.appendChild(loading);
+  let ecoFailed = false; // a rate limit / outage, not a missing economy
   const [eco, market, season, mine, listings] = await Promise.all([
-    c.economy().catch(() => null),
+    c.economy().catch(() => ((ecoFailed = true), null)),
     c.sharesMarket().catch(() => [] as ShareMarketRow[]),
     c.seasonStandings().catch(() => [] as SeasonRow[]),
     guest ? Promise.resolve([] as Holding[]) : c.myShares().catch(() => [] as Holding[]),
@@ -98,7 +99,7 @@ export async function renderEconomy(body: HTMLElement, ctx: Omit<Ctx, "c" | "sig
   loading.remove();
   const live = !!eco && eco.genesis > 0;
   if (!live) {
-    body.appendChild(h("p", "e-warn", c.mode === "chain" ? "Economy v2 isn't live on this contract yet: the numbers below stay empty until the contract upgrade lands." : "Live data is unavailable right now. Try again."));
+    body.appendChild(h("p", "e-warn", c.mode === "chain" && !ecoFailed ? "Economy v2 isn't live on this contract yet: the numbers below stay empty until the contract upgrade lands." : "Live data is unavailable right now. Try again."));
     const retry = h("button", "btn-ghost small", "TRY AGAIN");
     retry.addEventListener("click", () => ctx.rerender());
     body.appendChild(retry);

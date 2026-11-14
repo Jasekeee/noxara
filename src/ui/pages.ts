@@ -523,7 +523,21 @@ export class Pages {
         });
       };
       const c = this.d.client();
-      if (isT3(c)) c.leaderboard(kind).then(fill).catch(() => fill([]));
+      if (isT3(c))
+        c.leaderboard(kind)
+          .then(fill)
+          .catch(() => {
+            // a rate limit / outage: say so honestly (never "No data yet") and offer a retry
+            tbody.textContent = "";
+            const tr = h("tr");
+            const td = h("td", "muted", "Live data is unavailable right now. ");
+            const retry = h("button", "btn-ghost small", "TRY AGAIN");
+            retry.addEventListener("click", () => render());
+            td.appendChild(retry);
+            td.colSpan = 7;
+            tr.appendChild(td);
+            tbody.appendChild(tr);
+          });
       else if (kind === "bots") fill(this.d.fighters().map((f) => ({ account: f.account, name: f.name, bot: true, wins: f.record.wins, kills: f.record.kills, earnings: f.record.earnings, matches: f.record.matches })).sort((a, b) => b.earnings - a.earnings || b.wins - a.wins));
       else fill([]);
     };

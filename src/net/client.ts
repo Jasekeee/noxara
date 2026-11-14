@@ -10,7 +10,7 @@ import { levelProgress, unlocksForLevel, upgradesForLevel, xpForMatch } from "..
 import { SIM_VERSION, type MatchConfig, type MatchRecord, type Personality } from "../sim/types";
 import { t1Roster } from "../sim/roster";
 import { matchConfigFromChain, specsFromFighters, type ChainMatch, type ChainRosterEntry } from "./roster";
-import { ed25519Supported, finalBlockHash, generateKey, inputLogHash, rpc, sendTransaction, settleMessage, sha256, signDelegate, signTransaction, Signer, toBase64, viewCall, type StoredKey } from "./near";
+import { ed25519Supported, finalBlockHash, generateKey, inputLogHash, rpc, RpcError, sendTransaction, settleMessage, sha256, signDelegate, signTransaction, Signer, toBase64, viewCall, type StoredKey } from "./near";
 
 const env = ((import.meta as { env?: Record<string, string | undefined> }).env ?? {}) as Record<string, string | undefined>;
 /** Per-network defaults: VITE_NEAR_NETWORK=mainnet alone switches every id/link to noxara.near + mainnet explorers. */
@@ -151,6 +151,27 @@ export type OfflineReason =
   | "guests_closed" // the relayer's free budget / daily guest spots are used up (sign-in still works)
   | "chain_error"; // something failed mid-session (guest creation, relay, views)
 
+/** A view that failed: `code` "method_not_found" means the contract really lacks it; anything else is "live data
+ *  unavailable right now" (rate limit, timeout, server busy) and must never be shown as a missing feature. */
+export class ViewError extends Error {
+  code: string;
+  status: number;
+  constructor(message: string, code: string, status = 0) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+/** True only when the contract has no such view (MethodNotFound), not for rate limits / outages. */
+export function isMissingView(e: unknown): boolean {
+  if (e instanceof ViewError) return e.code === "method_not_found";
+  if (e instanceof RpcError) return /MethodNotFound|MethodResolveError/.test(`${e.message} ${e.detail}`);
+  return false;
+}
+const isFinalViewError = (e: unknown) => isMissingView(e) || (e instanceof ViewError && (e.code === "view_failed" || e.code === "bad_view")) || (e instanceof RpcError && /CONTRACT_EXECUTION_ERROR/.test(e.message));
+/** Client-side cache TTLs (the match server caches too): constants long, histories medium, live state short. */
+const viewTtl = (method: string) => (method === "get_config" ? 60_000 : method === "get_history" || method === "get_retired" ? 20_000 : 2_000);
+
 class Client implements GameClientT3, GameClientEcon {
   private _mode: "chain" | "offline";
   private _offlineReason: OfflineReason | undefined;
@@ -177,6 +198,9 @@ class Client implements GameClientT3, GameClientEcon {
   private cfgCache: ChainConfig | null = null;
   private rosters = new Map<string, ChainRosterEntry[]>();
   private localMatches = 0;
+  /** views go through the match server's /api/view (cached, coalesced) unless it turned out to be missing */
+  private viewProxy: boolean | undefined;
+  private viewCache = new Map<string, { at: number; v: Promise<unknown> }>();
 
   constructor(mode: "chain" | "offline", o: { relayer: string; rpc: string; contract: string }, reason?: OfflineReason, detail?: string) {
     this._mode = mode;
@@ -237,7 +261,12 @@ class Client implements GameClientT3, GameClientEcon {
     }
     const key = await generateKey();
     const r = await postJson<{ accountId: string }>(`${this.relayer}/api/guest`, { publicKey: key.publicKey });
-    if (!r.ok || !r.json.accountId) throw new Error(r.json.error ?? "could not create a guest");
+    if (!r.ok || !r.json.accountId) {
+      const code = (r.json as { code?: string }).code;
+      // no free guest spot for this network today (audit F-14) / budget spent: practice, clearly labelled
+      if (code === "guest_ip_daily" || code === "guests_closed") this.goOffline(r.json.error ?? code, "guests_closed");
+      throw new Error(r.json.error ?? "could not create a guest");
+    }
     this.guestSaved = { accountId: r.json.accountId, key, contract: this.contract };
     save(STORE, this.guestSaved);
     this.saved = this.guestSaved;
@@ -304,6 +333,7 @@ class Client implements GameClientT3, GameClientEcon {
       }
       throw new Error(msg);
     }
+    this.afterTx();
     return { value: r.json.value, tx: r.json.tx };
   }
 
@@ -320,7 +350,9 @@ class Client implements GameClientT3, GameClientEcon {
       actions: [{ methodName, args, gas }],
     });
     try {
-      return await sendTransaction<T>(this.rpcUrl, this.contract, signed);
+      const out = await sendTransaction<T>(this.rpcUrl, this.contract, signed);
+      this.afterTx();
+      return out;
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       if (retry && /nonce/i.test(m)) {
@@ -331,8 +363,67 @@ class Client implements GameClientT3, GameClientEcon {
     }
   }
 
+  // ------------------------------------------------------------ views (audit F-6)
+
+  /** A read-only view of the game contract: deduped + briefly cached here, proxied through the match server
+   *  (which caches and serves stale data when the RPC rate-limits), retried twice with backoff when busy. */
+  private view<T>(method: string, args: Record<string, unknown> = {}): Promise<T> {
+    const key = `${method}:${JSON.stringify(args)}`;
+    const hit = this.viewCache.get(key);
+    if (hit && Date.now() - hit.at < viewTtl(method)) return hit.v as Promise<T>;
+    const entry = { at: Number.POSITIVE_INFINITY, v: null as unknown as Promise<unknown> };
+    const p = this.viewRetry<T>(method, args);
+    entry.v = p;
+    this.viewCache.set(key, entry);
+    if (this.viewCache.size > 300) this.viewCache.delete(this.viewCache.keys().next().value!);
+    p.then(
+      () => (entry.at = Date.now()),
+      () => this.viewCache.get(key) === entry && this.viewCache.delete(key),
+    );
+    return p;
+  }
+
+  private async viewRetry<T>(method: string, args: Record<string, unknown>): Promise<T> {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.viewOnce<T>(method, args);
+      } catch (e) {
+        if (attempt >= 2 || isFinalViewError(e)) throw e;
+        await new Promise((r) => setTimeout(r, 500 * 3 ** attempt + Math.random() * 300));
+      }
+    }
+  }
+
+  private async viewOnce<T>(method: string, args: Record<string, unknown>): Promise<T> {
+    if (this.viewProxy !== false && this.relayer) {
+      let r: Response;
+      try {
+        r = await fetch(`${this.relayer}/api/view?method=${encodeURIComponent(method)}&args=${encodeURIComponent(JSON.stringify(args))}`, { signal: AbortSignal.timeout(8000), cache: "no-store" });
+      } catch {
+        return viewCall<T>(this.rpcUrl, this.contract, method, args); // the server is unreachable: ask the RPC directly
+      }
+      const j = (await r.json().catch(() => null)) as { result?: T; error?: string; code?: string; status?: number } | null;
+      if (r.status === 404 && !j?.code) {
+        this.viewProxy = false; // an older server without /api/view
+        return viewCall<T>(this.rpcUrl, this.contract, method, args);
+      }
+      // the server answers 200 with the view's own `status` (a busy RPC isn't a failed HTTP resource)
+      const st = j?.status ?? r.status;
+      if (!r.ok || !j || st !== 200 || j.error) throw new ViewError(j?.error ?? `HTTP ${r.status}`, j?.code ?? (st === 429 ? "rate_limited" : "unavailable"), st);
+      this.viewProxy = true;
+      return j.result as T;
+    }
+    return viewCall<T>(this.rpcUrl, this.contract, method, args);
+  }
+
+  /** Our own tx changed the chain: forget the views cached here. The server drops its live-state cache after
+   *  the relays/settles it sends; after a self-signed tx its short TTLs (2-10 s) catch up on their own. */
+  private afterTx() {
+    this.viewCache.clear();
+  }
+
   private async config(): Promise<ChainConfig> {
-    this.cfgCache ??= await viewCall<ChainConfig>(this.rpcUrl, this.contract, "get_config");
+    this.cfgCache ??= await this.view<ChainConfig>("get_config");
     return this.cfgCache;
   }
 
@@ -342,8 +433,8 @@ class Client implements GameClientT3, GameClientEcon {
     if (this._mode === "chain") {
       try {
         const [active, retired, cfg] = await Promise.all([
-          viewCall<ChainFighter[]>(this.rpcUrl, this.contract, "get_fighters"),
-          viewCall<ChainFighter[]>(this.rpcUrl, this.contract, "get_retired").catch(() => [] as ChainFighter[]),
+          this.view<ChainFighter[]>("get_fighters"),
+          this.view<ChainFighter[]>("get_retired").catch(() => [] as ChainFighter[]),
           this.config(),
         ]);
         const out: FighterInfo[] = [...active, ...retired].map((f) => ({
@@ -440,7 +531,7 @@ class Client implements GameClientT3, GameClientEcon {
     let bountyValue = 0;
     if (m.bounty_idx) {
       const carrier = m.roster[m.bounty_idx - 1]?.account;
-      const bal = carrier ? await viewCall<string>(this.rpcUrl, this.contract, "ft_balance_of", { account_id: carrier }).catch(() => "0") : "0";
+      const bal = carrier ? await this.view<string>("ft_balance_of", { account_id: carrier }).catch(() => "0") : "0";
       bountyValue = toBounty((BigInt(bal) * BigInt(chainCfg?.bounty_bps ?? 1500)) / 10_000n);
     }
     return {
@@ -479,6 +570,7 @@ class Client implements GameClientT3, GameClientEcon {
         { match_id: matchId, record, publicKey: this.saved.key.publicKey, signature, simVersion: SIM_VERSION },
         60_000,
       );
+      this.afterTx();
       if (!r.ok) {
         this.lastError = `${r.json.code ?? r.status}: ${r.json.error ?? "settle refused"}`;
         // the server was updated to another simulation mid-session: stop committing matches it can't verify
@@ -638,10 +730,10 @@ class Client implements GameClientT3, GameClientEcon {
   /** Storage deposit paid by the player's wallet (only when the relayer is closed). */
   private async selfRegister(accountId: string): Promise<boolean> {
     try {
-      const reg = await viewCall<unknown>(this.rpcUrl, this.contract, "storage_balance_of", { account_id: accountId }).catch(() => null);
+      const reg = await this.view<unknown>("storage_balance_of", { account_id: accountId }).catch(() => null);
       if (reg) return true;
       if (!this.connector) throw new Error("no wallet connection");
-      const cfg = await viewCall<{ storage_deposit: string }>(this.rpcUrl, this.contract, "get_config");
+      const cfg = await this.view<{ storage_deposit: string }>("get_config");
       const wallet = await this.connector.wallet();
       await wallet.signAndSendTransaction({
         receiverId: this.contract,
@@ -666,7 +758,7 @@ class Client implements GameClientT3, GameClientEcon {
   /** Welcome credit left (pays match entries only; not NOX). Proposed for GameClientT3. */
   async welcomeCredit(): Promise<number> {
     if (this._mode !== "chain" || !this.realSaved) return 0;
-    const v = await viewCall<string>(this.rpcUrl, this.contract, "get_welcome_credit", { account_id: this.realSaved.accountId }).catch(() => "0");
+    const v = await this.view<string>("get_welcome_credit", { account_id: this.realSaved.accountId }).catch(() => "0");
     return toBounty(v);
   }
 
@@ -684,14 +776,14 @@ class Client implements GameClientT3, GameClientEcon {
 
   async balance(): Promise<number> {
     if (this._mode !== "chain" || !this.realSaved) return 0;
-    const b = await viewCall<string>(this.rpcUrl, this.contract, "ft_balance_of", { account_id: this.realSaved.accountId }).catch(() => "0");
+    const b = await this.view<string>("ft_balance_of", { account_id: this.realSaved.accountId }).catch(() => "0");
     return toBounty(b);
   }
 
   async progress(): Promise<Progress> {
     let xp = localXp();
     if (this._mode === "chain" && this.saved) {
-      const p = await viewCall<ChainProgress>(this.rpcUrl, this.contract, "get_progress", { account_id: this.saved.accountId }).catch(() => null);
+      const p = await this.view<ChainProgress>("get_progress", { account_id: this.saved.accountId }).catch(() => null);
       if (p) xp = p.xp;
     }
     const p = levelProgress(xp);
@@ -702,7 +794,7 @@ class Client implements GameClientT3, GameClientEcon {
 
   async market(): Promise<BotMarket[]> {
     if (this._mode !== "chain") return [];
-    const m = await viewCall<ChainMarket[]>(this.rpcUrl, this.contract, "get_market").catch(() => [] as ChainMarket[]);
+    const m = await this.view<ChainMarket[]>("get_market").catch(() => [] as ChainMarket[]);
     const cut = (b: ChainMarket) => (b.sponsor_cut_bps || this.sponsorCutBps) / 10_000;
     return m.map((b) => ({ bot: b.bot, totalStake: toBounty(b.total_stake), sponsors: b.sponsors, sponsorCut: cut(b) }));
   }
@@ -712,7 +804,7 @@ class Client implements GameClientT3, GameClientEcon {
 
   async mySponsorships(): Promise<Sponsorship[]> {
     if (this._mode !== "chain" || !this.realSaved) return [];
-    const v = await viewCall<ChainSponsorship[]>(this.rpcUrl, this.contract, "get_sponsorships", { account_id: this.realSaved.accountId }).catch(() => [] as ChainSponsorship[]);
+    const v = await this.view<ChainSponsorship[]>("get_sponsorships", { account_id: this.realSaved.accountId }).catch(() => [] as ChainSponsorship[]);
     return v.map((x) => ({ bot: x.bot, botName: x.bot_name, stake: toBounty(x.staked), share: x.pool_bps / 10_000, earned: toBounty(x.earned) }));
   }
 
@@ -744,7 +836,11 @@ class Client implements GameClientT3, GameClientEcon {
       if (kind === "players") return [];
       return (await this.fighters()).map((f) => ({ account: f.account, name: f.name, bot: true, wins: f.record.wins, kills: f.record.kills, earnings: f.record.earnings, matches: f.record.matches }));
     }
-    const rows = await viewCall<ChainTop[]>(this.rpcUrl, this.contract, "get_top", { kind, by: "earnings", n: 50 }).catch(() => [] as ChainTop[]);
+    // a rate limit / outage throws (the page says "unavailable, try again"); only a missing view means "no rows"
+    const rows = await this.view<ChainTop[]>("get_top", { kind, by: "earnings", n: 50 }).catch((e) => {
+      if (isMissingView(e)) return [] as ChainTop[];
+      throw e;
+    });
     const me = this.saved?.accountId;
     return rows.map((r) => ({
       account: r.account,
@@ -759,30 +855,32 @@ class Client implements GameClientT3, GameClientEcon {
 
   async history(account: string): Promise<FighterEvent[]> {
     if (this._mode !== "chain") return [];
-    const h = await viewCall<ChainHist[]>(this.rpcUrl, this.contract, "get_history", { account_id: account }).catch(() => [] as ChainHist[]);
+    const h = await this.view<ChainHist[]>("get_history", { account_id: account }).catch(() => [] as ChainHist[]);
     return h.map((e) => histEvent(e));
   }
 
   /** Raw history with amounts (newest first) for the lobby P&L sparklines. */
   async rawHistory(account: string): Promise<{ match: string; kind: string; amount: number; detail: string }[]> {
     if (this._mode !== "chain") return [];
-    const h = await viewCall<ChainHist[]>(this.rpcUrl, this.contract, "get_history", { account_id: account }).catch(() => [] as ChainHist[]);
+    const h = await this.view<ChainHist[]>("get_history", { account_id: account }).catch(() => [] as ChainHist[]);
     return h.map((e) => ({ match: e.match_id, kind: e.kind, amount: toBounty(e.amount), detail: e.detail }));
   }
 
   // ---------------------------------------------------------------- Economy v2 (docs/ECONOMY.md)
-  /** Views never throw into the UI: a contract without the economy (MethodNotFound) or an RPC error gives neutral data. */
-  private async econView<T>(method: string, args: Record<string, unknown>, neutral: T): Promise<T> {
+  /** A contract without the economy (MethodNotFound) gives neutral data. Other failures (rate limit, outage)
+   *  also give neutral data unless `strict`, which throws them so the UI can say "unavailable, try again". */
+  private async econView<T>(method: string, args: Record<string, unknown>, neutral: T, strict = false): Promise<T> {
     if (this._mode !== "chain") return neutral;
     try {
-      return await viewCall<T>(this.rpcUrl, this.contract, method, args);
-    } catch {
+      return await this.view<T>(method, args);
+    } catch (e) {
+      if (strict && !isMissingView(e)) throw e;
       return neutral;
     }
   }
 
   async economy(): Promise<EconomyInfo> {
-    const e = await this.econView<ChainEconomy | null>("get_economy", {}, null);
+    const e = await this.econView<ChainEconomy | null>("get_economy", {}, null, true);
     if (!e) return NEUTRAL_ECONOMY;
     return {
       supply: toBounty(e.supply), genesis: toBounty(e.genesis), minted: toBounty(e.minted), burned: toBounty(e.burned),
@@ -862,6 +960,7 @@ class Client implements GameClientT3, GameClientEcon {
         receiverId: this.contract,
         actions: [{ type: "FunctionCall", params: { methodName: method, args: args as Record<string, unknown>, gas: "60000000000000", deposit: "1" } }],
       })) as unknown;
+      this.afterTx();
       const tx = (r as { transaction?: { hash?: string }; transaction_outcome?: { id?: string } } | null) ?? null;
       return tx?.transaction?.hash ?? tx?.transaction_outcome?.id ?? null;
     } catch (e) {

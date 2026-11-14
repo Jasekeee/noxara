@@ -65,6 +65,12 @@ export class Chain {
     return this.block ? BigInt(this.block.header.height) : undefined;
   }
 
+  /** The current height, fetching a block first if none was seen yet (audit A-16: never skip the expiry check). */
+  async ensureHeight(): Promise<bigint | undefined> {
+    if (!this.block) await this.refresh();
+    return this.height;
+  }
+
   private refresh(): Promise<void> {
     this.refreshing ??= this.getRawBlock({ finality: "final" })
       .then((b) => {
