@@ -138,7 +138,8 @@ export class Hud {
       label = "FINAL ZONE";
     }
     this.set("storm", `${label}${clock}${moving}`, () => {
-      this.stormText.textContent = label;
+      const short = innerWidth <= 720 ? ({ "SAFE ZONE SHRINKS IN": "SHRINK", "NEXT SHRINK": "SHRINK", "STORM MOVING": "MOVING" } as Record<string, string>)[label] : undefined;
+      this.stormText.textContent = short ?? label;
       this.matchTime.textContent = clock;
       this.matchTime.classList.toggle("hidden", !clock);
       this.stormChip.classList.toggle("closing", moving);

@@ -1560,7 +1560,7 @@ function frame(now: number) {
         const show = phase === "playing" && me.alive && controls.enabled && !controls.blocked && pv.active && !AUTOPLAY && introT <= 0;
         aimLine.update(show, views[0].pos.x, views[0].pos.z, pv.ang, pv.dist, me.weapon, rdt);
       }
-      hud.updateHints(controls.used, time - matchStartT, touchy());
+      if (!pendingHints && st.tick > SPAWN_PROTECT) hud.updateHints(controls.used, time - matchStartT - 3, touchy());
       miniT -= rdt;
       if (miniT <= 0) { hud.minimap(match, 0, visibleNow); miniT = 0.05; }
     }
