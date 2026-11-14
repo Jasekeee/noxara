@@ -31,7 +31,6 @@
 // Fighters with human: true and no entry in the map stand still.
 import {
   FIGHTERS,
-  MATCH_TICKS,
   type Chest,
   type FighterState,
   type Heal,
@@ -64,9 +63,10 @@ import {
   SPAWN_PROTECT,
   STORM_GRACE,
   IDLE_RELOAD,
-  STORM_PHASES,
   WEAPONS,
   WEAPON_ORDER,
+  matchTicksFor,
+  stormPhasesFor,
   aimDistQ,
   armored,
   lobDist,
@@ -74,6 +74,8 @@ import {
   type StormX,
 } from "./rules";
 import { generateWorld } from "./mapgen";
+import { obstaclesNear } from "./grid";
+import type { Obstacle } from "./types";
 import { segHit } from "./geom";
 import { botInput } from "./ai";
 
@@ -83,7 +85,10 @@ const IDLE: Input = { mx: 0, my: 0, aim: 0, fire: false };
 const sq = (v: number) => v * v;
 
 export function createMatch(cfg: MatchConfig): Match {
-  const world = generateWorld(cfg.seed);
+  const world = generateWorld(cfg.seed, cfg.map);
+  const STORM_PHASES = stormPhasesFor(cfg);
+  const MATCH_TICKS = matchTicksFor(cfg);
+  const nearBuf: Obstacle[] = [];
   const map = world.map;
   const rng = new Rng(mixSeed(cfg.seed, 0xb0b));
 
@@ -196,7 +201,7 @@ export function createMatch(cfg: MatchConfig): Match {
 
   function collide(f: FighterState) {
     for (let pass = 0; pass < 2; pass++) {
-      for (const o of map.obstacles) {
+      for (const o of obstaclesNear(map, f.x, f.y, f.x, f.y, FIGHTER_R + 2, nearBuf)) {
         const min = o.r + FIGHTER_R;
         const d2 = dist2(f.x, f.y, o.x, o.y);
         if (d2 >= min * min) continue;
@@ -301,7 +306,7 @@ export function createMatch(cfg: MatchConfig): Match {
       }
       // Bullet: the first thing touched along this tick's segment.
       let bestT = 2000, hitF = -1;
-      for (const o of map.obstacles) {
+      for (const o of obstaclesNear(map, p.x, p.y, p.x + dx, p.y + dy, BULLET_R, nearBuf)) {
         const t = segHit(p.x, p.y, dx, dy, o.x, o.y, o.r + BULLET_R);
         if (t >= 0 && t < bestT) {
           bestT = t;

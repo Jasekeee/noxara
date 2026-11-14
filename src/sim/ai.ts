@@ -21,9 +21,10 @@
 // discipline is imperfect on purpose (per-bot reaction delay, keep fighting in a weak storm, flee
 // through it) — that is where storm deaths come from. An idle, never-shooting human is ignored for
 // the first 10 s (onboarding). Bots lob grenades with aimDist = predicted target distance.
-import type { FighterState, Input, Match, Personality } from "./types";
+import type { FighterState, Input, Match, Obstacle, Personality } from "./types";
 import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
-import { BULLET_R, FIGHTER_R, SPAWN_PROTECT, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
+import { BULLET_R, FIGHTER_R, SPAWN_PROTECT, SPEED, WEAPONS, isBig, stormPhasesFor, type StormX } from "./rules";
+import { obstaclesNear } from "./grid";
 import { segHit } from "./geom";
 
 interface Params {
@@ -74,6 +75,16 @@ interface Brain {
   checkY: number;
   detourUntil: number;
   detourSide: number;
+  /** Big Island: consecutive stuck detours (wall following) and the tick of the last one */
+  stuckN: number;
+  lastStuck: number;
+  /** Big Island: walking through a ruin opening: waypoint 1 (this side of the wall), then 2 (the far side) */
+  doorX: number;
+  doorY: number;
+  door2X: number;
+  door2Y: number;
+  doorStage: number;
+  doorUntil: number;
   wanderX: number;
   wanderY: number;
   wanderUntil: number;
@@ -124,6 +135,12 @@ const DODGE: Record<Personality, number> = { aggressive: 30, camper: 25, sniper:
 /** chance (%) that a roaming bot heads for a nearby bush and lurks there */
 const BUSH_PCT: Record<Personality, number> = { aggressive: 25, camper: 85, sniper: 60, looter: 45, coward: 85, balanced: 60 };
 const ROAM_PACE = 550;
+/** Big Island: roam faster and farther, lurk shorter (the map is 3.3x larger; keeps encounters coming) */
+const BIG_ROAM_PACE = 800;
+/** Big Island: roaming bots walk toward gunfire heard within this distance */
+const HEAR_BIG = 22 * FP;
+/** ...from this tick on (the opening stays a loot-and-rotate phase; the middle of the match gets busier) */
+const HEAR_BIG_FROM = 640;
 const BURST_MIN = 2, BURST_MAX = 4, PAUSE_MIN = 10, PAUSE_MAX = 22;
 const sq = (v: number) => v * v;
 
@@ -156,6 +173,14 @@ function mind(match: Match): Mind {
           checkY: f.y,
           detourUntil: 0,
           detourSide: 1,
+          stuckN: 0,
+          lastStuck: -999,
+          doorX: 0,
+          doorY: 0,
+          door2X: 0,
+          door2Y: 0,
+          doorStage: 0,
+          doorUntil: -1,
           wanderX: 0,
           wanderY: 0,
           wanderUntil: 0,
@@ -195,19 +220,27 @@ function mind(match: Match): Mind {
   return m;
 }
 
+/** Debug only: a bot's internal memory (read-only use; tools/tests). */
+export function botBrain(match: Match, idx: number): Readonly<Record<string, unknown>> | undefined {
+  return minds.get(match)?.brains[idx] as unknown as Record<string, unknown> | undefined;
+}
+
 /** Debug: what each bot is doing (for overlays/tests). */
 export function botMode(match: Match, idx: number): string {
   return minds.get(match)?.brains[idx]?.mode ?? "";
 }
 
+const lineBuf: Obstacle[] = [];
+const blockBuf: Obstacle[] = [];
+
 function lineClear(match: Match, x0: number, y0: number, x1: number, y1: number): boolean {
   const dx = x1 - x0, dy = y1 - y0;
-  for (const o of match.map.obstacles) if (segHit(x0, y0, dx, dy, o.x, o.y, o.r + BULLET_R + 50) >= 0) return false;
+  for (const o of obstaclesNear(match.map, x0, y0, x1, y1, BULLET_R + 50, lineBuf)) if (segHit(x0, y0, dx, dy, o.x, o.y, o.r + BULLET_R + 50) >= 0) return false;
   return true;
 }
 
 function blockedAt(match: Match, x: number, y: number, pad: number): boolean {
-  for (const o of match.map.obstacles) if (dist2(o.x, o.y, x, y) < sq(o.r + FIGHTER_R + pad)) return true;
+  for (const o of obstaclesNear(match.map, x, y, x, y, FIGHTER_R + pad, blockBuf)) if (dist2(o.x, o.y, x, y) < sq(o.r + FIGHTER_R + pad)) return true;
   return false;
 }
 
@@ -256,6 +289,7 @@ export function botInput(match: Match, idx: number): Input {
   const t = s.tick;
   if (!me.alive || s.over) return { mx: 0, my: 0, aim: me.aim, fire: false };
   const P = PERSONALITY[me.personality] ?? PERSONALITY.balanced;
+  const big = isBig(match.cfg);
   const w = WEAPONS[me.weapon];
   const st = s.storm as StormX;
   const armed = me.weapon !== "popper";
@@ -323,7 +357,7 @@ export function botInput(match: Match, idx: number): Input {
   let mode = "roam";
   const dStorm = isqrt(dist2(me.x, me.y, st.cx, st.cy));
   const dTarget = isqrt(dist2(me.x, me.y, st.tx, st.ty));
-  const phase = STORM_PHASES[Math.max(0, st.phase - 1)];
+  const phase = stormPhasesFor(match.cfg)[Math.max(0, st.phase - 1)];
   const toShrink = phase ? phase.shrinkEnd - t : 9999;
   const needT = dTarget - Math.max(0, st.targetR - 1500);
   const ticksToWalk = Math.trunc(Math.max(0, needT) / SPEED);
@@ -534,11 +568,29 @@ export function botInput(match: Match, idx: number): Input {
 
   if (mode === "roam") {
     // Wander a few units at a time inside the safe area; often stop in a bush for a while (lurk).
-    const shrinking = phase !== undefined && t >= phase.shrinkEnd - 60; // roam the current circle until the shrink is nearly over
+    // roam the current circle until the shrink is nearly over (Big Island: passive bots, who head into the
+    // next circle early, roam that one — else they dither on its edge between "storm" and "roam")
+    const shrinking = phase !== undefined && (t >= phase.shrinkEnd - 60 || (big && P.passive && st.phase > 0));
     const cx = shrinking ? st.tx : st.cx, cy = shrinking ? st.ty : st.cy;
-    const lim = Math.max(1000, Math.trunc(((shrinking ? st.targetR : st.r) * 8) / 10));
+    const limR = shrinking ? st.targetR : st.r;
+    const lim = Math.max(1000, big ? Math.min(Math.trunc((limR * 8) / 10), limR - 2000) : Math.trunc((limR * 8) / 10));
     const reached = dist2(me.x, me.y, b.wanderX, b.wanderY) < sq(1200);
     const outside = dist2(b.wanderX, b.wanderY, cx, cy) > sq(lim + 1500);
+    if (big && me.personality === "aggressive" && t >= HEAR_BIG_FROM) {
+      // Big Island: investigate gunfire heard nearby (third parties join fights; the map stays lively)
+      let hd = sq(HEAR_BIG);
+      for (const f of s.fighters) {
+        if (f.idx === idx || !f.alive || t - f.lastShotTick > 30) continue;
+        const d2 = dist2(f.x, f.y, me.x, me.y);
+        if (d2 < hd && d2 > sq(6 * FP) && dist2(f.x, f.y, cx, cy) < sq(lim + 1000)) {
+          hd = d2;
+          b.wanderX = f.x;
+          b.wanderY = f.y;
+          b.wanderBush = false;
+          b.wanderUntil = t + 160;
+        }
+      }
+    }
     if (t >= b.wanderUntil || (reached && !b.wanderBush) || outside) {
       b.wanderBush = false;
       if (b.rng.chance(BUSH_PCT[me.personality])) {
@@ -552,12 +604,14 @@ export function botInput(match: Match, idx: number): Input {
           b.wanderX = bu.x;
           b.wanderY = bu.y;
           b.wanderBush = true;
-          b.wanderUntil = t + Math.trunc(isqrt(dist2(bu.x, bu.y, me.x, me.y)) / SPEED) + b.rng.range(60, 160);
+          b.wanderUntil = t + Math.trunc(isqrt(dist2(bu.x, bu.y, me.x, me.y)) / SPEED) + (big ? b.rng.range(40, 100) : b.rng.range(60, 160));
         }
       }
       if (!b.wanderBush) {
         const a = b.rng.below(4096);
-        const rr = b.rng.range(4 * FP, me.personality === "aggressive" ? 10 * FP : 7 * FP);
+        const rr = big
+          ? b.rng.range(6 * FP, me.personality === "aggressive" ? 14 * FP : 10 * FP)
+          : b.rng.range(4 * FP, me.personality === "aggressive" ? 10 * FP : 7 * FP);
         let wx = me.x + Math.trunc((icos(a) * rr) / 1024);
         let wy = me.y + Math.trunc((isin(a) * rr) / 1024);
         const dd = isqrt(dist2(wx, wy, cx, cy));
@@ -620,12 +674,84 @@ export function botInput(match: Match, idx: number): Input {
     const moved = dist2(me.x, me.y, b.checkX, b.checkY);
     if (goalA >= 0 && moved < sq(1500) && b.detourUntil < t) {
       b.detourUntil = t + b.rng.range(15, 30);
-      b.detourSide = b.rng.chance(50) ? 1 : -1;
+      const side = b.rng.chance(50) ? 1 : -1;
+      if (big && t - b.lastStuck < 80) {
+        // stuck again right after a detour (a long ruin wall): keep following it, longer each time,
+        // and turn around if that doesn't work either
+        b.stuckN++;
+        if (b.stuckN >= 4) {
+          b.stuckN = 1;
+          b.detourSide = -b.detourSide;
+        }
+        b.detourUntil += 20 * b.stuckN;
+      } else {
+        b.detourSide = side;
+        b.stuckN = 0;
+      }
+      b.lastStuck = t;
       b.strafe = -b.strafe;
+      // Big Island: a roam goal behind a ruin wall can't be walked to directly — pick another one
+      if (big && mode === "roam") b.wanderUntil = t;
     }
     b.checkTick = t;
     b.checkX = me.x;
     b.checkY = me.y;
+  }
+  // Big Island: stuck against a ruin wall -> walk through an opening (inside: the one facing the goal;
+  // outside: the nearest, preferring the goal side), aiming 1.5 u past the wall line
+  if (big && goalA >= 0 && match.map.ruins) {
+    if (t - b.lastStuck < 40 && b.doorUntil + 60 < t) {
+      // only when the way toward the goal really runs into a ruin wall within 2.5 u
+      const gx = Math.trunc((icos(goalA & 4095) * 2500) / 1024), gy = Math.trunc((isin(goalA & 4095) * 2500) / 1024);
+      for (const ru of match.map.ruins) {
+        if (Math.abs(me.x - ru.x) > ru.h + 2500 || Math.abs(me.y - ru.y) > ru.h + 2500 || ru.openings.length === 0) continue;
+        let walled = false;
+        for (const o of obstaclesNear(match.map, me.x, me.y, me.x + gx, me.y + gy, FIGHTER_R, lineBuf)) {
+          if (o.kind === "wall" && segHit(me.x, me.y, gx, gy, o.x, o.y, o.r + FIGHTER_R) >= 0) {
+            walled = true;
+            break;
+          }
+        }
+        if (!walled) break;
+        const inside = Math.abs(me.x - ru.x) < ru.h && Math.abs(me.y - ru.y) < ru.h;
+        let best = ru.openings[0], bestCost = 1e18;
+        for (const o of ru.openings) {
+          const d = isqrt(dist2(me.x, me.y, o.x, o.y));
+          const off = Math.abs(angDiff(iatan2(o.y - me.y, o.x - me.x), goalA & 4095));
+          const cost = inside ? off * 4 + d : d + off;
+          if (cost < bestCost) {
+            bestCost = cost;
+            best = o;
+          }
+        }
+        const ox = best.x - ru.x, oy = best.y - ru.y;
+        // points 1.6 u in front of / behind the opening along its side's normal
+        let nx = 0, ny = 0;
+        if (Math.abs(ox) > Math.abs(oy)) nx = ox > 0 ? 1600 : -1600;
+        else ny = oy > 0 ? 1600 : -1600;
+        const s1 = inside ? -1 : 1; // first waypoint on our side of the wall
+        b.doorX = best.x + s1 * nx;
+        b.doorY = best.y + s1 * ny;
+        b.door2X = best.x - s1 * nx;
+        b.door2Y = best.y - s1 * ny;
+        b.doorStage = 1;
+        b.doorUntil = t + 160;
+        break;
+      }
+    }
+    if (t < b.doorUntil) {
+      if (b.doorStage === 1 && dist2(me.x, me.y, b.doorX, b.doorY) < sq(700)) {
+        b.doorStage = 2;
+        b.doorX = b.door2X;
+        b.doorY = b.door2Y;
+        b.detourUntil = 0;
+      }
+      if (b.doorStage === 2 && dist2(me.x, me.y, b.doorX, b.doorY) < sq(700)) b.doorUntil = t;
+      else {
+        goalA = angleTo(b.doorX, b.doorY);
+        mode += "+door";
+      }
+    }
   }
   let mx = 0, my = 0;
   if (goalA >= 0) {
@@ -633,7 +759,7 @@ export function botInput(match: Match, idx: number): Input {
     if (t < b.detourUntil) want = (want + b.detourSide * 1024) & 4095;
     const a = steer(match, me, b, want, avoidStorm);
     // cautious walk while roaming (fewer blind encounters); full speed otherwise
-    const pace = mode === "roam" && t >= GRACE ? ROAM_PACE : 1000;
+    const pace = mode === "roam" && t >= GRACE ? (big ? BIG_ROAM_PACE : ROAM_PACE) : 1000;
     mx = Math.trunc((icos(a) * pace) / 1024);
     my = Math.trunc((isin(a) * pace) / 1024);
   }

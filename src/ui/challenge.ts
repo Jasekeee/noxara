@@ -159,8 +159,9 @@ export class Social {
 
   /** Called by showEnd. */
   endShown(over: boolean) {
-    // a training-island run (easy bots) can't be a challenge: the server replays challenges without the flag
-    this.challengeBtn.classList.toggle("sc-hidden", !over || !this.d.getRecord() || this.d.getRecord()?.cfg.training === true);
+    // a training-island run (easy bots) or a Big Island run can't be a challenge: the server replays challenges without those fields
+    const cfg = this.d.getRecord()?.cfg;
+    this.challengeBtn.classList.toggle("sc-hidden", !over || !cfg || cfg.training === true || cfg.map === "big");
   }
 
   // ------------------------------------------------------------------ helpers

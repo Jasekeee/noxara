@@ -31,6 +31,7 @@ import { Coach } from "./ui/coach";
 import { specsFromFighters } from "./net/roster";
 import { Social } from "./ui/challenge";
 import { fmt } from "./ui/dom";
+import { BIG_ISLAND_ENABLED } from "./modes";
 
 const U = 1 / 1000;
 const DT = 1 / TICK_HZ;
@@ -42,6 +43,8 @@ const CAM_DIST = Number(params.get("cam") ?? 0) || 0;
 const MOCK = params.has("mock");
 /** ?offline: the whole session stays local (no network at all), like ?seed. */
 const OFFLINE = params.has("offline");
+/** ?map=big: local matches are played on Big Island (tests / FPS runs) */
+const BIG_PARAM = BIG_ISLAND_ENABLED && params.get("map") === "big";
 const SPEED = Math.max(0.25, Math.min(16, Number(params.get("speed") ?? 1) || 1));
 const $ = (id: string) => document.getElementById(id)!;
 /** touch hints on any touch-first device (coarse pointer) or once a touch has been seen, however narrow the window */
@@ -529,6 +532,9 @@ function localFighters(): FighterInfo[] {
 /** set by the TRAINING ISLAND buttons: the next match is offline with easy bots (cfg.training) */
 let wantTraining = false;
 let inTraining = false;
+/** set by the BIG ISLAND button: the next match is offline on the big map (cfg.map = "big") */
+let wantBig = false;
+let inBig = false;
 
 function localStart(): StartResult {
   const cfg: MatchConfig = { seed: localSeed(), fighters: t1Roster() };
@@ -536,6 +542,7 @@ function localStart(): StartResult {
   const cached = SEED_PARAM === null ? specsFromFighters(fighters.filter((f) => isChainAcct(f.account))) : null;
   if (cached) cfg.fighters = [cfg.fighters[0], ...cached];
   if (SEED_PARAM === null) cfg.fighters[0].upgrades = upgradesForLevel(levelProgress(myXp).level); // your level's gear (offline)
+  if (BIG_PARAM) cfg.map = "big";
   const b = cfg.fighters.findIndex((f) => f.bounty);
   return { matchId: `local-${cfg.seed}`, cfg, pot: 0, bountyIdx: b >= 0 ? b : null, bountyValue: 0, playerPaid: 0, tx: null };
 }
@@ -597,6 +604,14 @@ async function startMatch() {
     if (r !== null) start.cfg.rival = r;
   }
   wantTraining = false;
+  inBig = false;
+  if (start === null && wantBig && BIG_ISLAND_ENABLED) {
+    // big island: offline (no stakes, never settled on chain), the bigger map with normal bots
+    start = localStart();
+    start.cfg.map = "big";
+    inBig = true;
+  }
+  wantBig = false;
   const forced = start !== null;
   const c = start === null && SEED_PARAM === null && !OFFLINE ? await withTimeout(clientP, 3000) : null;
   // "chain_error" = a transient failure last time: the client tries the chain again (and says so if it still fails)
@@ -620,12 +635,13 @@ async function startMatch() {
   lastAmmo = -1;
   if (fellBack) toast("Couldn't reach the NEAR island — playing offline practice (not recorded)");
   if (inTraining) toast("Training island: the bots go easy on you. Nothing is recorded.");
+  if (inBig) toast("Big Island: a 3x map, dense cover, a slow storm. Offline — nothing is staked.");
   coach.startMatch(!AUTOPLAY);
   gotChest = false;
   meBushSeen = false;
   const st = current;
   if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
-  else hud.banner(inTraining ? "TRAINING ISLAND" : "READY…", "gold");
+  else hud.banner(inTraining ? "TRAINING ISLAND" : inBig ? "BIG ISLAND" : "READY…", "gold");
   $("title").classList.add("hidden");
   $("hud").classList.remove("hidden");
   $("pot-chip").classList.toggle("hidden", !(current.pot > 0));
@@ -990,7 +1006,7 @@ function showEnd(force: boolean) {
   const fast = !won && !inTraining && me.placement >= 7 && (match.state.tick < 70 * 20 || me.kills === 0);
   $("again-training").classList.toggle("hidden", !fast && !inTraining);
   // after training: the main button is a real match; the secondary one trains again
-  $("again").textContent = inTraining ? "PLAY REAL MATCH" : "PLAY AGAIN";
+  $("again").textContent = inTraining ? "PLAY REAL MATCH" : inBig ? "BIG ISLAND AGAIN" : "PLAY AGAIN";
   $("again-training").textContent = inTraining ? "TRAIN AGAIN" : "TRY THE TRAINING ISLAND";
   $("end-dmg").textContent = String(Math.round(me.damageDealt));
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
@@ -1029,7 +1045,10 @@ const guarded = (fn: () => void) => (e: Event) => {
   fn();
 };
 
-$("again").addEventListener("click", guarded(() => void startMatch()));
+$("again").addEventListener("click", guarded(() => {
+  if (inBig) wantBig = true; // big island: "again" stays on the big map
+  void startMatch();
+}));
 $("to-lobby").addEventListener("click", guarded(toLobby));
 $("spectate").addEventListener("click", guarded(() => {
   sfx.ui();
@@ -1071,6 +1090,23 @@ const openJudges = () => {
 };
 $("nav-judges").addEventListener("click", openJudges);
 if (new URLSearchParams(location.search).has("judges")) setTimeout(openJudges, 400);
+{
+  // BIG ISLAND entry (its own element in index.html); behind BIG_ISLAND_ENABLED (else a "coming soon" badge)
+  const bigBtn = $("big-island") as HTMLButtonElement;
+  if (!BIG_ISLAND_ENABLED) {
+    bigBtn.setAttribute("aria-disabled", "true");
+    bigBtn.classList.add("soon");
+    bigBtn.querySelector("small")!.textContent = "coming soon";
+  } else
+    bigBtn.addEventListener("click", () => {
+      wantBig = true;
+      if (!bootDone) {
+        wantPlay = true;
+        return;
+      }
+      void startMatch();
+    });
+}
 $("again-training").addEventListener("click", () => {
   $("end").classList.add("hidden");
   startTraining();
@@ -1086,7 +1122,7 @@ const menu = new PauseMenu({
   exit: () => {
     const chain = !current?.matchId.startsWith("local-") && !!client && client.mode === "chain";
     toLobby();
-    toast(chain ? "You left — the match counts as a loss" : inTraining ? "You left the training island" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
+    toast(chain ? "You left — the match counts as a loss" : inTraining ? "You left the training island" : inBig ? "You left Big Island" : "You left the practice match"); // chain match: left unsettled (the contract's abandon/expiry rules handle it)
   },
   onChange: (open) => {
     controls.blocked = open;

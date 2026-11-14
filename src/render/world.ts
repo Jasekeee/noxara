@@ -97,6 +97,20 @@ function instanced(name: string, mats: THREE.Matrix4[], cast = false): THREE.Obj
   return g;
 }
 
+/** Big maps: split instances into spatial chunks (each its own InstancedMesh) so off-screen chunks are culled. */
+function instancedChunks(name: string, mats: THREE.Matrix4[], cast = false, size = 18): THREE.Object3D {
+  const g = new THREE.Group();
+  const chunks = new Map<string, THREE.Matrix4[]>();
+  for (const m of mats) {
+    const k = `${Math.floor(m.elements[12] / size)},${Math.floor(m.elements[14] / size)}`;
+    const list = chunks.get(k) ?? [];
+    list.push(m);
+    chunks.set(k, list);
+  }
+  for (const list of chunks.values()) g.add(instanced(name, list, cast));
+  return g;
+}
+
 function fitScale(name: string, radius: number): number {
   const b = bounds(name);
   const fr = Math.max(b.max.x - b.min.x, b.max.z - b.min.z) / 2;
@@ -212,13 +226,17 @@ export class World {
   onBurst: (x: number, z: number, kind: "chest" | "heal") => void = () => {};
 
   private lazyParts = false;
+  /** Big Island (cfg.map = "big"): hundreds of obstacles -> instanced, ruins as stone blocks, more decor */
+  private big = false;
   /** lazy: build bushes + decor later with finish() (keeps the boot task short) */
   constructor(private match: Match, lazy = false) {
     const map = match.map;
     this.radius = map.radius * U;
     const seed = match.cfg.seed;
+    this.big = match.cfg.map === "big";
     this.buildIsland(map, seed);
-    this.buildObstacles(map);
+    if (this.big) this.buildObstaclesInstanced(map, seed);
+    else this.buildObstacles(map);
     if (!lazy) {
       this.buildBushes(map, seed);
       this.buildDecor(map, seed);
@@ -324,7 +342,7 @@ export class World {
     const rand = rng(seed ^ 0x51a7);
     // grass: jittered triangle grid clipped to an irregular circle, one flat colour per face
     const grassR = R - 1.1;
-    const N = 46, step = (grassR * 2) / N;
+    const N = this.big ? Math.round((46 * R) / 32) : 46, step = (grassR * 2) / N;
     const cA = new THREE.Color(PAL.grass), cB = new THREE.Color(PAL.grassDark), cC = new THREE.Color(PAL.grassLight), tmp = new THREE.Color();
     const vx: number[] = [], vy: number[] = [], vz: number[] = [];
     const edgeR = (a: number) => grassR * (1 + Math.sin(a * 7 + seed) * 0.012 + Math.sin(a * 13 + seed * 0.3) * 0.01);
@@ -421,6 +439,66 @@ export class World {
     });
   }
 
+  /** Big Island: one InstancedMesh per model part (a few dozen draw calls for ~220 obstacles). */
+  private buildObstaclesInstanced(map: MapData, seed: number) {
+    const groups = new Map<string, THREE.Matrix4[]>();
+    const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    const walls: THREE.Matrix4[] = [];
+    const wallCols: THREE.Color[] = [];
+    const rand = rng(seed ^ 0x3a11);
+    const stoneA = new THREE.Color(0xd8ccb0), stoneB = new THREE.Color(0xbfae8c), tmp = new THREE.Color();
+    map.obstacles.forEach((o, i) => {
+      const r = o.r * U;
+      if (o.kind === "wall") {
+        // ruin wall: axis-aligned stone blocks (posts are <= 1.2 u apart, so neighbours touch), uneven tops
+        const hgt = rand() < 0.15 ? 0.7 + rand() * 0.3 : 1.15 + rand() * 0.75;
+        const w = r * 1.9;
+        walls.push(new THREE.Matrix4().compose(v.set(o.x * U, hgt / 2, o.y * U), q.identity(), sc.set(w, hgt, w)));
+        wallCols.push(tmp.copy(stoneA).lerp(stoneB, rand()).offsetHSL(0, 0, (rand() - 0.5) * 0.06).clone());
+        return;
+      }
+      let name: string, s: number;
+      if (o.kind === "tree") {
+        name = ["nature/tree_default", "nature/tree_detailed", "nature/tree_fat_fall"][i % 3];
+        s = fitScale(name, r) * 1.1;
+      } else if (o.kind === "crate") {
+        name = ["blasters/crate-medium", "blasters/crate-wide", "blasters/crate-small"][i % 3];
+        s = fitScale(name, r) * 1.05;
+      } else {
+        name = ["nature/rock_largeA", "nature/rock_largeB", "nature/rock_tallA", "nature/rock_smallA"][i % 4];
+        s = fitScale(name, r) * 1.1;
+      }
+      q.setFromAxisAngle(up, (i * 2.399) % (Math.PI * 2));
+      const m4 = new THREE.Matrix4().compose(v.set(o.x * U, 0, o.y * U), q, sc.set(s, s, s));
+      const list = groups.get(name) ?? [];
+      list.push(m4);
+      groups.set(name, list);
+    });
+    for (const [name, mats] of groups) {
+      const g = instancedChunks(name, mats, true);
+      if (name.startsWith("blasters/crate"))
+        g.traverse((x) => {
+          const mm = x as THREE.InstancedMesh;
+          if (mm.isInstancedMesh) mm.material = dullCrateMat(mm.material as THREE.MeshStandardMaterial);
+        });
+      this.group.add(g);
+    }
+    if (walls.length) {
+      const geo = new THREE.BoxGeometry(1, 1, 1);
+      const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+      const im = new THREE.InstancedMesh(geo, mat, walls.length);
+      walls.forEach((m4, i) => {
+        im.setMatrixAt(i, m4);
+        im.setColorAt(i, wallCols[i]);
+      });
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.computeBoundingSphere();
+      this.group.add(im);
+      this.owned.push(geo, mat, im);
+    }
+  }
+
   private buildBushes(map: MapData, seed: number) {
     const rand = rng(seed ^ 0xb055);
     // One merged mesh per bush (one draw call), own material so it can fade when you hide in it.
@@ -488,9 +566,10 @@ export class World {
       ["nature/log", 4, 1.6],
     ];
     const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
+    const area = this.big ? (map.radius * map.radius) / (32000 * 32000) : 1;
     for (const [name, count, scale] of kinds) {
       const mats: THREE.Matrix4[] = [];
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < Math.round(count * area); i++) {
         const a = rand() * Math.PI * 2, d = Math.sqrt(rand()) * R;
         const x = Math.cos(a) * d, z = Math.sin(a) * d;
         if (blocked(x, z, 0.4)) continue;
@@ -498,20 +577,22 @@ export class World {
         const s = scale * (0.7 + rand() * 0.6);
         mats.push(new THREE.Matrix4().compose(v.set(x, 0.02, z), q, sc.set(s, s, s)));
       }
-      this.group.add(instanced(name, mats, name.includes("stump") || name.includes("log")));
+      const cast = name.includes("stump") || name.includes("log");
+      this.group.add(this.big ? instancedChunks(name, mats, cast, 24) : instanced(name, mats, cast));
     }
     // palms/trees ring on the beach edge (decor only, outside the walkable area)
     const treeMats: THREE.Matrix4[] = [];
     const ring = map.radius * U + 1.2;
-    for (let i = 0; i < 18; i++) {
-      const a = (i / 18) * Math.PI * 2 + rand() * 0.2;
+    const nRing = this.big ? Math.round((18 * map.radius) / 32000) : 18;
+    for (let i = 0; i < nRing; i++) {
+      const a = (i / nRing) * Math.PI * 2 + rand() * 0.2;
       q.setFromAxisAngle(up, rand() * Math.PI * 2);
       const s = 2.2 + rand() * 0.8;
       treeMats.push(new THREE.Matrix4().compose(v.set(Math.cos(a) * ring, -0.2, Math.sin(a) * ring), q, sc.set(s, s, s)));
     }
     // a few rocks in the shallows
     const rockMats: THREE.Matrix4[] = [];
-    for (let i = 0; i < 14; i++) {
+    for (let i = 0; i < (this.big ? 26 : 14); i++) {
       const a = rand() * Math.PI * 2, d = map.radius * U + 4 + rand() * 9;
       q.setFromAxisAngle(up, rand() * Math.PI * 2);
       const s = 1.5 + rand() * 2.5;

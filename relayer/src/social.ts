@@ -4,8 +4,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { FIGHTERS, MATCH_TICKS, type FighterSpec, type Input, type MatchConfig, type MatchRecord, type Personality } from "../../src/sim/types.ts";
+import { FIGHTERS, type FighterSpec, type Input, type MatchConfig, type MatchRecord, type Personality } from "../../src/sim/types.ts";
 import { createMatch } from "../../src/sim/match.ts";
+import { matchTicksFor } from "../../src/sim/rules.ts";
 import { replayRecord } from "../../src/sim/record.ts";
 
 export const TICK_MS = 50;
@@ -72,7 +73,7 @@ export function analyze(cfg: MatchConfig, inputs: MatchRecord["inputs"]): Analys
   let k = 0;
   let died = -1;
   let bountyKiller: number | null = null;
-  while (!m.state.over && m.state.tick < MATCH_TICKS) {
+  while (!m.state.over && m.state.tick < matchTicksFor(cfg)) {
     while (k < rows.length && rows[k][0] <= m.state.tick) {
       const [, idx, mx, my, packed, fire] = rows[k++];
       const q = Math.floor(packed / 4096);

@@ -13,6 +13,9 @@ export const SIM_VERSION = "r6";
 export const TICK_HZ = 20;
 export const MATCH_SECONDS = 180;
 export const MATCH_TICKS = TICK_HZ * MATCH_SECONDS;
+/** Big Island (MatchConfig.map === "big") runs on a 10-minute clock. */
+export const BIG_MATCH_SECONDS = 600;
+export const BIG_MATCH_TICKS = TICK_HZ * BIG_MATCH_SECONDS;
 export const FIGHTERS = 10;
 
 export type Personality = "aggressive" | "camper" | "sniper" | "looter" | "coward" | "balanced";
@@ -55,6 +58,12 @@ export interface MatchConfig {
    * replays stay deterministic; absent = no rival (chain, daily and challenge configs never carry it).
    */
   rival?: number;
+  /**
+   * Big Island: a ~3.3x larger map with dense cover, more loot, a slower storm and a 10-minute clock
+   * (rules.ts BIG_*). Offline / replay-verifiable only, like training: never on chain, the daily or
+   * challenges (the server rebuilds those configs without it). Absent = the standard island.
+   */
+  map?: "big";
 }
 
 /** One fighter's control for one tick. Humans: from keyboard/mouse/touch. Bots: from their AI. */
@@ -161,6 +170,18 @@ export interface MapData {
   obstacles: Obstacle[];
   bushes: Bush[];
   spawns: { x: number; y: number }[]; // FIGHTERS entries
+  /**
+   * Big Island only: walled ruins (square of "wall" obstacles, centre x/y, half-size h, FP) and the centres
+   * of their wall openings, so bots can path through a doorway. Absent on the standard island.
+   */
+  ruins?: Ruin[];
+}
+
+export interface Ruin {
+  x: number;
+  y: number;
+  h: number;
+  openings: { x: number; y: number }[];
 }
 
 export interface MatchState {

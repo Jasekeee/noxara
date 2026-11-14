@@ -1,6 +1,7 @@
 // DOM HUD: top chips, storm, kill feed, weapon card, hp, popups, damage numbers, minimap, hints.
 import type { FighterState, Match, WeaponKind } from "../sim/types";
-import { MATCH_TICKS, TICK_HZ } from "../sim/types";
+import { TICK_HZ } from "../sim/types";
+import { matchTicksFor } from "../sim/rules";
 import { WEAPON_LABEL } from "../render/palette";
 import { IDLE_RELOAD, WEAPONS } from "../sim/rules";
 import { shortAcct } from "./acct";
@@ -120,7 +121,7 @@ export class Hud {
     this.set("kills", me.kills, () => {
       this.kills.textContent = String(me.kills);
     });
-    const left = Math.max(0, MATCH_TICKS - st.tick);
+    const left = Math.max(0, matchTicksFor(m.cfg) - st.tick);
     const secs = Math.ceil(left / TICK_HZ);
     this.set("time", secs, () => (this.matchTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
     if (st.storm.r < this.lastR) this.shrinkTick = st.tick;
@@ -339,6 +340,9 @@ export class Hud {
     c.beginPath(); c.arc(0, 0, R * s - 3, 0, Math.PI * 2); c.fill();
     c.fillStyle = "#3f8d34";
     for (const b of m.map.bushes) { c.beginPath(); c.arc(b.x * s, b.y * s, Math.max(2, b.r * s), 0, Math.PI * 2); c.fill(); }
+    // ruin walls (Big Island only: the standard island has no "wall" obstacles) as landmarks
+    c.fillStyle = "#d8ccb0";
+    for (const o of m.map.obstacles) if (o.kind === "wall") c.fillRect(o.x * s - 1.5, o.y * s - 1.5, 3, 3);
     const st = m.state;
     // storm
     c.fillStyle = "rgba(138,60,255,.45)";

@@ -1,8 +1,10 @@
 // Plays one recorded match with a deterministic scripted human (idx 0) and writes a MatchRecord.
-//   node tools/make-record.ts [out=matches/demo-1.json] [--seed 1] [--autoplay]
+//   node tools/make-record.ts [out=matches/demo-1.json] [--seed 1] [--autoplay] [--big]
 // --autoplay drives the human with botInput (like the client's ?autoplay) instead of the script.
+// --big plays it on Big Island (cfg.map = "big").
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import type { MatchConfig } from "../src/sim/types.ts";
 import { loadSim } from "./load-sim.ts";
 import { runMatch, scriptedInput, toRecord } from "./simlib.ts";
 
@@ -13,7 +15,7 @@ const autoplay = args.includes("--autoplay");
 const out = args.find((a, i) => !a.startsWith("--") && (si < 0 || i !== si + 1)) ?? "matches/demo-1.json";
 
 const sim = await loadSim();
-const cfg = { seed, fighters: sim.t1Roster() };
+const cfg: MatchConfig = { seed, fighters: sim.t1Roster(), ...(args.includes("--big") ? { map: "big" as const } : {}) };
 const rec = new sim.Recorder();
 const run = runMatch(sim.createMatch(cfg), { recorder: rec, human: autoplay ? sim.botInput : scriptedInput });
 const record = toRecord(cfg, rec.inputs, run);

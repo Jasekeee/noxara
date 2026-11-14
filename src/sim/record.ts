@@ -4,9 +4,9 @@
 // next change for that idx, so the replayed match is bit-identical (same hash()).
 // Packing: the "aim" column holds aim (0..4095) + 4096 * q, where q = aimDistQ(input.aimDist)
 // (0 = no aimDist). Old records (aim < 4096) replay unchanged. Proposal for the lead: a 7th column.
-import { MATCH_TICKS, type Input, type MatchConfig, type MatchRecord } from "./types";
+import { type Input, type MatchConfig, type MatchRecord } from "./types";
 import { createMatch } from "./match";
-import { aimDistQ } from "./rules";
+import { aimDistQ, matchTicksFor } from "./rules";
 
 const norm = (v: number) => Math.trunc(v) || 0;
 
@@ -45,7 +45,7 @@ export function replayRecord(
   const cur = new Map<number, Input>();
   for (let i = 0; i < cfg.fighters.length; i++) if (cfg.fighters[i].human) cur.set(i, { mx: 0, my: 0, aim: 0, fire: false });
   let k = 0;
-  while (!m.state.over && m.state.tick < MATCH_TICKS) {
+  while (!m.state.over && m.state.tick < matchTicksFor(cfg)) {
     while (k < rows.length && rows[k][0] <= m.state.tick) {
       const [, idx, mx, my, packed, fire] = rows[k++];
       const q = Math.floor(packed / 4096);

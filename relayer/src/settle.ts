@@ -4,6 +4,7 @@ import type { Input, MatchConfig, MatchRecord } from "../../src/sim/types.ts";
 import { FIGHTERS, MATCH_TICKS, SIM_VERSION } from "../../src/sim/types.ts";
 import { replayRecord } from "../../src/sim/record.ts";
 import { createMatch } from "../../src/sim/match.ts";
+import { matchTicksFor } from "../../src/sim/rules.ts";
 import { configDiff, matchConfigFromChain, type ChainMatch } from "./roster.ts";
 import { inputLogHash, settleMessage } from "./protocol.ts";
 
@@ -69,7 +70,7 @@ export function detailedReplay(cfg: MatchConfig, inputs: MatchRecord["inputs"]) 
   cfg.fighters.forEach((f, i) => f.human && cur.set(i, { mx: 0, my: 0, aim: 0, fire: false }));
   let k = 0;
   let bountyKiller: number | null = null;
-  while (!m.state.over && m.state.tick < MATCH_TICKS) {
+  while (!m.state.over && m.state.tick < matchTicksFor(cfg)) {
     while (k < rows.length && rows[k][0] <= m.state.tick) {
       const [, idx, mx, my, packed, fire] = rows[k++];
       const q = Math.floor(packed / 4096);
