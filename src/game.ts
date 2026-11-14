@@ -33,7 +33,7 @@ import { Social } from "./ui/challenge";
 import { fmt } from "./ui/dom";
 import { BIG_ISLAND_ENABLED } from "./modes";
 import { getMode, setBoardOpener } from "./ui/titlemenu";
-import { trailerCamera, trailerTimeScale } from "./trailer";
+import { TRAILER, trailerCamera, trailerTimeScale } from "./trailer";
 
 const U = 1 / 1000;
 const DT = 1 / TICK_HZ;
@@ -1619,7 +1619,7 @@ function frame(now: number) {
     const k = introT / INTRO;
     dist *= 1 + k * k * 1.8;
   }
-  const tcam = trailerCamera(camera, rdt, match && views.length ? match.state.fighters.map((f, i) => ({ x: views[i]?.pos.x ?? 0, z: views[i]?.pos.z ?? 0, alive: f.alive, bounty: !!f.bounty })) : [], watch);
+  const tcam = !TRAILER ? null : trailerCamera(camera, rdt, match && views.length ? match.state.fighters.map((f, i) => ({ x: views[i]?.pos.x ?? 0, z: views[i]?.pos.z ?? 0, alive: f.alive, bounty: !!f.bounty })) : [], watch);
   if (tcam) {
     dist = tcam.dist;
   } else if (phase === "title" || starting) {
