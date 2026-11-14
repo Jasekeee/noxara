@@ -30,7 +30,7 @@ the owner's literal reply **"yes, deploy"**.
 
 The owner account (your wallet, e.g. `<you>.near`) is set as `owner` and as the fixed teardown beneficiary at `new()`.
 
-## 2. Cost (preliminary — final numbers after the audit fixes and the testnet rehearsal)
+## 2. Cost — superseded by docs/COST.md (measured 2026-11-14: option A ≈ 6.38 NEAR to fund, ≈ 5.6–5.9 refundable; option B ≈ 0.07 NEAR). The table below is the older estimate.
 | Item | NEAR | Kind |
 |---|---|---|
 | Contract code storage (wasm 524,292 B incl. daily check-in/quests, login reward, `create_guest` → 1 NEAR per 100 KB) | ≈ 5.24 | refundable (on teardown) |
