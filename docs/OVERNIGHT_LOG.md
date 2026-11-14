@@ -28,3 +28,4 @@ Guardrails: no mainnet, no public repo, no hosting deploys, no posts. Approval-n
 | ~23:40 | Mobile HUD overlap fixed (storm warning below the HUD row). Cold Lighthouse on a fresh build: desktop 99/100/100, mobile 100/100/100. Cold judge #4 started | done |
 | 23:52 | Cold judge #4 = 55/70 (Main 6→8); fixed storm warning text, pot estimate/breakdown, bounty line, README numbers; unit 50/50, e2e 11/11, verify 11/11 | done |
 | 00:05 | Demo: tools/demo-video.ts records an ~80 s captioned draft of the shot list (docs/screens/demo-draft.webm, local only) + stills; DAILY spacing fix; softer player tint | done |
+| 00:20 | Final pass on main: unit 50/50, relayer 59/59, contract 104/104 + sandbox 14/14, e2e 11/11, verify 11/11, econ sim PASS. ~/.near-credentials has no mainnet dir. Play-test servers left running (r6) | done |
