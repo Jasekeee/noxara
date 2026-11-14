@@ -510,12 +510,12 @@ async fn contract_on_root_relay_as_server_and_teardown() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn teardown_refused_before_the_lock() -> anyhow::Result<()> {
-    let wd = world().await?; // default lock: 2026-11-25 00:00 UTC
+    let wd = world().await?; // default lock: 2026-12-20 00:00 UTC
     let r = wd.owner.call(wd.c.id(), "teardown").transact().await?;
     let e = format!("{:?}", r.into_result().unwrap_err());
-    assert!(e.contains("locked until 2026-11-25"), "{e}");
+    assert!(e.contains("locked until 2026-12-20"), "{e}");
     let t: String = wd.c.view("get_teardown_after").await?.json()?;
-    assert_eq!(t, "1795564800000");
+    assert_eq!(t, "1797724800000");
     Ok(())
 }
 
@@ -532,7 +532,7 @@ async fn release_build_ignores_an_earlier_teardown_time_and_init_is_private() ->
     // the account itself can, but a release build ignores teardown_after_ms
     c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id(), "teardown_after_ms": "1"})).gas(Gas::from_tgas(150)).transact().await?.into_result()?;
     let t: String = c.view("get_teardown_after").await?.json()?;
-    assert_eq!(t, "1795564800000", "release builds can't move the lock");
+    assert_eq!(t, "1797724800000", "release builds can't move the lock");
     // a second init fails
     let r = c.call("new").args_json(json!({"owner": root.id(), "server": root.id(), "guest_parent": root.id()})).gas(Gas::from_tgas(150)).transact().await?;
     assert!(r.into_result().is_err());
@@ -917,5 +917,81 @@ async fn upgrades_over_the_live_v2_layout() -> anyhow::Result<()> {
     assert!(r.logs().iter().any(|l| l.contains("guest_created")), "{:?}", r.logs());
     let daily: Value = c.view("get_daily").args_json(json!({"account_id": carol.id()})).await?.json()?;
     assert_eq!(daily["streak"], 0);
+    Ok(())
+}
+
+/// Upgrade over the LIVE mainnet code: `royale_v3_d734724.wasm` is the exact release wasm running on noxara.near
+/// (sha256 d734724f…, built from main's contract sources 354e1fe4…), contract-on-root topology, relay = server.
+/// It stored the 2026-11-25 teardown lock at new(); deploy + migrate moves it to 2026-12-20, ranked play stays
+/// open (the season now ends 2026-12-15), balances are kept, and a match pending across the upgrade settles.
+#[tokio::test]
+async fn upgrades_the_live_mainnet_code_and_extends_the_season() -> anyhow::Result<()> {
+    use near_workspaces::operations::Function;
+    let w = near_workspaces::sandbox().await?;
+    WORKER.with(|x| *x.borrow_mut() = Some(w.clone()));
+    let top = w.root_account()?;
+    let root = top.create_subaccount("noxara").initial_balance(NearToken::from_near(20)).transact().await?.into_result()?;
+    let owner = top.create_subaccount("boss").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    let relay = root.create_subaccount("relay").initial_balance(NearToken::from_near(5)).transact().await?.into_result()?;
+    let c = root.deploy(&std::fs::read("tests/fixtures/royale_v3_d734724.wasm")?).await?.into_result()?;
+    c.call("new")
+        .args_json(json!({"owner": owner.id(), "server": relay.id(), "guest_parent": relay.id(), "teardown_beneficiary": owner.id()}))
+        .gas(Gas::from_tgas(250))
+        .transact()
+        .await?
+        .into_result()?;
+    let t: String = c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1795564800000", "the live code locked teardown to 2026-11-25");
+    // live-like state: a guest and a real player with settled matches, a sponsorship, and a match in flight
+    let g = relay.create_subaccount("g-0001").initial_balance(NearToken::from_millinear(500)).transact().await?.into_result()?;
+    relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let carol = top.create_subaccount("carol").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    carol.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let (s, _) = start(&g, &c).await?;
+    settle(&relay, &c, &s["match_id"], 3, None).await?.0.map_err(anyhow::Error::msg)?;
+    let (s, _) = start(&carol, &c).await?;
+    settle(&relay, &c, &s["match_id"], 0, None).await?.0.map_err(anyhow::Error::msg)?;
+    let pending = start(&g, &c).await?.0;
+    let supply: String = c.view("ft_total_supply").await?.json()?;
+    let carol_bal: String = c.view("ft_balance_of").args_json(json!({"account_id": carol.id()})).await?.json()?;
+    let fighters0: Vec<Value> = c.view("get_fighters").await?.json()?;
+    // the upgrade exactly as scripts/upgrade.ts --contract-on-root sends it: ONE tx, deploy + migrate
+    let r = root.batch(c.id()).deploy(&std::fs::read(WASM)?).call(Function::new("migrate").gas(Gas::from_tgas(100))).transact().await?;
+    println!("deploy + migrate (live mainnet code d734724f): {} Tgas", r.total_gas_burnt.as_tgas());
+    r.into_result()?;
+    let t: String = c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1797724800000", "teardown moved to 2026-12-20 00:00 UTC");
+    let ending: bool = c.view("is_season_ending").await?.json()?;
+    assert!(!ending);
+    let cfg: Value = c.view("get_config").await?.json()?;
+    assert_eq!(cfg["version"], 2);
+    assert_eq!(cfg["total_supply"], supply);
+    let carol_bal2: String = c.view("ft_balance_of").args_json(json!({"account_id": carol.id()})).await?.json()?;
+    assert_eq!(carol_bal, carol_bal2);
+    let fighters1: Vec<Value> = c.view("get_fighters").await?.json()?;
+    assert_eq!(fighters0, fighters1, "bots, wallets and escrow unchanged");
+    // the match in flight across the upgrade settles; new matches start and settle
+    settle(&relay, &c, &pending["match_id"], 1, None).await?.0.map_err(anyhow::Error::msg)?;
+    let (s, _) = start(&carol, &c).await?;
+    settle(&relay, &c, &s["match_id"], 2, None).await?.0.map_err(anyhow::Error::msg)?;
+    let (s, _) = start(&g, &c).await?;
+    settle(&relay, &c, &s["match_id"], 4, None).await?.0.map_err(anyhow::Error::msg)?;
+    // teardown still locked (until 2026-12-20); a second migrate changes nothing
+    let r = owner.call(c.id(), "teardown").transact().await?;
+    let e = format!("{:?}", r.into_result().unwrap_err());
+    assert!(e.contains("locked until 2026-12-20"), "{e}");
+    root.call(c.id(), "migrate").gas(Gas::from_tgas(100)).transact().await?.into_result()?;
+    let t: String = c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1797724800000");
+    // ROLLBACK (docs/MAINNET.md §6): redeploy the live code + its migrate. State is kept; the stored lock stays
+    // 2026-12-20 (the old code reads it from state), ranked play falls back to the old 2026-11-20 end.
+    let r = root.batch(c.id()).deploy(&std::fs::read("tests/fixtures/royale_v3_d734724.wasm")?).call(Function::new("migrate").gas(Gas::from_tgas(100))).transact().await?;
+    r.into_result()?;
+    let t: String = c.view("get_teardown_after").await?.json()?;
+    assert_eq!(t, "1797724800000", "a rollback keeps the moved lock");
+    let cfg: Value = c.view("get_config").await?.json()?;
+    assert_eq!(cfg["version"], 2);
+    let (s, _) = start(&carol, &c).await?;
+    settle(&relay, &c, &s["match_id"], 5, None).await?.0.map_err(anyhow::Error::msg)?;
     Ok(())
 }

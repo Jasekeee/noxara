@@ -9,7 +9,7 @@
 Track: **Games** (NEAR HACKATHON). Status: **live on NEAR mainnet since 2026-11-14 — play at https://playnoxara.vercel.app** (contract [`noxara.near`](https://nearblocks.io/address/noxara.near), deploy tx [`BmMiB9cc…`](https://nearblocks.io/txns/BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6)); the testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment. Every match is seeded on chain, re-verified by replaying its inputs, and settled on chain. Token: **Nox (NOX)**, play-money only.
 
 ## Play
-Live: **https://playnoxara.vercel.app** (NEAR mainnet). Ranked (on-chain) play runs until **2026-11-20 00:00 UTC**; practice modes (Training Island, `?offline`) are always available. 2026-11-20 to 2026-11-25 is the exit window (players reclaim deposits); the owner can tear the contract down from 2026-11-25.
+Live: **https://playnoxara.vercel.app** (NEAR mainnet). Ranked (on-chain) play runs until **2026-12-15 00:00 UTC**; practice modes (Training Island, `?offline`) are always available. 2026-12-15 to 2026-12-20 is the exit window (players reclaim deposits); the owner can tear the contract down from 2026-12-20.
 
 Run it locally:
 ```bash
@@ -99,7 +99,7 @@ The contract has a single owner account. Owner-only methods, read from `contract
 | `set_max_free(n)` | Size of the free-match pool; paid matches are unaffected |
 | `propose_owner(account)` | Hand over ownership; the new owner must `accept_owner` |
 | `set_teardown_beneficiary(account)` | Once only, if unset; the beneficiary is then fixed |
-| `teardown()`, `teardown_clear(...)`, `withdraw_excess(amount)` | Only from 2026-11-25 00:00 UTC (time-locked in the contract): close in-flight matches, clear state, delete the contract and send its NEAR balance to the fixed beneficiary |
+| `teardown()`, `teardown_clear(...)`, `withdraw_excess(amount)` | Only from 2026-12-20 00:00 UTC (time-locked in the contract): close in-flight matches, clear state, delete the contract and send its NEAR balance to the fixed beneficiary |
 
 Not possible by any method: minting NOX, moving a player's or fighter's NOX. **The full-access key on `noxara.near` is kept** so the developer can upgrade the code (`migrate`) and fix bugs during judging; a code upgrade could in principle change these rules, so this is a trust assumption until the key is removed. [verified from source; key status per docs/MAINNET.md]
 

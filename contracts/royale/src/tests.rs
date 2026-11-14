@@ -2770,3 +2770,141 @@ fn a_failed_guest_creation_refunds_the_relayer() {
     assert!(c.on_guest_created(acc("g-0123abcd.royale.test"), acc(RELAY), U128(fund.as_yoctonear())));
     assert!(near_sdk::test_utils::get_created_receipts().iter().all(|r| r.receiver_id != acc(RELAY)));
 }
+
+// ---------------------------------------------------------------- ranked play extended through judging
+
+/// `ctx` at a given wall-clock time (ms).
+fn ctx_at(pred: &str, height: u64, deposit: NearToken, ms: u64) {
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME))
+        .predecessor_account_id(acc(pred))
+        .signer_account_id(acc(pred))
+        .block_height(height)
+        .block_timestamp(ms * 1_000_000)
+        .attached_deposit(deposit)
+        .account_balance(NearToken::from_near(50))
+        .random_seed([(height % 251) as u8 + 1; 32]);
+    testing_env!(b.build());
+}
+
+fn start_at(c: &mut Contract, who: &str, h: u64, ms: u64) -> MatchStart {
+    let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+    last.remove(&acc(who));
+    last.flush();
+    ctx_at(who, h, NearToken::from_yoctonear(0), ms);
+    let _ = c.start_match();
+    let id = c.next_match_id - 1;
+    ctx_at(ME, h + 1, NearToken::from_yoctonear(0), ms + 1_000);
+    c.resolve_start(U64(id))
+}
+
+fn settle_at(c: &mut Contract, id: U64, winner: usize, h: u64, ms: u64) -> MatchResult {
+    ctx_at(SERVER, h, NearToken::from_yoctonear(0), ms);
+    let mut kills = vec![0u8; FIGHTERS];
+    kills[winner] = 3;
+    c.settle_match(id, places(winner), kills, None, "ab".repeat(32), Some("deadbeef".into()))
+}
+
+const NOV_20_MS: u64 = 1_795_132_800_000; // the old ranked end (2026-11-20 00:00 UTC)
+const DEC_01_MS: u64 = 1_796_083_200_000; // 2026-12-01 00:00 UTC
+
+#[test]
+fn season_dates_are_dec_15_and_dec_20() {
+    assert_eq!(SEASON_END_MS, NOV_20_MS + 25 * 86_400_000, "ranked play ends 2026-12-15 00:00 UTC");
+    assert_eq!(TEARDOWN_AFTER_MS, SEASON_END_MS + 5 * 86_400_000, "teardown from 2026-12-20 00:00 UTC (the same 5-day exit window)");
+    assert_eq!(OLD_TEARDOWN_AFTER_MS, NOV_20_MS + 5 * 86_400_000, "the first release's lock: 2026-11-25 00:00 UTC");
+    assert_eq!(DEC_01_MS, NOV_20_MS + 11 * 86_400_000);
+}
+
+#[test]
+fn ranked_matches_start_and_settle_after_nov_20_until_dec_15() {
+    let mut c = setup();
+    grant(&mut c, ALICE, 50 * ONE);
+    let mut h = 1_000;
+    // at the old end, on 12-01 and in the last millisecond: a paid and a guest match start and settle
+    for ms in [NOV_20_MS, DEC_01_MS, SEASON_END_MS - 2_000] {
+        ctx_at(ALICE, h, NearToken::from_yoctonear(0), ms);
+        assert!(!c.is_season_ending());
+        for who in [ALICE, GUEST] {
+            let s = start_at(&mut c, who, h, ms);
+            let n = c.matches_settled;
+            let r = settle_at(&mut c, s.match_id, 2, h + 2, ms + 60_000);
+            assert_eq!(r.winner, Some(2));
+            assert_eq!(c.matches_settled, n + 1);
+            h += 10;
+        }
+    }
+    assert_supply(&c);
+    // a match started just before the end still settles after it
+    let late = start_at(&mut c, ALICE, h, SEASON_END_MS - 2_000);
+    // from 2026-12-15 00:00 UTC nobody can start
+    for who in [GUEST, ALICE] {
+        let mut last = near_sdk::store::LookupMap::<AccountId, u64>::new(Key::LastFreeStart);
+        last.remove(&acc(who));
+        last.flush();
+        for ms in [SEASON_END_MS, SEASON_END_MS + 1, TEARDOWN_AFTER_MS - 1, TEARDOWN_AFTER_MS + 1] {
+            ctx_at(who, h + 5, NearToken::from_yoctonear(0), ms);
+            let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.start_match(); })).unwrap_err();
+            let msg = e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string())).unwrap_or_default();
+            assert!(msg.contains("the season is over"), "{who} at {ms}: {msg}");
+        }
+    }
+    ctx_at(ALICE, h + 6, NearToken::from_yoctonear(0), SEASON_END_MS);
+    assert!(c.is_season_ending(), "the exit window opens with the season's end");
+    let n = c.matches_settled;
+    let r = settle_at(&mut c, late.match_id, 0, h + 7, SEASON_END_MS + 60_000);
+    assert_eq!(r.winner, Some(0));
+    assert_eq!(c.matches_settled, n + 1);
+    assert_supply(&c);
+}
+
+#[test]
+fn teardown_locked_until_dec_20() {
+    let mut c = setup();
+    for ms in [OLD_TEARDOWN_AFTER_MS, DEC_01_MS, SEASON_END_MS, TEARDOWN_AFTER_MS - 1] {
+        ctx_at("owner.test", 500, NearToken::from_yoctonear(0), ms);
+        let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.teardown(); }));
+        assert!(e.is_err(), "locked at {ms}");
+        let e = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { let _ = c.withdraw_excess(U128(1)); }));
+        assert!(e.is_err(), "withdraw_excess locked at {ms}");
+    }
+    ctx_at("owner.test", 500, NearToken::from_yoctonear(0), TEARDOWN_AFTER_MS);
+    let _ = c.teardown();
+    assert!(near_sdk::test_utils::get_created_receipts().iter().any(|x| x.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::DeleteAccount { .. }))));
+}
+
+/// `migrate` (code-only upgrade) moves the first release's stored lock (2026-11-25) to 2026-12-20 and
+/// leaves every other stored value as it is.
+#[test]
+fn migrate_moves_only_the_old_release_teardown() {
+    let cases: [(Option<u64>, u64); 6] = [
+        (Some(OLD_TEARDOWN_AFTER_MS), TEARDOWN_AFTER_MS),
+        (Some(TEARDOWN_AFTER_MS), TEARDOWN_AFTER_MS),
+        (Some(1_795_000_000_123), 1_795_000_000_123), // a test build's lock: untouched
+        (Some(OLD_TEARDOWN_AFTER_MS + 1), OLD_TEARDOWN_AFTER_MS + 1),
+        (Some(OLD_TEARDOWN_AFTER_MS - 1), OLD_TEARDOWN_AFTER_MS - 1),
+        (None, TEARDOWN_AFTER_MS), // no stored lock: the constant
+    ];
+    let mut c = setup();
+    let supply = c.token.total_supply;
+    for (stored, want) in cases {
+        c.fighters.flush();
+        c.players.flush();
+        c.matches.flush();
+        match stored {
+            Some(v) => env::storage_write(TEARDOWN_KEY, &v.to_le_bytes()),
+            None => env::storage_remove(TEARDOWN_KEY),
+        };
+        env::state_write(&c);
+        ctx(ME, 400, NearToken::from_yoctonear(0));
+        let m = Contract::migrate();
+        assert_eq!(m.get_teardown_after().0, want, "stored {stored:?}");
+        assert_eq!(m.version, STATE_VERSION);
+        assert_eq!(m.token.total_supply, supply);
+        // a second migrate is a no-op
+        env::state_write(&m);
+        let m2 = Contract::migrate();
+        assert_eq!(m2.get_teardown_after().0, want);
+        c = m2;
+    }
+}

@@ -49,7 +49,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
     h("p", "ab-p", undefined, h("b", "", "The House. "), document.createTextNode("The treasury behind every match. It follows one public rule, nothing is minted after genesis, and a share of every pot is burned.")),
     h("p", "ab-p", undefined, h("b", "", "The bounty. "), document.createTextNode("The richest bot is the Mark. Whoever takes it down collects it.")),
     h("p", "ab-p", undefined, h("b", "", "Bot shares. "), document.createTextNode("Fans can own shares of a fighter. Dividends are paid only from profit. If the fighter goes broke, its shares go to zero.")),
-    h("p", "sc-note", "NOX is play-money with no real-world value. Ranked (on-chain) play runs until 2026-11-20 00:00 UTC; practice modes are always available."),
+    h("p", "sc-note", "NOX is play-money with no real-world value. Ranked (on-chain) play runs until 2026-12-15 00:00 UTC; practice modes are always available."),
   );
   const eco = h("button", "btn-chip", "OPEN THE ECONOMY");
   eco.type = "button";

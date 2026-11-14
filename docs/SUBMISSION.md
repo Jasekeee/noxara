@@ -15,7 +15,7 @@ NOXARA is a 3-minute top-down battle royale: you against 9 AI fighters on an isl
 Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends come only from the fighter's profit; when a fighter goes bankrupt, its shares go to zero. One public rule (`get_economy`) steers the treasury, and nothing is minted after genesis. Matches are seeded by the next block, replayed by the match server from your inputs, and settled on chain. Guests play in seconds with no wallet, no gas and no popups.
 
 ## 2. What to try (do X → see Y)
-Judge path: open https://playnoxara.vercel.app, press PLAY as a guest (no wallet), finish a match and look for **Verified**; then FIGHTERS, ECONOMY and the contract `noxara.near` on https://nearblocks.io/address/noxara.near. Mainnet accounts: `noxara.near` (game + NOX), `relay.noxara.near` (relayer + match server), `<fighter>.noxara.near` (keyless fighters), owner `zhasik.near`. Ranked (on-chain) play is open until 2026-11-20 00:00 UTC; practice modes always. The testnet build `royale.br-7e8492.testnet` is the rehearsal environment.
+Judge path: open https://playnoxara.vercel.app, press PLAY as a guest (no wallet), finish a match and look for **Verified**; then FIGHTERS, ECONOMY and the contract `noxara.near` on https://nearblocks.io/address/noxara.near. Mainnet accounts: `noxara.near` (game + NOX), `relay.noxara.near` (relayer + match server), `<fighter>.noxara.near` (keyless fighters), owner `zhasik.near`. Ranked (on-chain) play is open until 2026-12-15 00:00 UTC; practice modes always. The testnet build `royale.br-7e8492.testnet` is the rehearsal environment.
 | Do | See |
 |---|---|
 | **About the game** (title link, in-match menu, or `/?about`) | The pitch, how to play, the economy in plain words, links to the contract and live transactions |
@@ -62,7 +62,7 @@ Prerequisites: the audited `main` build; `node scripts/build-contract.ts` prints
 | 5 | Owner | `! cd ~/Developer/bounty-royale && ENV_FILE=.env.mainnet BR_MAINNET_YES=yes node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <your-wallet>.near` | ≈ 5.05 code + 0.5 state + 1.5 relayer + 0.01 bots + gas ≈ **7.1 NEAR** (≈ 6.0 refundable) |
 | 6 | Claude (read-only) | `npm run verify` against mainnet: contract metadata Nox/NOX, 10 keyless accounts, one smoke match | 0 |
 | 7 | Owner (hosting) | Step by step in **docs/HOSTING.md**: Railway runs the match server + relayer (`railway.json`; variables incl. `GUEST_VIA_CONTRACT=1`, pasted by you from `.env.mainnet`), Vercel builds the game (`vercel.json`; `VITE_NEAR_NETWORK=mainnet` + `VITE_RELAYER_URL`) | Railway ≈ $5/month [assumed] |
-Teardown after 2026-11-25: docs/MAINNET.md §4.
+Teardown after 2026-12-20: docs/MAINNET.md §4.
 
 ## 6. Tag plan (HACKATHON.md Q-003)
 - `pre-hackathon`: not needed. All code was written inside the window; the first commit `6649b77` is from 2026-11-13. Optional: tag `6649b77` and say so in the README.

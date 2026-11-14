@@ -18,7 +18,7 @@ Gas: mainnet and testnet use the same minimum gas price (0.1 Ngas → 0.0001 NEA
 ## Option A — the whole game on mainnet (`noxara.near`, contract on the root)
 | Item | NEAR | Kind |
 |---|---|---|
-| Contract code storage (520,948 B) | 5.2095 | locked, refundable (delete-account after 2026-11-25) |
+| Contract code storage (520,948 B) | 5.2095 | locked, refundable (delete-account after 2026-12-20) |
 | Genesis state | 0.06 | locked, refundable |
 | State headroom | 0.30 | locked, refundable (whatever isn't used) |
 | 10 keyless NPC accounts (9 fighters + house) | 0.01 | **spent** (keyless accounts can't be deleted) |
@@ -50,7 +50,7 @@ README "On NEAR" section:
 `npm run verify` would add: "PASS mainnet anchor for <day>: the recorded root equals the root recomputed from testnet" and "PASS 9 mainnet identities have 0 access keys".
 
 ## Recommendation
-**Option A, if you can lock ≈ 6.4 NEAR until 2026-11-25** — the real game on mainnet (keyless mercenaries with mainnet wallets, guests as `g-<id>.noxara.near`) for ≈ 0.1–0.45 NEAR actually spent; ≈ 5.6–5.9 NEAR comes back on teardown.
+**Option A, if you can lock ≈ 6.4 NEAR until 2026-12-20** — the real game on mainnet (keyless mercenaries with mainnet wallets, guests as `g-<id>.noxara.near`) for ≈ 0.1–0.45 NEAR actually spent; ≈ 5.6–5.9 NEAR comes back on teardown.
 **Option B if you don't want to lock that much**: ≈ 0.08 NEAR in total, but mainnet then proves only that the testnet history wasn't rewritten — the game itself stays on testnet (allowed by the hackathon rules, Q-010).
 Fallback rule unchanged: if A isn't live and stable by 15:00 UTC, submit testnet (optionally with B).
 
