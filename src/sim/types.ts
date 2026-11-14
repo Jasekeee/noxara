@@ -48,6 +48,13 @@ export interface MatchConfig {
    * those configs without it), so a training run can't be passed off as a real one.
    */
   training?: boolean;
+  /**
+   * Rivalry (offline only, like `training`): fighter idx of the bot that "remembers you" — the one you
+   * eliminated last time. It prefers you as a target and, after the opening grace, roams toward you instead
+   * of wandering. Chosen before the match from the previous result (never from this match's inputs), so
+   * replays stay deterministic; absent = no rival (chain, daily and challenge configs never carry it).
+   */
+  rival?: number;
 }
 
 /** One fighter's control for one tick. Humans: from keyboard/mouse/touch. Bots: from their AI. */

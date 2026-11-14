@@ -58,7 +58,7 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
   const active = fighters.filter((f) => f.status === "active").sort((a, b) => a.slot - b.slot);
   for (const f of active) {
     const idx = f.slot + 1;
-    const li = h("li", "fcard" + (f.bounty ? " bounty" : "") + (f.generation > 0 && f.record.matches < 5 ? " rookie" : ""));
+    const li = h("li", "fcard" + (f.bounty ? " bounty wanted" : "") + (f.generation > 0 && f.record.matches < 5 ? " rookie" : ""));
     li.dataset.acct = f.account;
     const open = h("button", "fc-open");
     open.setAttribute("aria-label", `${f.name}: open profile`);
@@ -70,6 +70,7 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
     img.height = 80;
     if (portraits[idx]) img.src = portraits[idx];
     const top = h("div", "fc-top", undefined, img);
+    if (f.bounty) li.appendChild(h("div", "fc-wanted", "WANTED"));
     if (f.bounty) top.appendChild(h("span", "fc-crown", undefined, icon(ICON.crown), h("b", "", fmt(f.bountyValue))));
     if (f.generation > 0 && f.record.matches < 5) top.appendChild(h("span", "fc-rookie", "ROOKIE"));
     const p = prev?.f[f.account];
@@ -83,7 +84,9 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
       h("div", "fc-bal", undefined, icon(ICON.coin, "ic coin"), h("b", "", fmt(f.balance)), deltaEl),
       h("div", "fc-up", undefined, pips("W", f.upgrades.weaponTier), pips("A", f.upgrades.armor)),
       h("div", "fc-rec", `${f.record.wins}W · ${f.record.kills}K · ${f.record.matches}M`),
+      h("div", "fc-spark"),
     );
+    if (f.bounty) li.appendChild(h("div", "fc-reward", undefined, h("small", "", "BOUNTY"), h("b", "", `${fmt(f.bountyValue)} NOX`)));
     li.title = `${f.name}${isChainAcct(f.account) ? ` (${f.account})` : ""} — ${f.personality}. Wallet ${fmt(f.balance)} NOX. ${f.record.wins} wins, ${f.record.kills} kills in ${f.record.matches} matches.` + (f.bounty ? ` Carries a ${fmt(f.bountyValue)} NOX bounty.` : "");
     list.appendChild(li);
   }
@@ -92,4 +95,73 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
 export function lobbySkeleton(list: HTMLElement) {
   list.textContent = "";
   for (let i = 0; i < 9; i++) list.appendChild(h("li", "fcard skel"));
+}
+
+// ---------------------------------------------------------------- P&L sparklines (from on-chain history)
+export interface Spark {
+  /** net NOX per recent match, oldest first (prizes + bounties collected − bounties lost − upgrades; entries/upkeep not in the log) */
+  pts: number[];
+  /** season P&L from the contract (income − costs, entries and upkeep included), or null if unknown */
+  pnl: number | null;
+}
+
+/** Per-match income from a fighter's chain history (newest-first entries with amounts). */
+export function sparkFromHistory(hist: { match: string; kind: string; amount: number; detail: string }[], n = 12): number[] {
+  const by = new Map<string, number>();
+  const order: string[] = [];
+  for (const e of hist) {
+    if (!e.match || e.match === "0") continue;
+    if (!by.has(e.match)) {
+      by.set(e.match, 0);
+      order.push(e.match);
+    }
+    const sign = e.kind === "win" || (e.kind === "bounty" && e.detail !== "lost") ? 1 : e.kind === "upgrade" || (e.kind === "bounty" && e.detail === "lost") ? -1 : 0;
+    by.set(e.match, by.get(e.match)! + sign * e.amount);
+  }
+  return order.slice(0, n).reverse().map((m) => Math.round(by.get(m)! * 100) / 100);
+}
+
+/** A tiny bar sparkline (green up, red down) as inline SVG. */
+export function sparkSvg(pts: number[], w = 72, hgt = 18): SVGSVGElement {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${w} ${hgt}`);
+  svg.setAttribute("width", String(w));
+  svg.setAttribute("height", String(hgt));
+  svg.setAttribute("aria-hidden", "true");
+  const mid = hgt / 2;
+  const base = document.createElementNS(NS, "line");
+  base.setAttribute("x1", "0"); base.setAttribute("x2", String(w)); base.setAttribute("y1", String(mid)); base.setAttribute("y2", String(mid));
+  base.setAttribute("class", "sp-base");
+  svg.appendChild(base);
+  const max = Math.max(1, ...pts.map((v) => Math.abs(v)));
+  const bw = w / Math.max(pts.length, 6);
+  pts.forEach((v, i) => {
+    const r = document.createElementNS(NS, "rect");
+    const hh = Math.max(1.5, (Math.abs(v) / max) * (mid - 1));
+    r.setAttribute("x", String(i * bw + 1));
+    r.setAttribute("width", String(Math.max(2, bw - 2)));
+    r.setAttribute("y", String(v >= 0 ? mid - hh : mid));
+    r.setAttribute("height", String(hh));
+    r.setAttribute("rx", "1");
+    r.setAttribute("class", v > 0 ? "sp-up" : v < 0 ? "sp-down" : "sp-flat");
+    svg.appendChild(r);
+  });
+  return svg;
+}
+
+/** Fill the cards' sparkline slots without re-rendering the roster. */
+export function fillSparks(list: HTMLElement, sparks: Map<string, Spark>) {
+  for (const li of Array.from(list.querySelectorAll<HTMLElement>("li.fcard"))) {
+    const s = sparks.get(li.dataset.acct ?? "");
+    const slot = li.querySelector<HTMLElement>(".fc-spark");
+    if (!s || !slot) continue;
+    slot.textContent = "";
+    if (s.pts.length) slot.appendChild(sparkSvg(s.pts));
+    if (s.pnl !== null) {
+      const v = Math.round(s.pnl * 100) / 100;
+      slot.appendChild(h("span", "sp-pnl " + (v > 0 ? "up" : v < 0 ? "down" : ""), `${v > 0 ? "+" : v < 0 ? "−" : ""}${fmt(Math.abs(v))}`));
+    }
+    slot.title = `Season P&L ${s.pnl === null ? "n/a" : fmt(s.pnl) + " NOX"} (prizes + bounties − entries, upkeep, upgrades). Bars: income per recent match.`;
+  }
 }

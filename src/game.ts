@@ -26,7 +26,7 @@ import { Pages } from "./ui/pages";
 import { levelBadge, localXp, renderXp, setLocalXp } from "./ui/progress";
 import { levelProgress, upgradesForLevel, xpForMatch } from "./sim/progression";
 import type { MatchConfig } from "./sim/types";
-import { diffLines, loadSnap, lobbySkeleton, renderLobby, saveSnap, type Snap } from "./ui/lobby";
+import { diffLines, fillSparks, loadSnap, lobbySkeleton, renderLobby, saveSnap, sparkFromHistory, type Snap, type Spark } from "./ui/lobby";
 import { renderLedger, PLAY_MONEY_NOTE } from "./ui/ledger";
 import { Coach } from "./ui/coach";
 import { specsFromFighters } from "./net/roster";
@@ -241,10 +241,59 @@ async function refreshLobby() {
   const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
   mode.textContent = c.mode === "chain" ? "live wallets · NEAR testnet" : `offline practice — results aren't recorded${r ? ` (${r})` : ""}`;
   mode.classList.toggle("chain", c.mode === "chain");
-  if (fighters.length && portraits.length) renderLobby($("roster"), fighters, portraits, prevSnap);
+  if (fighters.length && portraits.length) {
+    renderLobby($("roster"), fighters, portraits, prevSnap);
+    void loadSparks(c);
+  }
   renderTicker();
   rebuildPreview();
   await refreshAccount();
+}
+
+// ------------------------------------------------------------------ rivalry (offline modes): "<name> remembers you"
+const RIVAL_KEY = "noxara.rival";
+function rememberRival(name: string) {
+  try {
+    localStorage.setItem(RIVAL_KEY, name);
+  } catch {
+    /* storage blocked: no rivalry */
+  }
+}
+function rivalIdx(cfg: MatchConfig): number | null {
+  let name: string | null = null;
+  try {
+    name = localStorage.getItem(RIVAL_KEY);
+  } catch {
+    return null;
+  }
+  if (!name) return null;
+  const i = cfg.fighters.findIndex((f, k) => k > 0 && f.name === name);
+  return i > 0 ? i : null;
+}
+
+// ------------------------------------------------------------------ lobby P&L sparklines (chain history + season P&L)
+let sparks = new Map<string, Spark>();
+let ipoOpen = new Map<string, { left: number; price: number }>();
+let sparksAt = 0;
+async function loadSparks(c: GameClient) {
+  if (c.mode !== "chain") return;
+  const raw = c as GameClient & { rawHistory?: (a: string) => Promise<{ match: string; kind: string; amount: number; detail: string }[]>; sharesMarket?: () => Promise<{ bot: string; seasonPnl: number }[]> };
+  if (!raw.rawHistory) return;
+  if (Date.now() - sparksAt > 60_000 || !sparks.size) {
+    sparksAt = Date.now();
+    const active = fighters.filter((f) => f.status === "active");
+    const [hists, market] = await Promise.all([
+      Promise.all(active.map((f) => raw.rawHistory!(f.account).catch(() => []))),
+      raw.sharesMarket ? raw.sharesMarket().catch(() => []) : Promise.resolve([]),
+    ]);
+    const pnl = new Map(market.map((m) => [m.bot, m.seasonPnl]));
+    ipoOpen = new Map((market as { bot: string; ipoLeft?: number; ipoPrice?: number }[]).filter((m) => (m.ipoLeft ?? 0) > 0).map((m) => [m.bot, { left: m.ipoLeft!, price: m.ipoPrice ?? 0 }]));
+    const next = new Map<string, Spark>();
+    active.forEach((f, i) => next.set(f.account, { pts: sparkFromHistory(hists[i]), pnl: pnl.has(f.account) ? pnl.get(f.account)! : null }));
+    sparks = next;
+  }
+  fillSparks($("roster"), sparks);
+  renderTicker();
 }
 
 // ------------------------------------------------------------------ lobby change feed
@@ -260,10 +309,44 @@ function settleLines(r: SettleResult): string[] {
   for (const u of r.upgrades) out.push(`${u.name} bought ${/^armou?r/i.test(u.what) ? "armor" : /^weapon/i.test(u.what) ? "a weapon upgrade" : u.what}`);
   return out;
 }
+/** Live world state from the contract: the Mark and its bounty, rookies (and open IPOs), recent bankruptcies. */
+export function worldLines(list: FighterInfo[], ipo: Map<string, { left: number; price: number }>): string[] {
+  const out: string[] = [];
+  const mark = list.find((f) => f.status === "active" && f.bounty);
+  if (mark) out.push(`THE MARK: ${mark.name} — ${mark.bountyValue > 0 ? `${fmt(mark.bountyValue)} NOX bounty` : "bounty on its head"}`);
+  for (const f of list.filter((x) => x.status === "active" && x.generation > 0 && x.record.matches < 10)) {
+    const i = ipo.get(f.account);
+    out.push(i ? `Rookie ${f.name}: IPO open, ${i.left} shares at ${fmt(i.price)} NOX` : `Rookie ${f.name} joined the board`);
+  }
+  for (const f of list.filter((x) => x.status === "retired").slice(-3).reverse()) out.push(`${f.name} went broke after ${f.record.matches} matches`);
+  return out;
+}
 function renderTicker() {
-  const lines = lastSettleLines ?? diffLines(prevSnap, fighters);
+  const recent = lastSettleLines ?? diffLines(prevSnap, fighters);
+  const live = client?.mode === "chain" ? worldLines(fighters, ipoOpen) : [];
+  const lines = [...live, ...recent];
   $("ticker").classList.toggle("hidden", !lines.length);
-  $("ticker-text").textContent = lines.join(" · ");
+  $("ticker").querySelector("b")!.textContent = live.length ? "LIVE ON NEAR" : "LAST MATCH";
+  const txt = $("ticker-text");
+  const text = lines.join("   ·   ");
+  if (txt.dataset.t === text) return;
+  txt.dataset.t = text;
+  txt.textContent = "";
+  const run = document.createElement("span");
+  run.className = "tk-run";
+  run.textContent = text;
+  txt.appendChild(run);
+  // scroll like a news ticker only when it doesn't fit (and motion is allowed)
+  requestAnimationFrame(() => {
+    const over = run.scrollWidth > txt.clientWidth + 4;
+    txt.classList.toggle("marquee", over);
+    if (over) {
+      const copy = run.cloneNode(true) as HTMLElement;
+      copy.setAttribute("aria-hidden", "true");
+      txt.appendChild(copy);
+      txt.style.setProperty("--tk-dur", `${Math.max(14, Math.round(run.scrollWidth / 45))}s`);
+    }
+  });
 }
 addEventListener("pagehide", () => saveSnap(fighters));
 
@@ -385,7 +468,7 @@ const pages = new Pages({
   refresh: refreshLobby,
   signIn,
   toast,
-  sfx: (k) => (k === "coin" ? sfx.heal() : sfx.ui()),
+  sfx: (k) => (k === "coin" ? sfx.coin(3) : sfx.ui()),
 });
 // Challenge a friend + DAILY (docs/SOCIAL.md): own DOM, three hooks below (forcedStart / matchOver / endShown)
 const social = new Social({
@@ -393,7 +476,7 @@ const social = new Social({
   start: () => { if (!bootDone) wantPlay = true; else void startMatch(); }, // before the island is built: start when ready
   client: () => client,
   toast,
-  sfx: (k) => { sfx.start(); if (k === "coin") sfx.heal(); else sfx.ui(); },
+  sfx: (k) => { sfx.start(); if (k === "coin") sfx.coin(3); else sfx.ui(); },
   signIn,
 });
 $("signin").addEventListener("click", () => void signIn());
@@ -502,6 +585,9 @@ async function startMatch() {
     start = localStart();
     start.cfg.training = true;
     inTraining = true;
+    // rivalry: the bot you eliminated last time remembers you (decided before the match, never from its inputs)
+    const r = rivalIdx(start.cfg);
+    if (r !== null) start.cfg.rival = r;
   }
   wantTraining = false;
   const forced = start !== null;
@@ -649,6 +735,7 @@ function onEvents(evs: SimEvent[]) {
         sfx.poof(distVol(v.pos.x, v.pos.z));
         hud.feedItem(nameOf(e.by), nameOf(e.who)!, e.weapon, { me: e.by === 0 || e.who === 0, bounty: f.bounty, kAcct: acctOf(e.by), vAcct: acctOf(e.who) });
         if (e.by === 0) {
+          rememberRival(st.fighters[e.who].name);
           sfx.kill(true);
           myKillTimes.push(time);
           const streak = myKillTimes.filter((t) => time - t < 5).length;
@@ -679,8 +766,17 @@ function onEvents(evs: SimEvent[]) {
         if (e.by === 0) iClaimedBounty = true;
         const val = current && current.bountyValue > 0 ? `THE ${fmt(current.bountyValue)} NOX BOUNTY` : "THE BOUNTY";
         hud.banner(`${nameOf(e.by)!.toUpperCase()} CLAIMED ${val} ON ${nameOf(e.who)!.toUpperCase()}!`, "gold");
-        hud.feedBounty(nameOf(e.by)!, nameOf(e.who)!, current?.bountyValue ?? 0, e.by === 0);
-        sfx.chest();
+        {
+          const bvNow = current?.bountyValue ?? 0;
+          // only a wallet-paid player really collects; guests and offline runs earn 0 (say so, never fake a payout)
+          const paid = !!current && current.playerPaid > 0 && !inTraining;
+          const line = e.by === 0
+            ? bvNow > 0 && paid ? `You took ${nameOf(e.who)}'s bounty: +${fmt(bvNow)} NOX` : `You took ${nameOf(e.who)}'s bounty${bvNow > 0 ? ` (${fmt(bvNow)} NOX — sign in and pay an entry to collect)` : ""}`
+            : `${nameOf(e.by)} took ${nameOf(e.who)}'s bounty${bvNow > 0 ? `: +${fmt(bvNow)} NOX` : ""}`;
+          hud.feedLine(line, e.by === 0);
+        }
+        if (e.by === 0) sfx.bounty();
+        else sfx.chest();
         break;
       }
       case "chest":
@@ -859,6 +955,7 @@ function drawLedger() {
     explorerTx: (h) => client?.explorerTx(h) ?? "#",
     explorerAccount: (a) => client?.explorerAccount(a) ?? "#",
     onSignIn: () => void signIn().then(() => drawLedger()),
+    onCoin: (i) => sfx.coin(i),
   });
 }
 
@@ -956,6 +1053,17 @@ const startTraining = () => {
   void startMatch();
 };
 $("training").addEventListener("click", startTraining);
+const openJudges = () => {
+  sfx.start();
+  sfx.ui();
+  pages.judges({
+    training: startTraining,
+    play: () => $("play").click(),
+    sampleBot: () => fighters.find((f) => f.status === "active" && isChainAcct(f.account))?.account ?? null,
+  });
+};
+$("nav-judges").addEventListener("click", openJudges);
+if (new URLSearchParams(location.search).has("judges")) setTimeout(openJudges, 400);
 $("again-training").addEventListener("click", () => {
   $("end").classList.add("hidden");
   startTraining();
@@ -982,12 +1090,43 @@ const menu = new PauseMenu({
   sfx: () => sfx.ui(),
 });
 menu.mount($("app"), $("hud"));
+const MUTE_KEY = "noxara.muted";
+function showMute(m: boolean) {
+  for (const b of [muteBtn, $("title-mute")]) {
+    b.classList.toggle("muted", m);
+    b.setAttribute("aria-pressed", String(m));
+  }
+}
 function toggleMute() {
   const m = sfx.toggleMute();
-  muteBtn.classList.toggle("muted", m);
-  muteBtn.setAttribute("aria-pressed", String(m));
+  showMute(m);
+  try {
+    localStorage.setItem(MUTE_KEY, m ? "1" : "0");
+  } catch {
+    /* storage blocked: mute lasts for this visit */
+  }
 }
+try {
+  if (localStorage.getItem(MUTE_KEY) === "1") sfx.toggleMute();
+} catch {
+  /* storage blocked */
+}
+showMute(sfx.muted);
 muteBtn.addEventListener("click", toggleMute);
+$("title-mute").addEventListener("click", (ev) => {
+  ev.stopPropagation();
+  toggleMute();
+});
+// the title theme: once per visit, on the first tap/click/key on the title screen (no autoplay)
+const themeOnce = () => {
+  if (phase !== "title") return;
+  removeEventListener("pointerdown", themeOnce, true);
+  removeEventListener("keydown", themeOnce, true);
+  sfx.start();
+  setTimeout(() => sfx.theme(), 60);
+};
+addEventListener("pointerdown", themeOnce, true);
+addEventListener("keydown", themeOnce, true);
 controls.onMute = toggleMute;
 
 // ------------------------------------------------------------------ frame loop
@@ -1058,7 +1197,12 @@ function frame(now: number) {
       if (n !== countShown) {
         if (countShown !== -1 || n > 0) {
           if (n > 0) { hud.popup(String(n), "count"); sfx.countTick(false); }
-          else if (countShown > 0) { hud.popup("GO!"); sfx.countTick(true); }
+          else if (countShown > 0) {
+            hud.popup("GO!");
+            sfx.countTick(true);
+            const r = match.cfg.rival;
+            if (r !== undefined && st.fighters[r]) setTimeout(() => hud.banner(`${st.fighters[r].name.toUpperCase()} REMEMBERS YOU`, "hot"), 900);
+          }
         }
         countShown = n;
       }
@@ -1249,7 +1393,10 @@ async function boot() {
   await nextFrame();
   portraits = await makePortraits(renderer);
   hud.portraits = portraits;
-  if (fighters.length) renderLobby($("roster"), fighters, portraits, prevSnap);
+  if (fighters.length) {
+    renderLobby($("roster"), fighters, portraits, prevSnap);
+    fillSparks($("roster"), sparks);
+  }
   rebuildPreview();
   await nextFrame();
   skinPortraits = await makePortraits(renderer, HUMAN_SKIN_IDS.map((id) => charFor(0, id)));

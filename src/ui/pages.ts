@@ -15,6 +15,7 @@ export interface PageDeps {
   sfx(kind: "ui" | "coin"): void;
 }
 
+import { renderJudges, type JudgeDeps } from "./judges";
 const isT3 = (c: GameClient | null): c is GameClientT3 => !!c && "signIn" in c;
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -434,6 +435,23 @@ export class Pages {
       });
     };
     this.show("ECONOMY", render);
+  }
+
+  // ---------------------------------------------------------------- FOR JUDGES — 60 SECONDS
+  judges(deps: Omit<JudgeDeps, "client" | "economy" | "near">) {
+    const render = () => {
+      $("page-title").textContent = "FOR JUDGES — 60 SECONDS";
+      $("page-tabs").textContent = "";
+      renderJudges($("page-body"), {
+        ...deps,
+        client: () => this.d.client(),
+        economy: () => this.economy(),
+        near: () => this.near(),
+        training: () => { this.close(); deps.training(); },
+        play: () => { this.close(); deps.play(); },
+      });
+    };
+    this.show("FOR JUDGES — 60 SECONDS", render);
   }
 
   // ---------------------------------------------------------------- HOW NEAR POWERS NOXARA

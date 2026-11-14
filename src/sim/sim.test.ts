@@ -447,3 +447,36 @@ describe("training island (cfg.training, r6)", () => {
     expect(replayRecord(demo.cfg, demo.inputs).hash).toBe(demo.hash);
   });
 });
+
+describe("rivalry (cfg.rival, offline only)", () => {
+  /** human played by the AI; measures how much of the human's damage taken comes from the rival bot */
+  const play = (seed: number, rival: number | undefined) => {
+    const cfg: MatchConfig = { seed, fighters: t1Roster(), training: true, ...(rival !== undefined ? { rival } : {}) };
+    const m = createMatch(cfg);
+    const rec = new Recorder();
+    let fromRival = 0;
+    let closeTicks = 0;
+    while (!m.state.over) {
+      const inp = botInput(m, 0);
+      rec.push(m.state.tick, 0, inp);
+      for (const e of m.step(new Map([[0, inp]]))) if (e.t === "hit" && e.who === 0 && e.by === 3) fromRival += e.dmg;
+      const me = m.state.fighters[0], r = m.state.fighters[3];
+      if (me.alive && r.alive && dist2(me.x, me.y, r.x, r.y) < (8 * FP) ** 2) closeTicks++;
+    }
+    return { cfg, rec, m, fromRival, closeTicks };
+  };
+
+  it("the rival bot seeks the human out: more time near them over 30 seeds", () => {
+    let base = 0, riv = 0;
+    for (let s = 1; s <= 30; s++) {
+      base += play(7100 + s, undefined).closeTicks;
+      riv += play(7100 + s, 3).closeTicks;
+    }
+    expect(riv).toBeGreaterThan(base);
+  }, 120_000);
+
+  it("a rival match is deterministic and the flag is part of the replay", () => {
+    const r = play(4343, 3);
+    expect(replayRecord(r.cfg, r.rec.inputs).hash).toBe(r.m.hash());
+  });
+});

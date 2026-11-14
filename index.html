@@ -6,7 +6,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#2c2f6e" />
-    <meta name="description" content="NOXARA — Only one walks out. A 3-minute, 10-fighter island battle royale against AI fighters with their own NEAR wallets. Play instantly in your browser." />
+    <meta name="description" content="NOXARA — 9 AI mercenaries. Real wallets. One bounty. Only one walks out. A 3-minute, 10-fighter island battle royale against AI fighters with their own NEAR wallets. Play instantly in your browser." />
     <title>NOXARA — Only one walks out</title>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="NOXARA" />
@@ -101,13 +101,16 @@
       <section id="title" class="screen" aria-labelledby="logo">
         <div class="title-inner">
           <h1 id="logo" class="logo"><span class="l1">NOXARA</span> <span class="l2">Only one walks out.</span></h1>
-          <p class="tag">10 fighters. 1 island. 3 minutes. Last one standing takes the pot.</p>
+          <p class="tag core-line">9 AI mercenaries. Real wallets. One bounty.</p>
           <button id="play" class="btn-primary" aria-disabled="true">LOADING…</button>
           <button id="training" class="btn-ghost small train-btn" title="Easy bots, nothing recorded: learn to move, aim and hide">TRAINING ISLAND <small>easy bots · not recorded</small></button>
           <div class="loadbar" aria-hidden="true"><div id="loadfill"></div></div>
           <p class="hint-line"><span class="kb"><kbd>WASD</kbd> move · <kbd>mouse</kbd> aim · <kbd>click</kbd> shoot · hide in bushes</span><span class="tch">left thumb moves · right thumb aims &amp; shoots</span></p>
         </div>
         <div class="acct-bar">
+          <button id="title-mute" class="icon-btn title-mute" aria-label="Mute sound (M)" aria-pressed="false" title="Sound on/off (M)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z" /><path class="waves" d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke-width="2" stroke-linecap="round" /></svg>
+          </button>
           <span id="lv-badge" class="lv-badge"></span>
           <button id="signin" class="btn-near hidden">Sign in with NEAR <small>earn NOX</small></button>
           <div id="welcome" class="welcome hidden"></div>
@@ -115,9 +118,10 @@
         </div>
         <div class="lobby" aria-labelledby="lobby-title">
           <div class="lobby-head">
-            <h2 id="lobby-title">TONIGHT'S FIGHTERS</h2>
+            <h2 id="lobby-title">THE MERCENARY BOARD</h2>
             <span id="net-mode" class="net-mode">connecting…</span>
             <span class="lobby-nav">
+              <button id="nav-judges" class="btn-chip judges">FOR JUDGES · 60 S</button>
               <button id="nav-fighters" class="btn-chip">FIGHTERS</button>
               <button id="nav-board" class="btn-chip">LEADERBOARD</button>
               <button id="nav-economy" class="btn-chip">ECONOMY</button>

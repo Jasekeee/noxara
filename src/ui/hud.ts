@@ -225,6 +225,17 @@ export class Hud {
     setTimeout(() => li.remove(), 7000);
   }
 
+  /** A gold kill-feed line with ready text (bounty claims). */
+  feedLine(text: string, me: boolean) {
+    const li = document.createElement("li");
+    li.className = "bounty" + (me ? " me" : "");
+    li.textContent = text;
+    this.feed.prepend(li);
+    while (this.feed.children.length > 5) this.feed.lastElementChild!.remove();
+    setTimeout(() => li.classList.add("out"), 6500);
+    setTimeout(() => li.remove(), 7000);
+  }
+
   // ---------------------------------------------------------------- events
   feedItem(killer: string | null, victim: string, weapon: WeaponKind | "storm", opts: { me?: boolean; bounty?: boolean; kAcct?: string; vAcct?: string }) {
     const li = document.createElement("li");

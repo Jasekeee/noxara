@@ -260,6 +260,7 @@ export function botInput(match: Match, idx: number): Input {
   const st = s.storm as StormX;
   const armed = me.weapon !== "popper";
   const hurtRecently = t - me.lastHurtTick <= 40;
+  const isRival = match.cfg.rival === idx;
 
   // ---- 1. Target selection (only enemies we can legitimately see, within vision).
   const vision = me.weapon === "sniper" ? P.vision + 3 * FP : P.vision;
@@ -302,6 +303,7 @@ export function botInput(match: Match, idx: number): Input {
     }
     // Weak + close targets first (third-party), keep the current one unless clearly worse.
     let score = d + f.hp * 40 - (f.idx === b.target ? 3 * FP : 0) - (f.bounty ? 2 * FP : 0);
+    if (isRival && f.human) score -= 6 * FP; // the rival wants YOU
     if (!lineClear(match, me.x, me.y, f.x, f.y) && me.weapon !== "grenade") score += 6 * FP;
     if (score < tgtScore) {
       tgtScore = score;
@@ -488,10 +490,19 @@ export function botInput(match: Match, idx: number): Input {
     }
   }
 
-  if (mode === "roam" && T && willFight && t >= GRACE && (me.personality === "aggressive" || (!P.camp && me.hp >= T.hp + 30))) {
+  if (mode === "roam" && T && willFight && t >= GRACE && (me.personality === "aggressive" || (!P.camp && me.hp >= T.hp + 30) || (isRival && s.fighters[T.idx].human))) {
     // chase visible targets beyond engage range
     mode = "chase";
     goalA = angleTo(T.x, T.y);
+  }
+
+  if (mode === "roam" && isRival && t >= GRACE && (armed || t >= 2 * GRACE)) {
+    // the rival hunts you: walk toward the human (storm avoidance above still wins)
+    const H = s.fighters.find((f) => f.human && f.alive);
+    if (H && dist2(me.x, me.y, H.x, H.y) > sq(5 * FP)) {
+      mode = "hunt";
+      goalA = angleTo(H.x, H.y);
+    }
   }
 
   if (mode === "roam" && P.camp && (armed || t > 600)) {

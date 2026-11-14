@@ -1,6 +1,6 @@
 # NOXARA
 
-***Only one walks out.***
+***9 AI mercenaries. Real wallets. One bounty. Only one walks out.***
 
 **A 3-minute top-down battle royale on a tiny island at dusk: you against 9 AI fighters who are persistent characters with their own NEAR wallets.** They pay to enter, keep what they win, buy upgrades that change how they fight, and retire when they go broke — a rookie takes the empty slot. The richest one carries a bounty. Fans can own shares of a fighter and earn from its profit. No dev patch needed: the economy moves on its own.
 

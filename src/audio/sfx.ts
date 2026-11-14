@@ -209,6 +209,38 @@ class Sfx {
     [523, 659, 784, 1047, 1319].forEach((f, i) => this.tone("square", f, f * 1.01, 0.12, 0.12, i * 0.07));
     this.tone("triangle", 1568, 2093, 0.5, 0.1, 0.38);
   }
+  /** You took the Mark's bounty: cash-register sting (two coin pings over a rising chord). */
+  bounty() {
+    if (!this.ok("bounty", 0.8)) return;
+    [659, 784, 988, 1319].forEach((f, i) => this.tone("square", f, f, 0.1, 0.11, i * 0.06));
+    this.tone("triangle", 1976, 2637, 0.18, 0.12, 0.26);
+    this.tone("triangle", 2637, 3136, 0.3, 0.1, 0.36);
+    this.tone("sine", 330, 330, 0.6, 0.14, 0.02);
+  }
+  /** One coin landing (money-flow animation); pitch rises with i so a run of coins climbs. */
+  coin(i = 0) {
+    if (!this.ok("coin", 0.05)) return;
+    const f = 1568 * Math.pow(1.06, Math.min(i, 12));
+    this.tone("square", f, f, 0.04, 0.06);
+    this.tone("triangle", f * 1.5, f * 1.5, 0.12, 0.07, 0.04);
+  }
+  /** Short title theme (~6 s, synthesized): a dusk motif in A minor over a pulsing bass. Once per session. */
+  private themed = false;
+  theme() {
+    if (this.themed || !this.ctx || this.muted) return;
+    this.themed = true;
+    const beat = 0.2;
+    const mel: [number, number][] = [[440, 1], [523, 1], [659, 2], [587, 1], [523, 1], [494, 2], [440, 1], [523, 1], [659, 1], [784, 1], [880, 4]];
+    let t = 0.05;
+    for (const [f, d] of mel) {
+      this.tone("triangle", f, f, d * beat * 0.95, 0.09, t, 0.01);
+      this.tone("square", f * 2, f * 2, 0.05, 0.025, t);
+      t += d * beat;
+    }
+    const bass = [110, 110, 98, 98, 87, 87, 110, 110];
+    bass.forEach((f, i) => this.tone("sine", f, f, beat * 1.8, 0.16, 0.05 + i * beat * 2, 0.01));
+    for (let i = 0; i < 16; i++) this.hiss(0.03, i % 4 === 0 ? 0.05 : 0.02, 9000, 6000, "highpass", 0.05 + i * beat);
+  }
   reload() {
     if (!this.ok("reload", 0.3)) return;
     this.tone("square", 300, 260, 0.04, 0.07);

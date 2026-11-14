@@ -17,6 +17,50 @@ export interface LedgerInput {
   explorerTx: (h: string) => string;
   explorerAccount: (a: string) => string;
   onSignIn?: () => void;
+  /** a coin lands during the money-flow animation (i = how many so far) */
+  onCoin?: (i: number) => void;
+}
+
+const reduced = () => typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/** Count a number up from 0 in an element (no animation with reduced motion). */
+function countUp(el: HTMLElement, to: number, ms: number, delay: number, onTick?: (i: number) => void) {
+  if (reduced() || to <= 0) {
+    el.textContent = fmt(to);
+    return;
+  }
+  el.textContent = "0";
+  const t0 = performance.now() + delay;
+  let ticks = 0;
+  const step = (now: number) => {
+    const k = Math.min(1, Math.max(0, (now - t0) / ms));
+    el.textContent = fmt(Math.round(to * (1 - Math.pow(1 - k, 3)) * 100) / 100);
+    const want = Math.floor(k * 6);
+    while (ticks < want) onTick?.(ticks++);
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+/** The money flow: the pot splits into the winner's share, the House treasury and the burn (amounts from the settle tx). */
+export function moneyFlow(pot: number, legs: { label: string; sub: string; amount: number; cls: string }[], onCoin?: (i: number) => void): HTMLElement {
+  const wrap = h("div", "mf");
+  wrap.setAttribute("role", "img");
+  wrap.setAttribute("aria-label", `Pot ${fmt(pot)} NOX: ` + legs.map((l) => `${l.label} ${fmt(l.amount)} NOX`).join(", "));
+  const potEl = h("b", "", fmt(pot));
+  wrap.appendChild(h("div", "mf-pot", undefined, icon(ICON.coin, "ic coin"), h("small", "", "POT"), potEl, h("span", "mf-u", "NOX")));
+  const row = h("div", "mf-legs");
+  let n = 0;
+  legs.forEach((l, i) => {
+    const amt = h("b", "", "0");
+    const pipe = h("div", "mf-pipe", undefined, h("i"), h("i"), h("i"));
+    pipe.style.setProperty("--d", `${0.25 + i * 0.35}s`);
+    const leg = h("div", `mf-leg ${l.cls}`, undefined, pipe, h("small", "", l.label), amt, h("span", "mf-sub", l.sub));
+    row.appendChild(leg);
+    countUp(amt, l.amount, 900, 250 + i * 350, () => onCoin?.(n++));
+  });
+  wrap.appendChild(row);
+  return wrap;
 }
 
 function link(text: string, href: string): HTMLAnchorElement {
@@ -113,8 +157,25 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     const house = s.payouts.find((p) => p.reason === "house" && p !== prize);
     const burn = s.payouts.find((p) => p.reason === "burn");
     if (house || burn) rows.appendChild(h("li", "small", `House ${fmt(house?.amount ?? 0)} · burned ${fmt(burn?.amount ?? 0)} NOX`));
+    // animated money flow above the rows: pot -> winner / House treasury / burn (only amounts the settle tx reported)
+    if (prize || house || burn) {
+      const legs: { label: string; sub: string; amount: number; cls: string }[] = [];
+      if (prize) legs.push({ label: prize.reason === "house" ? "THE HOUSE" : prize.name === "You" || w === 0 ? "YOU" : prize.name.toUpperCase(), sub: prize.reason === "house" ? "guest win → treasury" : "winner", amount: prize.amount, cls: "win" });
+      if (house) legs.push({ label: "HOUSE", sub: "treasury", amount: house.amount, cls: "house" });
+      if (burn) legs.push({ label: "BURNED", sub: "gone forever", amount: burn.amount, cls: "burn" });
+      const pot = Math.round(legs.reduce((a, l) => a + l.amount, 0) * 100) / 100;
+      el.appendChild(moneyFlow(pot, legs, L.onCoin));
+    }
     el.appendChild(rows);
-    if (s.verified) el.appendChild(h("div", "lg-verified", undefined, icon(ICON.check), h("span", "", "Verified — the server replayed every input and got the same result")));
+    if (s.verified) {
+      const v = s.tx ? h("a", "lg-verified", undefined, icon(ICON.check), h("span", "", "Verified on NEAR — the server replayed every input; open the settle tx")) : h("div", "lg-verified", undefined, icon(ICON.check), h("span", "", "Verified — the server replayed every input and got the same result"));
+      if (s.tx && v instanceof HTMLAnchorElement) {
+        v.href = L.explorerTx(s.tx);
+        v.target = "_blank";
+        v.rel = "noopener noreferrer";
+      }
+      el.appendChild(v);
+    }
   }
 
   if (L.guest) {

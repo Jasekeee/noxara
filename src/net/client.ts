@@ -755,6 +755,13 @@ class Client implements GameClientT3, GameClientEcon {
     return h.map((e) => histEvent(e));
   }
 
+  /** Raw history with amounts (newest first) for the lobby P&L sparklines. */
+  async rawHistory(account: string): Promise<{ match: string; kind: string; amount: number; detail: string }[]> {
+    if (this._mode !== "chain") return [];
+    const h = await viewCall<ChainHist[]>(this.rpcUrl, this.contract, "get_history", { account_id: account }).catch(() => [] as ChainHist[]);
+    return h.map((e) => ({ match: e.match_id, kind: e.kind, amount: toBounty(e.amount), detail: e.detail }));
+  }
+
   // ---------------------------------------------------------------- Economy v2 (docs/ECONOMY.md)
   /** Views never throw into the UI: a contract without the economy (MethodNotFound) or an RPC error gives neutral data. */
   private async econView<T>(method: string, args: Record<string, unknown>, neutral: T): Promise<T> {
