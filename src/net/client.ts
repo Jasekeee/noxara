@@ -997,10 +997,21 @@ export const createGameClient: CreateGameClient = async (opts = {}) => {
   const offline = (reason: OfflineReason, detail: string) => new Client("offline", o, reason, detail);
   if (typeof crypto?.subtle === "undefined" || !(await ed25519Supported())) return offline("no_webcrypto", "WebCrypto ed25519 unavailable");
   let h: { ok?: boolean; game?: string; simVersion?: string; guests?: string; reason?: string };
+  // The first load also downloads the island's models in parallel, so a cold connection to the server can
+  // take a few seconds: wait up to 8 s, then retry once before falling back to practice.
+  const health = async (ms: number) => {
+    const r = await fetch(`${o.relayer.replace(/\/$/, "")}/api/health`, { signal: AbortSignal.timeout(ms), cache: "no-store" });
+    return { r, h: (await r.json()) as typeof h };
+  };
   try {
-    const r = await fetch(`${o.relayer.replace(/\/$/, "")}/api/health`, { signal: AbortSignal.timeout(2500) });
-    h = (await r.json()) as typeof h;
-    if (!r.ok || !h.ok) return offline("relayer_unreachable", `health: HTTP ${r.status}`);
+    let res: Awaited<ReturnType<typeof health>>;
+    try {
+      res = await health(8000);
+    } catch {
+      res = await health(8000);
+    }
+    h = res.h;
+    if (!res.r.ok || !h.ok) return offline("relayer_unreachable", `health: HTTP ${res.r.status}`);
   } catch (e) {
     return offline("relayer_unreachable", e instanceof Error ? e.message : String(e));
   }
