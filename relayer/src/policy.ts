@@ -78,6 +78,27 @@ export function checkDelegate(d: DelegateLike, p: RelayPolicy, currentHeight?: b
   return { ok: true, methods, gas: d.actions.reduce((a, x) => a + BigInt((x.functionCall as { gas: bigint }).gas), 0n) };
 }
 
+/** The key every per-address limit uses: IPv4-mapped IPv6 ("::ffff:1.2.3.4") becomes the IPv4 address, and an
+ *  IPv6 address becomes its /64 prefix (one subscriber usually holds a whole /64, so per-address limits would
+ *  otherwise be trivial to rotate around). Anything unparseable is returned trimmed and lowercased. */
+export function normalizeIp(raw: string): string {
+  let ip = raw.trim().toLowerCase();
+  if (ip.startsWith("[") && ip.includes("]")) ip = ip.slice(1, ip.indexOf("]"));
+  const pct = ip.indexOf("%");
+  if (pct >= 0) ip = ip.slice(0, pct); // zone id
+  const mapped = /^[0:]*:ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(ip);
+  if (mapped) return mapped[1];
+  if (/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip) || !ip.includes(":")) return ip;
+  // expand "::" and keep the first four hextets
+  const [head, tail] = ip.includes("::") ? ip.split("::", 2) : [ip, undefined];
+  const h = head ? head.split(":") : [];
+  const t = tail !== undefined && tail !== "" ? tail.split(":") : [];
+  if (t.length && t[t.length - 1].includes(".")) t.splice(t.length - 1, 1, "0", "0"); // embedded IPv4 tail
+  const groups = tail === undefined ? h : [...h, ...Array(Math.max(0, 8 - h.length - t.length)).fill("0"), ...t];
+  if (groups.length !== 8 || !groups.every((g) => /^[0-9a-f]{1,4}$/.test(g))) return ip;
+  return `${groups.slice(0, 4).map((g) => g.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
+
 /** Fixed-window counter, in memory (one relayer instance). */
 export class RateLimiter {
   private hits = new Map<string, { n: number; reset: number }>();

@@ -201,8 +201,6 @@ class Client implements GameClientT3, GameClientEcon {
   /** views go through the match server's /api/view (cached, coalesced) unless it turned out to be missing */
   private viewProxy: boolean | undefined;
   private viewCache = new Map<string, { at: number; v: Promise<unknown> }>();
-  /** after a tx we sent ourselves (not through the server), ask the server to skip its cache for a while */
-  private freshUntil = 0;
 
   constructor(mode: "chain" | "offline", o: { relayer: string; rpc: string; contract: string }, reason?: OfflineReason, detail?: string) {
     this._mode = mode;
@@ -335,7 +333,7 @@ class Client implements GameClientT3, GameClientEcon {
       }
       throw new Error(msg);
     }
-    this.afterTx(true);
+    this.afterTx();
     return { value: r.json.value, tx: r.json.tx };
   }
 
@@ -353,7 +351,7 @@ class Client implements GameClientT3, GameClientEcon {
     });
     try {
       const out = await sendTransaction<T>(this.rpcUrl, this.contract, signed);
-      this.afterTx(false);
+      this.afterTx();
       return out;
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
@@ -398,10 +396,9 @@ class Client implements GameClientT3, GameClientEcon {
 
   private async viewOnce<T>(method: string, args: Record<string, unknown>): Promise<T> {
     if (this.viewProxy !== false && this.relayer) {
-      const fresh = Date.now() < this.freshUntil ? "&fresh=1" : "";
       let r: Response;
       try {
-        r = await fetch(`${this.relayer}/api/view?method=${encodeURIComponent(method)}&args=${encodeURIComponent(JSON.stringify(args))}${fresh}`, { signal: AbortSignal.timeout(8000), cache: "no-store" });
+        r = await fetch(`${this.relayer}/api/view?method=${encodeURIComponent(method)}&args=${encodeURIComponent(JSON.stringify(args))}`, { signal: AbortSignal.timeout(8000), cache: "no-store" });
       } catch {
         return viewCall<T>(this.rpcUrl, this.contract, method, args); // the server is unreachable: ask the RPC directly
       }
@@ -417,10 +414,10 @@ class Client implements GameClientT3, GameClientEcon {
     return viewCall<T>(this.rpcUrl, this.contract, method, args);
   }
 
-  /** Our own tx changed the chain: forget cached views (and, if the server didn't send it, bypass its cache). */
-  private afterTx(viaServer: boolean) {
+  /** Our own tx changed the chain: forget the views cached here. The server drops its live-state cache after
+   *  the relays/settles it sends; after a self-signed tx its short TTLs (2-10 s) catch up on their own. */
+  private afterTx() {
     this.viewCache.clear();
-    if (!viaServer) this.freshUntil = Date.now() + 8_000;
   }
 
   private async config(): Promise<ChainConfig> {
@@ -571,7 +568,7 @@ class Client implements GameClientT3, GameClientEcon {
         { match_id: matchId, record, publicKey: this.saved.key.publicKey, signature, simVersion: SIM_VERSION },
         60_000,
       );
-      this.afterTx(true);
+      this.afterTx();
       if (!r.ok) {
         this.lastError = `${r.json.code ?? r.status}: ${r.json.error ?? "settle refused"}`;
         // the server was updated to another simulation mid-session: stop committing matches it can't verify
@@ -961,7 +958,7 @@ class Client implements GameClientT3, GameClientEcon {
         receiverId: this.contract,
         actions: [{ type: "FunctionCall", params: { methodName: method, args: args as Record<string, unknown>, gas: "60000000000000", deposit: "1" } }],
       })) as unknown;
-      this.afterTx(false);
+      this.afterTx();
       const tx = (r as { transaction?: { hash?: string }; transaction_outcome?: { id?: string } } | null) ?? null;
       return tx?.transaction?.hash ?? tx?.transaction_outcome?.id ?? null;
     } catch (e) {

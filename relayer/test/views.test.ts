@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { ViewProxy, VIEW_TTL_MS, checkViewRequest, stableJson, type RpcPost } from "../src/views.ts";
 import { IpDailyCap } from "../src/budget.ts";
+import { normalizeIp, RateLimiter } from "../src/policy.ts";
 
 const okReply = (v: unknown) => ({ status: 200, json: { jsonrpc: "2.0", id: 1, result: { result: [...Buffer.from(JSON.stringify(v))], logs: [], block_height: 1 } } });
 
@@ -63,7 +64,8 @@ test("TTL cache, in-flight coalescing, `fresh` bypass and invalidation", async (
   assert.equal(calls.length, 1);
   now += VIEW_TTL_MS.get_economy + 1;
   assert.equal((await p.view("get_economy", {})).body.result, 2);
-  assert.equal((await p.view("get_economy", {}, true)).body.result, 3, "fresh bypasses the cache");
+  assert.equal((await p.view("get_economy", { fresh: 1 })).body.result, 3, "a new args object is its own key (no magic bypass flag)");
+  assert.equal((await p.view("get_economy", {})).body.cached, true, "the shared entry stays cached");
   // a relayed call drops live state, keeps histories; a settle drops everything
   await p.view("get_history", { account_id: "b" });
   const before = calls.length;
@@ -145,4 +147,37 @@ test("per-IP daily guest cap: persisted across restarts, resets at the UTC day, 
   assert.equal(after.take("203.0.113.7", t + 1000), false, "a restart doesn't reopen the cap");
   after.release("198.51.100.1", t + 1000);
   assert.equal(after.take("203.0.113.7", t + day), true, "the next UTC day reopens it");
+});
+
+test("a per-caller miss limit: one address cycling args can't drain the shared upstream budget", async () => {
+  let calls = 0;
+  const p = new ViewProxy({ contract: "g", rpcUrls: ["a"], upstreamPerMin: 1000, now: () => 5, post: async () => (calls++, okReply(7)) });
+  const perIp = new RateLimiter(3, 60_000);
+  const mine = () => perIp.take("203.0.113.9", 5);
+  for (let i = 0; i < 6; i++) await p.view("ft_balance_of", { account_id: `x${i}.near` }, mine);
+  assert.equal(calls, 3);
+  const r = await p.view("ft_balance_of", { account_id: "z.near" }, mine);
+  assert.equal(r.status, 429);
+  // cache hits never count against the caller
+  assert.equal((await p.view("ft_balance_of", { account_id: "x0.near" }, mine)).body.result, 7);
+  // another caller still gets through
+  assert.equal((await p.view("ft_balance_of", { account_id: "z.near" }, () => perIp.take("198.51.100.2", 5))).status, 200);
+});
+
+test("normalizeIp: IPv4-mapped IPv6 -> IPv4, IPv6 -> /64, IPv4 unchanged", () => {
+  assert.equal(normalizeIp("203.0.113.7"), "203.0.113.7");
+  assert.equal(normalizeIp("::ffff:203.0.113.7"), "203.0.113.7");
+  assert.equal(normalizeIp("::FFFF:203.0.113.7"), "203.0.113.7");
+  assert.equal(normalizeIp("0:0:0:0:0:ffff:203.0.113.7"), "203.0.113.7");
+  assert.equal(normalizeIp(" 203.0.113.7 "), "203.0.113.7");
+  const a = normalizeIp("2001:db8:abcd:12:1:2:3:4");
+  assert.equal(a, "2001:db8:abcd:12::/64");
+  assert.equal(normalizeIp("2001:0db8:abcd:0012:ffff:ffff:ffff:ffff"), a, "same /64, different interface id");
+  assert.equal(normalizeIp("2001:db8:abcd:12::1"), a);
+  assert.equal(normalizeIp("[2001:db8:abcd:12::99]"), a);
+  assert.equal(normalizeIp("2001:db8:abcd:12::1%eth0"), a);
+  assert.notEqual(normalizeIp("2001:db8:abcd:13::1"), a, "another /64 is another key");
+  assert.equal(normalizeIp("::1"), "0:0:0:0::/64");
+  assert.equal(normalizeIp("2001:db8::"), "2001:db8:0:0::/64");
+  assert.equal(normalizeIp("?"), "?");
 });

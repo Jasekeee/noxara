@@ -96,17 +96,27 @@ export class ViewProxy {
     for (const k of this.cache.keys()) if (VIEW_TTL_MS[k.slice(0, k.indexOf(":"))] <= 10_000) this.cache.delete(k);
   }
 
-  async view(method: unknown, args: unknown, fresh = false): Promise<ViewReply> {
+  /** `takeMiss` (per caller, e.g. per IP) is asked before a cache miss may start an upstream call, so one
+   *  client cycling args can't spend the shared RPC budget; refused misses get stale data or a 503. There is
+   *  deliberately no client-controlled cache bypass. */
+  async view(method: unknown, args: unknown, takeMiss: () => boolean = () => true): Promise<ViewReply> {
     const req = checkViewRequest(method, args);
     if (!req.ok) return { status: 400, body: { error: req.reason, code: "bad_view" } };
     const ttl = VIEW_TTL_MS[req.method];
     const hit = this.cache.get(req.key);
-    if (hit && !fresh && this.now() - hit.at < ttl) {
+    if (hit && this.now() - hit.at < ttl) {
       this.stats.hits++;
       return { status: hit.status, body: { ...hit.body, cached: true } };
     }
     let p = this.inflight.get(req.key);
     if (!p) {
+      if (!takeMiss()) {
+        if (hit && hit.status === 200) {
+          this.stats.stale++;
+          return { status: 200, body: { ...hit.body, stale: true, age_ms: this.now() - hit.at } };
+        }
+        return { status: 429, body: { error: "slow down", code: "rate_limited" } };
+      }
       p = this.fetchEntry(req.method, req.args, req.key).finally(() => this.inflight.delete(req.key));
       this.inflight.set(req.key, p);
     }

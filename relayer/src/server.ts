@@ -22,7 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Chain } from "./chain.ts";
 import { signatureOk, settleSignatureOk, KeyOwners } from "./verify.ts";
-import { checkDelegate, preflight, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
+import { checkDelegate, normalizeIp, preflight, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
 import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
 import { registerMessage } from "./protocol.ts";
 import { Subsidies } from "./subsidies.ts";
@@ -84,6 +84,8 @@ const guestGlobal = new RateLimiter(Number(env("GUEST_GLOBAL_PER_HOUR", "200")),
 const relayPerSender = new RateLimiter(Number(env("RELAY_PER_SENDER_PER_MIN", "20")), 60_000);
 const relayPerIp = new RateLimiter(Number(env("RELAY_PER_IP_PER_MIN", "60")), 60_000);
 const viewPerIp = new RateLimiter(Number(env("VIEW_PER_IP_PER_MIN", "180")), 60_000);
+// cache misses (upstream RPC calls) one address may cause: well below the global upstream budget
+const viewMissPerIp = new RateLimiter(Number(env("VIEW_MISS_PER_IP_PER_MIN", "40")), 60_000);
 const views = new ViewProxy({ contract: gameId, rpcUrls, upstreamPerMin: Number(env("VIEW_UPSTREAM_PER_MIN", "600")) });
 const registerPerIp = new RateLimiter(Number(env("REGISTER_PER_IP_PER_HOUR", "10")), 3_600_000);
 // storage subsidies for signed-in real accounts: once per account ever, at most N per hour (N x 0.02 NEAR)
@@ -136,12 +138,13 @@ async function readJson(req: http.IncomingMessage, max = 8_192): Promise<Record<
 // Only trust X-Forwarded-For behind a known proxy (TRUST_PROXY=1), and then take the right-most
 // entry (the one our proxy appended), never the client-controlled left-most one.
 const TRUST_PROXY = env("TRUST_PROXY", "0") === "1";
+// Every per-IP limit keys on normalizeIp(): IPv4-mapped IPv6 -> IPv4, IPv6 -> its /64.
 const ipOf = (req: http.IncomingMessage) => {
   if (TRUST_PROXY) {
     const parts = String(req.headers["x-forwarded-for"] ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
+    if (parts.length) return normalizeIp(parts[parts.length - 1]);
   }
-  return req.socket.remoteAddress ?? "?";
+  return normalizeIp(req.socket.remoteAddress ?? "?");
 };
 
 const panicMessage = (e: unknown) => {
@@ -221,8 +224,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.url === "/api/view" || req.url?.startsWith("/api/view?")) {
       if (req.method !== "GET" && req.method !== "POST") return send(res, 405, { error: "method not allowed" }, origin);
-      if (!viewPerIp.take(ipOf(req))) return send(res, 429, { error: "slow down", code: "rate_limited" }, origin);
-      let method: unknown, args: unknown, fresh: boolean;
+      const vip = ipOf(req);
+      if (!viewPerIp.take(vip)) return send(res, 429, { error: "slow down", code: "rate_limited" }, origin);
+      let method: unknown, args: unknown;
       if (req.method === "GET") {
         const q = new URL(req.url, "http://x").searchParams;
         method = q.get("method");
@@ -233,14 +237,12 @@ const server = http.createServer(async (req, res) => {
         } catch {
           return send(res, 400, { error: "args must be JSON", code: "bad_view" }, origin);
         }
-        fresh = q.get("fresh") === "1";
       } else {
         const body = await readJson(req, 2_048);
         method = body.method;
         args = body.args;
-        fresh = body.fresh === true;
       }
-      const r = await views.view(method, args, fresh);
+      const r = await views.view(method, args, () => viewMissPerIp.take(vip));
       return send(res, r.status, r.body, origin);
     }
     const rec = req.method === "GET" ? /^\/api\/match\/([0-9]{1,18})\/record$/.exec(req.url ?? "") : null;
