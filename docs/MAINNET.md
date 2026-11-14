@@ -25,6 +25,7 @@ the owner's literal reply **"yes, deploy"**.
 |---|---|
 | `noxara.near` | root **and** contract: game + Nox (NOX) token in one contract. Free as of 2026-11-13 (read-only `view_account` check; fallbacks `playnoxara.near`, `noxaragame.near` also free) |
 | `relay.noxara.near` | relayer (guest accounts, storage, relayed gas) **and** the only account allowed to `settle_match`. Trade-off: one hot key instead of two; whoever holds it can settle matches, but every settlement stores its input-log hash and anyone can re-verify it offline (`npm run verify-match`); the owner can rotate it with `set_server` |
+| `g-<hex>.noxara.near` | walletless guests. Created by the **contract** (`create_guest`, callable only by `relay.noxara.near`, which attaches the 0.003 NEAR funding) with one function-call key: receiver `noxara.near`, methods `start_match`/`sweep_match`, allowance 0.05 NEAR — fixed in the contract. The relayer runs with `GUEST_VIA_CONTRACT=1` and never holds a key of `noxara.near`. Old `g-*.relay.*` guests (testnet) stay guests too |
 | `<bot>.noxara.near` ×10 (9 fighters + house) | created by the contract with **no access keys**, funded with exactly their storage (100 bytes ≈ 0.001 NEAR) |
 
 The owner account (your wallet, e.g. `<you>.near`) is set as `owner` and as the fixed teardown beneficiary at `new()`.
@@ -32,12 +33,12 @@ The owner account (your wallet, e.g. `<you>.near`) is set as `owner` and as the 
 ## 2. Cost (preliminary — final numbers after the audit fixes and the testnet rehearsal)
 | Item | NEAR | Kind |
 |---|---|---|
-| Contract code storage (wasm 504,653 B incl. daily check-in/quests → 1 NEAR per 100 KB) | ≈ 5.05 | refundable (on teardown) |
+| Contract code storage (wasm 521,532 B incl. daily check-in/quests, login reward, `create_guest` → 1 NEAR per 100 KB) | ≈ 5.22 | refundable (on teardown) |
 | Contract state headroom (testnet: ≈ 56 KB after 46 matches) | ≈ 0.96 | refundable |
 | Relayer budget: guest accounts + storage deposits + relayed gas, hard-capped | 1.00 | mostly spent; unused part refundable |
 | 10 keyless bot/house accounts | 0.01 | spent (no key → can't be deleted) |
 | Deploy gas | ≤ 0.05 | spent |
-| **Total** | **≈ 7.1** (fund the root with ≥ 8) | ≈ 6.0 refundable / ≈ 1.1 spent |
+| **Total** | **≈ 7.3** (fund the root with ≥ 8) | ≈ 6.2 refundable / ≈ 1.1 spent |
 
 Ongoing: Railway smallest plan for match server + relayer (≈ $5/month [assumed — check price before launch]); Vercel static hosting free tier [assumed].
 
@@ -62,6 +63,8 @@ nothing recorded) while signed-in players keep playing with their own function-c
 6. Read-only checks: contract metadata (Nox/NOX), 10 accounts with 0 keys, one smoke match settled.
 7. Hosting (needs the same "yes"): Vercel (frontend) + Railway (relayer). You paste the relayer key into
    Railway's secret variables yourself; Claude gives the exact variable names.
+   The relayer's variables include `GUEST_VIA_CONTRACT=1` (guests become `g-<hex>.noxara.near`, made by the
+   contract); only `RELAYER_PRIVATE_KEY` (= `relay.noxara.near`) is secret — no key of `noxara.near` is hosted.
 
 ## 4. Teardown after 2026-11-25
 The season ends 2026-11-25 00:00 UTC. NOX is play-money. From the season end new matches are refused;

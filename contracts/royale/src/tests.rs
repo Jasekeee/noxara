@@ -552,7 +552,12 @@ fn storage_deposit_covers_a_player_and_a_pending_match() {
     let bot_id = 4 + "yarrow-1234.royale.br-7e8492.testnet".len();
     let entry = borsh::to_vec(&crate::SponsorEntry { sponsor: acc(who), shares: U128(u128::MAX), staked: U128(u128::MAX), earned: U128(u128::MAX), since_matches: 0 }).unwrap().len();
     // + the welcome record (a set entry) and the welcome credit (u128)
-    let extra = rec(1 + id_len, 8) + 3 * entry + rec(1 + id_len, 4 + 3 * bot_id) + rec(1 + id_len, 0) + rec(1 + id_len, 16);
+    // + the login row (registration day + last claim, daily.rs). The 3 legacy pool entries are kept in the
+    // budget only while the login row fits too: `sponsor` is refused in release builds (economy v2), so a new
+    // player can't create them; the list row stays as a stand-in for the v2 holdings list.
+    let legacy = 3 * entry;
+    let extra = rec(1 + id_len, 8) + rec(1 + id_len, 4 + 3 * bot_id) + rec(1 + id_len, 0) + rec(1 + id_len, 16) + rec(1 + id_len, 8);
+    let _ = legacy;
     let used = rec(1 + id_len, p) + rec(1 + 8, m) + rec(1 + id_len, 16) + extra;
     let cost = env::storage_byte_cost().as_yoctonear() * used as u128;
     println!("player {p} B + pending match {m} B + ft account + xp + 3 sponsorships ({extra} B): {used} bytes = {cost} yocto (deposit {})", STORAGE_DEPOSIT.as_yoctonear());
@@ -1118,7 +1123,9 @@ fn unregister_then_register_brings_no_new_credit_and_keeps_the_record_paid() {
         near_sdk::mock::MockAction::Transfer { deposit, .. } => Some(*deposit),
         _ => None,
     })).unwrap();
-    assert_eq!(refund.as_yoctonear(), STORAGE_DEPOSIT.as_yoctonear() - WELCOME_RECORD_NEAR.as_yoctonear(), "the record's storage stays paid");
+    // the welcome record and the login row (registration day, daily.rs) outlive the registration
+    let login_row = (40 + 5 + "erin.testnet".len() as u128 + 8) * env::storage_byte_cost().as_yoctonear();
+    assert_eq!(refund.as_yoctonear(), STORAGE_DEPOSIT.as_yoctonear() - WELCOME_RECORD_NEAR.as_yoctonear() - login_row, "the record's storage stays paid");
     register_as(&mut c, "erin.testnet", "erin.testnet", 2);
     assert_eq!(c.welcome_credit(&acc("erin.testnet")), 0);
     assert!(c.got_welcome(acc("erin.testnet")));
@@ -1729,6 +1736,9 @@ fn econ_params_match_the_simulator() {
     assert_eq!(n("ROOKIE_PROTECTED_MATCHES") as u32, daily::ROOKIE_PROTECTED_MATCHES);
     assert_eq!(n("CHECKIN_DAILY_CAP") as u32, daily::CHECKIN_DAILY_CAP);
     assert_eq!(n("QUEST_DAILY_CAP") as u32, daily::QUEST_DAILY_CAP);
+    assert_eq!(n("LOGIN_REWARD_MILLI") * ONE / 1000, daily::LOGIN_REWARD);
+    assert_eq!(n("LOGIN_DAILY_CAP") as u32, daily::LOGIN_DAILY_CAP);
+    assert_eq!(n("LOGIN_MIN_AGE_DAYS") as u32, daily::LOGIN_MIN_AGE_DAYS);
 }
 
 #[test]
@@ -2455,4 +2465,213 @@ fn audit6_no_idle_check_in_farming_and_zero_payouts_consume_nothing() {
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err(), "zero payout refused");
     let v = c.get_daily(acc(ALICE));
     assert!(!v.checked_in_today && v.streak == 1, "nothing consumed: {} {}", v.checked_in_today, v.streak);
+}
+
+// ============================================================ daily login reward (daily.rs) + contract-made guests
+
+fn register_on(c: &mut Contract, who: &str, d: u64) {
+    ctx_ts(RELAY, 120, day_ms(d), STORAGE_DEPOSIT);
+    c.storage_deposit(Some(acc(who)), None);
+    c.set_welcome_credit(&acc(who), 0);
+}
+
+fn login(c: &mut Contract, who: &str, d: u64) -> u128 {
+    ctx_ts(who, 130, day_ms(d), NearToken::from_yoctonear(0));
+    c.claim_login().0
+}
+
+#[test]
+fn login_reward_once_per_day_from_the_house_no_match_needed() {
+    let mut c = setup();
+    register_on(&mut c, "carol.test", 20_000);
+    assert_eq!(login(&mut c, "carol.test", 20_000), 0, "not on the day the account registered");
+    assert!(c.get_login(acc("carol.test")).why_not.unwrap().contains("day after"));
+    let (minted0, supply0, house0) = (c.total_minted, c.token.total_supply, bal(&c, c.house.as_str()));
+    let paid = login(&mut c, "carol.test", 20_001);
+    assert_eq!(paid, daily::LOGIN_REWARD * m_now(&c).min(10_000) / 10_000, "LOGIN_REWARD × min(m, 1)");
+    assert!(paid > 0 && paid < ENTRY_FEE);
+    assert_eq!(bal(&c, "carol.test"), paid, "no match was needed");
+    assert_eq!(bal(&c, c.house.as_str()), house0 - paid, "paid by the House");
+    assert_eq!((c.total_minted, c.token.total_supply), (minted0, supply0), "never minted");
+    assert_eq!(login(&mut c, "carol.test", 20_001), 0, "once per UTC day");
+    assert_eq!(bal(&c, "carol.test"), paid);
+    let v = c.get_login(acc("carol.test"));
+    assert!(v.claimed_today && !v.can_claim && v.claims_today == 1);
+    assert!(login(&mut c, "carol.test", 20_002) > 0, "a new UTC day pays again");
+    // the streak check-in is separate and still needs a wallet-paid match
+    ctx_ts("carol.test", 140, day_ms(20_002), NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err());
+    // accounts registered before the upgrade (no login row) can claim right away
+    assert!(daily::login_map().get(&acc(ALICE)).is_some(), "setup registered Alice on day 0");
+    daily::login_map().remove(&acc(ALICE));
+    assert!(login(&mut c, ALICE, 20_002) > 0);
+    assert_supply_seen(&c, &mut [acc("carol.test")].into_iter().collect());
+}
+
+#[test]
+fn login_reward_is_zero_for_guests_game_wallets_and_strangers() {
+    let mut c = setup();
+    let house0 = bal(&c, c.house.as_str());
+    assert_eq!(login(&mut c, GUEST, 20_001), 0, "relayer-made guest");
+    let new_guest = "g-0123abcd.royale.test";
+    register_on(&mut c, new_guest, 20_000);
+    assert!(c.get_player(acc(new_guest)).unwrap().guest, "a contract-made guest registers as a guest");
+    assert_eq!(login(&mut c, new_guest, 20_001), 0, "contract-made guest");
+    let bot = slot_acc(&c, 0);
+    register_on(&mut c, &bot, 20_000);
+    assert_eq!(login(&mut c, &bot, 20_001), 0, "a bot");
+    assert_eq!(login(&mut c, "stranger.test", 20_001), 0, "not registered");
+    assert_eq!(bal(&c, c.house.as_str()), house0, "nothing paid");
+    assert_eq!(c.get_login(acc(GUEST)).claims_today, 0, "nothing counted against the cap");
+}
+
+#[test]
+fn login_reward_global_cap_then_zero_without_consuming_anything() {
+    let mut c = setup();
+    let who: Vec<String> = (0..=daily::LOGIN_DAILY_CAP).map(|i| format!("farm{i}.test")).collect();
+    for w in &who {
+        register_on(&mut c, w, 20_000);
+    }
+    let mut total = 0;
+    for w in &who[..daily::LOGIN_DAILY_CAP as usize] {
+        let p = login(&mut c, w, 20_001);
+        assert!(p > 0);
+        total += p;
+    }
+    assert!(total <= daily::LOGIN_DAILY_CAP as u128 * daily::LOGIN_REWARD, "a day's exposure is bounded by the cap");
+    let last = who.last().unwrap();
+    let house = bal(&c, c.house.as_str());
+    assert_eq!(login(&mut c, last, 20_001), 0, "cap reached");
+    assert_eq!(bal(&c, c.house.as_str()), house);
+    let v = c.get_login(acc(last));
+    assert!(!v.claimed_today && v.why_not.unwrap().contains("all claimed"), "the refused claim consumed nothing");
+    assert!(login(&mut c, last, 20_002) > 0, "the next day it pays");
+}
+
+#[test]
+fn login_reward_respects_the_house_floor() {
+    let mut c = setup();
+    register_on(&mut c, "carol.test", 20_000);
+    let house = c.house.clone();
+    let drain = c.balance(&house) - HOUSE_FLOOR;
+    c.move_tokens(&house, &acc(BOB), drain, "test");
+    assert_eq!(login(&mut c, "carol.test", 20_001), 0, "the House sits on its floor");
+    assert_eq!(c.balance(&house), HOUSE_FLOOR);
+    let v = c.get_login(acc("carol.test"));
+    assert!(!v.claimed_today && v.claims_today == 0, "nothing consumed");
+}
+
+#[test]
+fn login_row_survives_unregister_and_its_storage_is_kept_from_the_refund() {
+    let mut c = setup();
+    register_on(&mut c, "carol.test", 20_000);
+    assert!(login(&mut c, "carol.test", 20_001) > 0);
+    ctx_ts("carol.test", 150, day_ms(20_001), NearToken::from_yoctonear(1));
+    let kept = c.daily_row_near(&acc("carol.test"));
+    assert_eq!(kept, (40 + 5 + "carol.test".len() as u128 + 8) * env::storage_byte_cost().as_yoctonear(), "only the login row");
+    assert!(c.storage_unregister(Some(true)));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().rev().find_map(|r| r.actions.iter().find_map(|a| match a {
+        near_sdk::mock::MockAction::Transfer { deposit, .. } => Some(deposit.as_yoctonear()),
+        _ => None,
+    }));
+    assert_eq!(refund, Some(STORAGE_DEPOSIT.as_yoctonear() - WELCOME_RECORD_NEAR.as_yoctonear() - kept), "the row's bytes stay paid");
+    register_on(&mut c, "carol.test", 20_001);
+    assert_eq!(login(&mut c, "carol.test", 20_001), 0, "re-registering can't claim the same day twice");
+    assert_eq!(daily::login_map().get(&acc("carol.test")).unwrap().since_day, 20_000, "registration day kept");
+    assert!(login(&mut c, "carol.test", 20_002) > 0);
+}
+
+#[test]
+fn both_guest_forms_are_guests_and_nothing_else_is() {
+    let c = setup();
+    for g in ["g-ab12.relay.test", "g-0123456789.royale.test"] {
+        assert!(c.is_guest_account(acc(g)), "{g}");
+    }
+    for n in ["g-ab.x.relay.test", "g-ab.x.royale.test", "gab.royale.test", "house.royale.test", "brindle.royale.test", "g-ab.other.test", "alice.test", "royale.test", "g.royale.test"] {
+        assert!(!c.is_guest_account(acc(n)), "{n}");
+    }
+}
+
+#[test]
+fn contract_made_guests_play_free_and_earn_nothing() {
+    let mut c = setup();
+    let g = "g-00aa11bb22.royale.test";
+    register_on(&mut c, g, 0);
+    assert_eq!(c.welcome_credit(&acc(g)), 0, "no welcome credit for guests");
+    let s = start(&mut c, g, 300);
+    assert!(s.guest && s.player_paid.0 == 0);
+    let house0 = bal(&c, c.house.as_str());
+    let r = settle(&mut c, s.match_id, 0, None, 310);
+    let _ = r;
+    assert_eq!(bal(&c, g), 0, "a guest win pays the House, not the guest");
+    assert!(bal(&c, c.house.as_str()) > house0);
+    ctx(g, 320, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.claim_welcome(); })).is_err());
+    ctx(g, 321, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.check_in(); })).is_err());
+    let bot = slot_acc(&c, 0);
+    ctx(g, 322, NearToken::from_yoctonear(0));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { c.buy_ipo(acc(&bot), 10); })).is_err(), "no shares");
+}
+
+fn pk() -> near_sdk::PublicKey {
+    "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp".parse().unwrap()
+}
+
+#[test]
+fn create_guest_is_relayer_only_and_validates_everything() {
+    let mut c = setup();
+    let fund = NearToken::from_millinear(3);
+    for who in [ALICE, "owner.test", SERVER, ME] {
+        ctx(who, 200, fund);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.create_guest("0123abcd".into(), pk()))).is_err(), "{who}");
+    }
+    for bad in ["", "0123abc", "0123ABCD", "0123abcg", "01-3abcd", "0123.abcd", "0123abcd0123abcd0123abcd0123abcd0", "g-0123abcd"] {
+        ctx(RELAY, 201, fund);
+        assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.create_guest(bad.into(), pk()))).is_err(), "{bad:?}");
+    }
+    ctx(RELAY, 202, NearToken::from_millinear(11));
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.create_guest("0123abcd".into(), pk()))).is_err(), "too much funding");
+    let secp: near_sdk::PublicKey = "secp256k1:qMoRgcoXai4mBPsdbHi1wfyxF9TdbPCF4qSDQTRP3TfescSRoUdSx6nmeQoN3aiwGzwMyGXAb1gUjBTv5AY8DXj".parse().unwrap();
+    ctx(RELAY, 203, fund);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| c.create_guest("0123abcd".into(), secp.clone()))).is_err(), "ed25519 only");
+    // the happy path: create + key + transfer, then the callback
+    ctx(RELAY, 204, fund);
+    c.create_guest("0123abcd".into(), pk());
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let r = receipts.iter().find(|r| r.receiver_id == acc("g-0123abcd.royale.test")).expect("creates g-<id>.<contract>");
+    assert!(r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::CreateAccount { .. })));
+    assert!(r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { deposit, .. } if *deposit == fund)));
+    let key = r.actions.iter().find_map(|a| match a {
+        near_sdk::mock::MockAction::AddKeyWithFunctionCall { public_key, allowance, receiver_id, method_names, .. } => Some((public_key.to_string(), *allowance, receiver_id.clone(), method_names.clone())),
+        _ => None,
+    });
+    let (k, allowance, receiver, methods) = key.expect("a function-call key");
+    assert_eq!(k, "ed25519:6E8sCci9badyRkXb3JoRpBj5p8C6Tw41ELDZoiihKEtp");
+    assert_eq!(allowance, Some(GUEST_KEY_ALLOWANCE));
+    assert_eq!(receiver, acc(ME), "the key may only call this contract");
+    assert_eq!(methods.iter().map(|m| m.as_str()).collect::<Vec<_>>(), vec!["start_match", "sweep_match"]);
+    assert!(!r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::AddKeyWithFullAccess { .. })), "never a full-access key");
+    assert!(receipts.iter().any(|r| r.receiver_id == acc(ME) && r.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::FunctionCallWeight { method_name, .. } if method_name == b"on_guest_created"))), "callback");
+    assert!(c.is_guest_account(acc("g-0123abcd.royale.test")));
+}
+
+#[test]
+fn a_failed_guest_creation_refunds_the_relayer() {
+    let mut c = setup();
+    let fund = NearToken::from_millinear(3);
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ME)).account_balance(NearToken::from_near(50));
+    near_sdk::testing_env!(b.build(), near_sdk::test_vm_config(), near_sdk::RuntimeFeesConfig::test(), Default::default(), vec![near_sdk::PromiseResult::Failed]);
+    assert!(!c.on_guest_created(acc("g-0123abcd.royale.test"), acc(RELAY), U128(fund.as_yoctonear())));
+    let receipts = near_sdk::test_utils::get_created_receipts();
+    let refund = receipts.iter().find(|r| r.receiver_id == acc(RELAY)).expect("refund to the relayer");
+    assert!(refund.actions.iter().any(|a| matches!(a, near_sdk::mock::MockAction::Transfer { deposit, .. } if *deposit == fund)));
+    // success: no refund
+    let mut b = VMContextBuilder::new();
+    b.current_account_id(acc(ME)).predecessor_account_id(acc(ME)).account_balance(NearToken::from_near(50));
+    near_sdk::testing_env!(b.build(), near_sdk::test_vm_config(), near_sdk::RuntimeFeesConfig::test(), Default::default(), vec![near_sdk::PromiseResult::Successful(vec![])]);
+    assert!(c.on_guest_created(acc("g-0123abcd.royale.test"), acc(RELAY), U128(fund.as_yoctonear())));
+    assert!(near_sdk::test_utils::get_created_receipts().iter().all(|r| r.receiver_id != acc(RELAY)));
 }

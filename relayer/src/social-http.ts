@@ -22,6 +22,8 @@ export type SocialConfig = {
   gameUrl?: string;
   verifyOwner: (account: string, publicKey: string) => Promise<boolean>;
   guestParent?: string;
+  /** the game contract: its `g-*` sub-accounts (made by `create_guest`) are guests too */
+  gameContract?: string;
   realtimeFactor?: number;
   now?: () => number;
   secret?: string;
@@ -38,7 +40,7 @@ export function createSocial(c: SocialConfig) {
     defaultGameUrl: c.gameUrl,
     now: c.now,
   });
-  const daily = new Daily({ dir: path.join(c.dataDir, "daily"), tokens, realtimeFactor, verifyOwner: c.verifyOwner, guestParent: c.guestParent, now: c.now });
+  const daily = new Daily({ dir: path.join(c.dataDir, "daily"), tokens, realtimeFactor, verifyOwner: c.verifyOwner, guestParent: c.guestParent, gameContract: c.gameContract, now: c.now });
 
   async function body(req: http.IncomingMessage, max = 512 * 1024): Promise<Record<string, unknown>> {
     let size = 0;

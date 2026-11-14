@@ -120,6 +120,20 @@ export class Chain {
     return this.near.view(this.cfg.gameContractId, method, args, { finality: "optimistic" }) as Promise<T>;
   }
 
+  /** Mainnet path (GUEST_VIA_CONTRACT=1): ONE transaction to the game contract: `create_guest` makes
+   *  `g-<id>.<contract>` with the browser's function-call key (the contract fixes its methods and allowance), then
+   *  `storage_deposit` prepays its registration. The relayer never needs a key of the contract account. */
+  async createGuestViaContract(id: string, publicKey: string, funding: string, storage: string) {
+    const accountId = `g-${id}.${this.cfg.gameContractId}`;
+    const o = await this.near
+      .transaction(this.cfg.relayerId)
+      .functionCall(this.cfg.gameContractId, "create_guest", { id, public_key: publicKey }, { gas: "40 Tgas", attachedDeposit: funding })
+      .functionCall(this.cfg.gameContractId, "storage_deposit", { account_id: accountId }, { gas: "15 Tgas", attachedDeposit: storage })
+      .send({ waitUntil: "EXECUTED_OPTIMISTIC" });
+    const created = gameEvents(o, this.cfg.gameContractId).some((e) => e.event === "guest_created" && e.data.account === accountId);
+    return { accountId, tx: o.transaction.hash as string, created, failure: gameFailure(o), burnt: tokensBurnt(o as never) };
+  }
+
   async createGuest(accountId: string, publicKey: string, methods: readonly string[], funding: string, allowance: string) {
     const o = await this.near
       .transaction(this.cfg.relayerId)

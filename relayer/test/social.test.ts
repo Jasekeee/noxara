@@ -274,6 +274,13 @@ test("daily: a real account needs a valid signature + key owner; guest accounts 
   assert.equal(g.kind, "guest");
   assert.equal(g.earns, 0);
   assert.equal(g.name, "Guest abcd");
+  // a contract-made guest (g-*.<game contract>, mainnet create_guest) is a guest too
+  const s3 = mk({ verifyOwner: async () => true, gameContract: "game.t" });
+  const t3 = todayToken(s3);
+  clock += ticks * 50;
+  const g3 = (await s3.daily.submit({ record: rec, token: t3, simVersion: SIM_VERSION, account: "g-00aa11bb22.game.t", publicKey: gk.pk, signature: gk.sign(dailyMessage(day, inputLogHash(rec.inputs))) }, "3.3.3.5")).json as { kind: string; earns: number };
+  assert.equal(g3.kind, "guest");
+  assert.equal(g3.earns, 0);
   const rows = (s.daily.leaderboard(null).json as { rows: { kind: string; account: string | null }[] }).rows;
   assert.deepEqual(rows.map((r) => r.kind).sort(), ["real", "unverified", "unverified"]);
   assert.equal(rows.filter((r) => r.account).length, 1);

@@ -1,11 +1,19 @@
 {
   "shareReturns": {
-    "medianSingleIpo": -0.5737389124563789,
-    "top10pctSingleIpo": 0.8737150162480067,
-    "shareOfIposInProfit": 0.22681247468610774,
-    "portfolio": -0.14342923105247163
+    "medianSingleIpo": -0.5840058448399187,
+    "top10pctSingleIpo": 0.9283096608269529,
+    "shareOfIposInProfit": 0.2268890046899427,
+    "portfolio": -0.14713722391967987
   },
-  "generatedAt": "2026-11-14T00:15:46.137Z",
+  "login": {
+    "realPerDay": 6.252134079980078,
+    "sybilPerDay": 2.105273423697988,
+    "worstDay": 20,
+    "bound": 20,
+    "sybil": true,
+    "loginP": 0.5
+  },
+  "generatedAt": "2026-11-14T06:42:15.225Z",
   "matches": 10000,
   "runs": 20,
   "seed": 1,
@@ -87,7 +95,10 @@
     ],
     "ROOKIE_PROTECTED_MATCHES": 10,
     "CHECKIN_DAILY_CAP": 100,
-    "QUEST_DAILY_CAP": 300
+    "QUEST_DAILY_CAP": 300,
+    "LOGIN_REWARD_MILLI": 500,
+    "LOGIN_DAILY_CAP": 40,
+    "LOGIN_MIN_AGE_DAYS": 1
   },
   "assumptions": {
     "HUMAN_WIN": 0.08,
@@ -98,7 +109,9 @@
     "MATCHES_PER_DAY": 300,
     "IPO_BUY_P": 0.6,
     "TRADE_P": 0.05,
-    "COSMETIC_P": 0.02
+    "COSMETIC_P": 0.02,
+    "LOGIN_P": 0.5,
+    "SYBIL": true
   },
   "checks": [
     {
@@ -119,17 +132,17 @@
     {
       "name": "house median within target ±30%",
       "ok": true,
-      "value": "median 714 vs target 1000"
+      "value": "median 713 vs target 1000"
     },
     {
       "name": "reward multiplier within 0–1.5, smooth",
       "ok": true,
-      "value": "range 0.13–0.94, max step 0.036"
+      "value": "range 0.11–0.84, max step 0.033"
     },
     {
       "name": "median bot life 30–150 matches",
       "ok": true,
-      "value": "median 56 (n=18561)"
+      "value": "median 56 (n=18417)"
     },
     {
       "name": "≥25% of the top-3 at 20% fall out by 40%",
@@ -147,9 +160,14 @@
       "value": "0.242"
     },
     {
+      "name": "daily login reward bounded by its cap (sybil farm takes the rest of the cap every day)",
+      "ok": true,
+      "value": "worst day 20.00 NOX ≤ cap 20 NOX (2.0% of target); mean real 6.25 + sybil 2.11 NOX/day"
+    },
+    {
       "name": "share portfolio ROI (every IPO bought) −30%…+40%",
       "ok": true,
-      "value": "-14% (median single IPO -57%: most rookies fail, a few pay off)"
+      "value": "-15% (median single IPO -58%: most rookies fail, a few pay off)"
     }
   ],
   "pass": true

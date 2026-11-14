@@ -16,6 +16,17 @@ pub const CHECKIN_MIN_LIFETIME_PAID: u32 = 3;
 /// quests: (id, goal, reward NOX × m)
 pub const QUESTS: [(&str, u32, u128); 3] = [("play 3 matches", 3, ONE), ("finish in the top 3", 1, ONE), ("take down the bounty carrier", 1, 2 * ONE)];
 pub const QUEST_DAILY_CAP: u32 = 300;
+/// Daily LOGIN reward (owner spec 2026-11-14): claimed on entering the game, no match needed. Paid by the House
+/// (never minted) × min(m, 1), never below the floor, real accounts only, once per account per UTC day.
+/// Sybil bound: a global daily cap (worst case LOGIN_DAILY_CAP × LOGIN_REWARD = 20 NOX a day, 2% of the
+/// House target, and m shrinks it as the House empties) and an account must be registered on an EARLIER UTC
+/// day (a fresh farm account waits a day; its 0.02 NEAR registration stays locked meanwhile). The bigger,
+/// streak-growing `check_in` stays reserved for days with a match paid from the player's own NOX.
+pub const LOGIN_REWARD: u128 = ONE / 2;
+pub const LOGIN_DAILY_CAP: u32 = 40;
+/// claimable from the UTC day `registered day + LOGIN_MIN_AGE_DAYS` (≥ 1: re-registering can't re-claim a day)
+pub const LOGIN_MIN_AGE_DAYS: u32 = 1;
+const LOGIN_COUNT_KEY: &[u8] = b"login_day_count";
 const DAY_MS: u64 = 86_400_000;
 const CHECKIN_COUNT_KEY: &[u8] = b"checkin_day_count";
 const QUEST_COUNT_KEY: &[u8] = b"quest_day_count";
@@ -34,6 +45,29 @@ pub struct PlayerDaily {
     pub claimed: u8,
     /// wallet-paid matches ever
     pub lifetime_paid: u32,
+}
+
+/// Per-account login record. Like `PlayerDaily` it outlives `storage_unregister` (its bytes are kept from the
+/// refund), so leaving and re-registering neither resets the registration day nor today's claim.
+#[near(serializers = [borsh, json])]
+#[derive(Clone, Debug, Default)]
+pub struct LoginRow {
+    /// UTC day the account first registered (0 = registered before the login reward existed)
+    pub since_day: u32,
+    /// UTC day of the last claim (0 = never)
+    pub claimed_day: u32,
+}
+
+#[near(serializers = [json])]
+pub struct LoginView {
+    pub day: u32,
+    pub claimed_today: bool,
+    pub can_claim: bool,
+    pub why_not: Option<String>,
+    /// what a claim pays right now (× min(m, 1), never below the House floor)
+    pub reward: U128,
+    pub claims_today: u32,
+    pub daily_cap: u32,
 }
 
 #[near(serializers = [json])]
@@ -60,6 +94,9 @@ pub struct DailyView {
 
 fn map() -> StoreMap<AccountId, PlayerDaily> {
     StoreMap::new(Key::PlayerDaily)
+}
+pub(crate) fn login_map() -> StoreMap<AccountId, LoginRow> {
+    StoreMap::new(Key::LoginRow)
 }
 pub fn today() -> u32 {
     (env::block_timestamp_ms() / DAY_MS) as u32
@@ -119,6 +156,42 @@ impl Contract {
         e.season_rewards += amount;
         self.save_econ(&e);
     }
+    /// storage_deposit hook: remember the first registration day of a real account (kept on re-registering)
+    pub(crate) fn note_registration(&mut self, a: &AccountId) {
+        let mut m = login_map();
+        if m.get(a).is_none() {
+            m.insert(a.clone(), LoginRow { since_day: today(), claimed_day: 0 });
+            m.flush();
+        }
+    }
+    /// What `claim_login` would pay `a` now, or why it pays nothing.
+    fn login_quote(&self, a: &AccountId) -> Result<u128, String> {
+        let day = today();
+        if self.load_player(a).is_none() {
+            return Err("sign in with a NEAR account".into());
+        }
+        if self.is_guest(a) {
+            return Err("guests earn no NOX: sign in with a NEAR account".into());
+        }
+        if self.is_game_wallet_pub(a) {
+            return Err("game wallets earn no login reward".into());
+        }
+        let row = login_map().get(a).cloned().unwrap_or_default();
+        if row.claimed_day == day {
+            return Err("already claimed today".into());
+        }
+        if day < row.since_day.saturating_add(LOGIN_MIN_AGE_DAYS) {
+            return Err("the login reward starts the day after you register".into());
+        }
+        if day_count(LOGIN_COUNT_KEY, day) >= LOGIN_DAILY_CAP {
+            return Err("today's login rewards are all claimed: come back tomorrow".into());
+        }
+        let paid = self.daily_amount(LOGIN_REWARD);
+        if paid == 0 {
+            return Err("the House can't pay rewards right now".into());
+        }
+        Ok(paid)
+    }
     fn reward_for_streak(streak: u32) -> u128 {
         CHECKIN_REWARDS[(streak.max(1) as usize - 1).min(CHECKIN_REWARDS.len() - 1)]
     }
@@ -165,6 +238,45 @@ impl Contract {
         self.house_reward(&me, paid, "daily quest");
         event("quest", &near_sdk::serde_json::json!({ "player": me, "quest": quest, "paid": U128(paid) }));
         U128(paid)
+    }
+
+    /// Daily login reward: call once when a signed-in real account enters the game. Pays LOGIN_REWARD × min(m, 1)
+    /// from the House (never minted, never below its floor), once per account per UTC day, at most
+    /// LOGIN_DAILY_CAP claims a day in total. Returns 0 and changes nothing when there is nothing to pay
+    /// (guest, game wallet, already claimed, too new, cap reached, House at its floor): the reason is logged.
+    pub fn claim_login(&mut self) -> U128 {
+        let me = env::predecessor_account_id();
+        let paid = match self.login_quote(&me) {
+            Ok(p) => p,
+            Err(why) => {
+                env::log_str(&format!("no login reward: {why}"));
+                return U128(0);
+            }
+        };
+        let day = today();
+        bump_day_count(LOGIN_COUNT_KEY, day, LOGIN_DAILY_CAP, "login reward");
+        let mut m = login_map();
+        let mut row = m.get(&me).cloned().unwrap_or_default();
+        row.claimed_day = day;
+        m.insert(me.clone(), row);
+        m.flush();
+        self.house_reward(&me, paid, "daily login");
+        event("login_reward", &near_sdk::serde_json::json!({ "player": me, "paid": U128(paid), "today": day_count(LOGIN_COUNT_KEY, day) }));
+        U128(paid)
+    }
+
+    pub fn get_login(&self, account_id: AccountId) -> LoginView {
+        let day = today();
+        let q = self.login_quote(&account_id);
+        LoginView {
+            day,
+            claimed_today: login_map().get(&account_id).is_some_and(|r| r.claimed_day == day),
+            can_claim: q.is_ok(),
+            reward: U128(q.as_ref().copied().unwrap_or(0)),
+            why_not: q.err(),
+            claims_today: day_count(LOGIN_COUNT_KEY, day),
+            daily_cap: LOGIN_DAILY_CAP,
+        }
     }
 
     pub fn get_daily(&self, account_id: AccountId) -> DailyView {

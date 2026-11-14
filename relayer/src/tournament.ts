@@ -11,7 +11,7 @@ import path from "node:path";
 import { SIM_VERSION, type MatchConfig, type MatchRecord } from "../../src/sim/types.ts";
 import { t1Roster } from "../../src/sim/roster.ts";
 import { checkInputs, checkSimVersion, inputLogHash } from "./settle.ts";
-import { RateLimiter } from "./policy.ts";
+import { isGuestAccount, RateLimiter } from "./policy.ts";
 import { settleSignatureOk } from "./verify.ts";
 import { analyze, cleanName, compareScores, err, readJson, tooFast, writeJson, type Analysis, type Reply, type Score, type Tokens } from "./social.ts";
 
@@ -58,6 +58,7 @@ export type DailyOpts = {
   verifyOwner: (account: string, publicKey: string) => Promise<boolean>;
   /** the relayer account that parents guest accounts (g-xxx.<parent>) */
   guestParent?: string;
+  gameContract?: string;
   now?: () => number;
   submitPerIpPerHour?: number;
 };
@@ -137,7 +138,7 @@ export class Daily {
     }
 
     // ---- who is it? Only an ed25519 signature by a key of the claimed NEAR account counts as a real
-    // account; guest accounts (g-*.<relayer>) verify the same way but never earn.
+    // account; guest accounts (g-*.<relayer>, or g-*.<contract> from create_guest) verify the same way but never earn.
     const guestId = String(body.guestId ?? "");
     const account = typeof body.account === "string" ? body.account : "";
     const logHash = inputLogHash(record.inputs);
@@ -153,7 +154,7 @@ export class Daily {
       } catch {
         ok = false;
       }
-      const isGuestAcct = !!this.o.guestParent && account.endsWith(`.${this.o.guestParent}`) && account.startsWith("g-");
+      const isGuestAcct = isGuestAccount(account, this.o.guestParent, this.o.gameContract);
       if (ok && isGuestAcct) {
         kind = "guest";
         key = `acct:${account}`;

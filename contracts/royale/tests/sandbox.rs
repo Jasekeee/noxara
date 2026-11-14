@@ -727,3 +727,189 @@ async fn audit2_large_state_cleared_then_deleted() -> anyhow::Result<()> {
     assert!(got + NearToken::from_millinear(10).as_yoctonear() > root_bal);
     Ok(())
 }
+
+// ---------------------------------------------------------------- daily login reward + contract-made guests
+
+async fn day_of(w: &Worker<Sandbox>) -> anyhow::Result<u64> {
+    Ok(w.view_block().await?.timestamp() / 86_400_000_000_000)
+}
+
+/// Fast-forwarding a whole UTC day is too slow in the sandbox: rewrite an account's login row instead
+/// (`Key::LoginRow` = storage prefix 22, borsh(AccountId) key, borsh(LoginRow { since_day, claimed_day }) value).
+async fn set_login_row(w: &Worker<Sandbox>, c: &Contract, who: &near_workspaces::AccountId, since_day: u32, claimed_day: u32) -> anyhow::Result<()> {
+    let mut key = vec![22u8];
+    key.extend((who.as_str().len() as u32).to_le_bytes());
+    key.extend(who.as_str().as_bytes());
+    let mut val = since_day.to_le_bytes().to_vec();
+    val.extend(claimed_day.to_le_bytes());
+    Ok(w.patch_state(c.id(), &key, &val).await?)
+}
+
+async fn claim_login(a: &Account, c: &Contract) -> anyhow::Result<u128> {
+    let v: String = a.call(c.id(), "claim_login").gas(Gas::from_tgas(30)).transact().await?.into_result()?.json()?;
+    Ok(v.parse()?)
+}
+
+#[tokio::test]
+async fn login_reward_daily_from_the_house_guests_zero_no_mint() -> anyhow::Result<()> {
+    let wd = world().await?;
+    let c = &wd.c;
+    let carol = wd.w.root_account()?.create_subaccount("carol").initial_balance(NearToken::from_near(2)).transact().await?.into_result()?;
+    carol.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let g = guest(&wd, "g-ab12").await?;
+    assert_eq!(claim_login(&carol, c).await?, 0, "not on the registration day");
+    let v: Value = c.view("get_login").args_json(json!({"account_id": carol.id()})).await?.json()?;
+    assert!(v["why_not"].as_str().unwrap().contains("day after"), "{v}");
+    let today = day_of(&wd.w).await? as u32;
+    // the account registered yesterday (the layout check: get_login must read the patched row)
+    set_login_row(&wd.w, c, carol.id(), today - 1, 0).await?;
+    let v: Value = c.view("get_login").args_json(json!({"account_id": carol.id()})).await?.json()?;
+    assert_eq!(v["can_claim"], true, "{v}");
+    let cfg0: Value = c.view("get_config").await?.json()?;
+    let paid = claim_login(&carol, c).await?;
+    assert!(paid > 0 && paid <= ONE / 2, "0.5 NOX × min(m, 1): {paid}");
+    assert_eq!(ft(c, carol.id().as_str()).await?, paid, "no match needed");
+    assert_eq!(claim_login(&carol, c).await?, 0, "once per UTC day");
+    assert_eq!(ft(c, carol.id().as_str()).await?, paid);
+    let cfg1: Value = c.view("get_config").await?.json()?;
+    assert_eq!(cfg0["total_minted"], cfg1["total_minted"], "never minted");
+    assert_eq!(cfg0["total_supply"], cfg1["total_supply"]);
+    let h0: u128 = cfg0["house_balance"].as_str().unwrap().parse()?;
+    let h1: u128 = cfg1["house_balance"].as_str().unwrap().parse()?;
+    assert_eq!(h0 - h1, paid, "paid by the House");
+    // a guest gets 0 (it can't even call it with its game key; signed with its own key here)
+    assert_eq!(claim_login(&g, c).await?, 0);
+    let v: Value = c.view("get_login").args_json(json!({"account_id": g.id()})).await?.json()?;
+    assert_eq!(v["can_claim"], false);
+    // a new UTC day pays again (the last claim was yesterday)
+    let today = day_of(&wd.w).await? as u32;
+    set_login_row(&wd.w, c, carol.id(), today - 2, today - 1).await?;
+    assert!(claim_login(&carol, c).await? > 0);
+    let v: Value = c.view("get_login").args_json(json!({"account_id": carol.id()})).await?.json()?;
+    assert_eq!(v["claimed_today"], true);
+    assert_eq!(v["claims_today"], 2);
+    Ok(())
+}
+
+#[tokio::test]
+async fn create_guest_by_the_contract() -> anyhow::Result<()> {
+    use near_workspaces::operations::Function;
+    use near_workspaces::types::{KeyType, SecretKey};
+    let wd = world().await?;
+    let c = &wd.c;
+    let sk = SecretKey::from_random(KeyType::ED25519);
+    let pk = sk.public_key().to_string();
+    let fund = NearToken::from_millinear(3);
+    let gs = NearToken::from_yoctonear(royale::GUEST_STORAGE_DEPOSIT.as_yoctonear());
+    // only the relayer
+    let r = wd.owner.call(c.id(), "create_guest").args_json(json!({"id": "00aa11bb22", "public_key": pk})).deposit(fund).gas(Gas::from_tgas(50)).transact().await?;
+    assert!(format!("{:?}", r.into_result().unwrap_err()).contains("only the relayer"));
+    // bad ids
+    for bad in ["00AA11BB22", "00aa11b", "00aa.11bb22", "g-00aa11bb22", "zz00aa11bb"] {
+        let r = wd.relay.call(c.id(), "create_guest").args_json(json!({"id": bad, "public_key": pk})).deposit(fund).gas(Gas::from_tgas(50)).transact().await?;
+        assert!(r.into_result().is_err(), "{bad}");
+    }
+    // the relayer's one transaction: create the account + register its storage
+    let relay0 = wd.relay.view_account().await?.balance.as_yoctonear();
+    let r = wd
+        .relay
+        .batch(c.id())
+        .call(Function::new("create_guest").args_json(json!({"id": "00aa11bb22", "public_key": pk})).deposit(fund).gas(Gas::from_tgas(40)))
+        .call(Function::new("storage_deposit").args_json(json!({"account_id": format!("g-00aa11bb22.{}", c.id())})).deposit(gs).gas(Gas::from_tgas(20)))
+        .transact()
+        .await?;
+    println!("create_guest + storage_deposit: {} Tgas", r.total_gas_burnt.as_tgas());
+    assert!(r.logs().iter().any(|l| l.contains("guest_created")), "{:?}", r.logs());
+    r.into_result()?;
+    let gid: near_workspaces::AccountId = format!("g-00aa11bb22.{}", c.id()).parse()?;
+    assert_eq!(wd.w.view_account(&gid).await?.balance, fund, "funded with the attached deposit");
+    let keys = wd.w.view_access_keys(&gid).await?;
+    assert_eq!(keys.len(), 1);
+    println!("guest key permission: {:?}", keys[0].access_key.permission);
+    let perm = format!("{:?}", keys[0].access_key.permission);
+    assert!(perm.contains("FunctionCall") && perm.contains("start_match") && perm.contains("sweep_match") && perm.contains(c.id().as_str()), "{perm}");
+    let is_guest: bool = c.view("is_guest_account").args_json(json!({"account_id": gid})).await?.json()?;
+    assert!(is_guest);
+    // the browser key plays a free guest match (signed directly here, so it pays its own gas: top it up first;
+    // in the game the relayer pays via NEP-366)
+    wd.relay.transfer_near(&gid, NearToken::from_near(1)).await?.into_result()?;
+    let g = Account::from_secret_key(gid.clone(), sk.clone(), &wd.w);
+    // (40 Tgas: the key's 0.05 NEAR allowance caps what a directly signed call may prepay)
+    let s: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(40)).transact().await?.into_result().map_err(|e| anyhow::anyhow!("{e:?}"))?.json()?;
+    assert_eq!(s["guest"], true);
+    assert_eq!(s["player_paid"], "0");
+    // its key can't call anything else
+    let r = g.call(c.id(), "claim_login").gas(Gas::from_tgas(30)).transact().await;
+    assert!(r.is_err() || r.unwrap().into_result().is_err(), "the key is limited to start_match/sweep_match");
+    // creating it again: nothing overwritten, the funding goes back to the relayer
+    let sk2 = SecretKey::from_random(KeyType::ED25519);
+    let mid = wd.relay.view_account().await?.balance.as_yoctonear();
+    let big = NearToken::from_millinear(10);
+    let r = wd.relay.call(c.id(), "create_guest").args_json(json!({"id": "00aa11bb22", "public_key": sk2.public_key().to_string()})).deposit(big).gas(Gas::from_tgas(50)).transact().await?;
+    assert!(r.logs().iter().any(|l| l.contains("guest_failed")), "{:?}", r.logs());
+    assert!(!r.logs().iter().any(|l| l.contains("guest_created")));
+    let after = wd.relay.view_account().await?.balance.as_yoctonear();
+    assert!(mid - after < NearToken::from_millinear(3).as_yoctonear(), "refunded: spent only gas ({} yocto)", mid - after);
+    let keys = wd.w.view_access_keys(&gid).await?;
+    assert_eq!(keys.len(), 1, "no key added to the existing account");
+    assert!(relay0 > after);
+    Ok(())
+}
+
+/// Upgrade over the live layout: the contract as of main 6ceda7b (what testnet runs, economy v2 + dailies) ->
+/// this code (`migrate` is a code-only upgrade: no state layout change). Players registered before the upgrade
+/// claim the login reward right away; the existing `g-*.<relayer>` guests stay guests; `create_guest` works.
+#[tokio::test]
+async fn upgrades_over_the_live_v2_layout() -> anyhow::Result<()> {
+    use near_workspaces::operations::Function;
+    use near_workspaces::types::{KeyType, SecretKey};
+    let w = near_workspaces::sandbox().await?;
+    let root = w.root_account()?;
+    let mk = |n: &'static str| {
+        let root = root.clone();
+        async move { root.create_subaccount(n).initial_balance(NearToken::from_near(10)).transact().await.unwrap().into_result().unwrap() }
+    };
+    let (owner, server, relay, ca) = (mk("owner").await, mk("server").await, mk("relay").await, mk("royale").await);
+    let c = ca.deploy(&std::fs::read("tests/fixtures/royale_v2_6ceda7b.wasm")?).await?.into_result()?;
+    c.call("new").args_json(json!({"owner": owner.id(), "server": server.id(), "guest_parent": relay.id()})).gas(Gas::from_tgas(100)).transact().await?.into_result()?;
+    let g = relay.create_subaccount("g-0ld").initial_balance(NearToken::from_millinear(500)).transact().await?.into_result()?;
+    relay.call(c.id(), "storage_deposit").args_json(json!({"account_id": g.id()})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let carol = mk("carol").await;
+    carol.call(c.id(), "storage_deposit").args_json(json!({})).deposit(NearToken::from_millinear(20)).transact().await?.into_result()?;
+    let r: Value = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?.into_result()?.json()?;
+    settle(&server, &c, &r["match_id"], 3, None).await?.0.map_err(anyhow::Error::msg)?;
+    let supply: String = c.view("ft_total_supply").await?.json()?;
+    // upgrade: new code + migrate
+    let r = ca.batch(c.id()).deploy(&std::fs::read(WASM)?).call(Function::new("migrate").gas(Gas::from_tgas(100))).transact().await?;
+    println!("deploy + migrate (live v2 layout): {} Tgas", r.total_gas_burnt.as_tgas());
+    r.into_result()?;
+    let cfg: Value = c.view("get_config").await?.json()?;
+    assert_eq!(cfg["version"], 2);
+    assert_eq!(cfg["total_supply"], supply);
+    // registered before the upgrade: claims right away; the old guest stays a guest and gets 0
+    let paid: String = carol.call(c.id(), "claim_login").gas(Gas::from_tgas(30)).transact().await?.into_result()?.json()?;
+    assert!(paid.parse::<u128>()? > 0);
+    let is_guest: bool = c.view("is_guest_account").args_json(json!({"account_id": g.id()})).await?.json()?;
+    assert!(is_guest);
+    let zero: String = g.call(c.id(), "claim_login").gas(Gas::from_tgas(30)).transact().await?.into_result()?.json()?;
+    assert_eq!(zero, "0");
+    let (s, _) = {
+        w.fast_forward(101).await?;
+        let r = g.call(c.id(), "start_match").gas(Gas::from_tgas(100)).transact().await?;
+        (r.into_result().map_err(|e| anyhow::anyhow!("{e:?}"))?.json::<Value>()?, ())
+    };
+    assert_eq!(s["guest"], true, "old guests keep playing free");
+    // the new guest path works on the upgraded contract
+    let sk = SecretKey::from_random(KeyType::ED25519);
+    let r = relay
+        .call(c.id(), "create_guest")
+        .args_json(json!({"id": "0123456789", "public_key": sk.public_key().to_string()}))
+        .deposit(NearToken::from_millinear(3))
+        .gas(Gas::from_tgas(40))
+        .transact()
+        .await?;
+    assert!(r.logs().iter().any(|l| l.contains("guest_created")), "{:?}", r.logs());
+    let daily: Value = c.view("get_daily").args_json(json!({"account_id": carol.id()})).await?.json()?;
+    assert_eq!(daily["streak"], 0);
+    Ok(())
+}

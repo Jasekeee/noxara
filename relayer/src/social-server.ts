@@ -17,6 +17,7 @@ const social = createSocial({
   publicUrl: process.env.PUBLIC_URL,
   gameUrl: process.env.GAME_URL,
   guestParent: process.env.RELAYER_ACCOUNT_ID,
+  gameContract: process.env.GAME_CONTRACT_ID,
   verifyOwner: async (a, k) => (owners ? owners.owns(a, k) : false),
   realtimeFactor: process.env.SOCIAL_REALTIME === undefined ? undefined : Number(process.env.SOCIAL_REALTIME),
 });

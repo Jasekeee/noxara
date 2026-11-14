@@ -1,6 +1,8 @@
 // NOXARA relayer + match server.
 //  POST /api/guest   {publicKey}            -> walletless guest account g-*.<relayer> (function-call key
-//                                               for the game) + its NEP-145 storage prepaid by the relayer
+//                                               for the game) + its NEP-145 storage prepaid by the relayer;
+//                                               with GUEST_VIA_CONTRACT=1 (mainnet): g-*.<game contract>, made
+//                                               by the contract's `create_guest` in the same tx as the storage
 //  POST /api/relay   {payload}              -> pays gas for a NEP-366 delegate action calling the game
 //                                               (allow-listed methods, zero deposit, signature + key owner
 //                                               checked before any budget is spent)
@@ -16,7 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Chain } from "./chain.ts";
 import { signatureOk, settleSignatureOk, KeyOwners } from "./verify.ts";
-import { checkDelegate, isGuestAccount, RateLimiter, Budget, GUEST_PREFIX, type RelayPolicy } from "./policy.ts";
+import { checkDelegate, isGuestAccount, isGuestId, RateLimiter, Budget, GUEST_PREFIX, GAME_METHODS_DEFAULT, METHOD_GAS_DEFAULT, type RelayPolicy } from "./policy.ts";
 import { judge, inputLogHash, settleMessage, checkSimVersion, SIM_VERSION } from "./settle.ts";
 import { registerMessage } from "./protocol.ts";
 import { Subsidies } from "./subsidies.ts";
@@ -39,7 +41,7 @@ const serverId = process.env.SERVER_ACCOUNT_ID;
 const serverKey = process.env.SERVER_PRIVATE_KEY;
 const rpcUrl = env("NEAR_RPC", network === "testnet" ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 // methods anyone may have relayed / that a guest's function-call key may call
-const GAME_METHODS = env("RELAY_METHODS", "start_match,sweep_match,sponsor,unsponsor,claim_welcome,buy_ipo,claim_dividends,cancel_listing,buy_cosmetic,prune_listings,check_in,claim_quest").split(",");
+const GAME_METHODS = env("RELAY_METHODS", GAME_METHODS_DEFAULT.join(",")).split(",");
 const GUEST_METHODS = env("GUEST_METHODS", "start_match,sweep_match").split(",");
 const TGAS = 1_000_000_000_000n;
 const policy: RelayPolicy = {
@@ -48,8 +50,12 @@ const policy: RelayPolicy = {
   allowedMethods: GAME_METHODS,
   maxGasPerAction: 150n * TGAS,
   maxActions: 1,
-  methodGas: { start_match: 150n * TGAS, sweep_match: 30n * TGAS, sponsor: 50n * TGAS, unsponsor: 50n * TGAS, claim_welcome: 30n * TGAS },
+  methodGas: METHOD_GAS_DEFAULT,
 };
+// mainnet: guests are made by the game contract (`create_guest`, g-*.<contract>), so the hosted relayer needs no
+// key of the contract account. Off by default: the live testnet contract predates `create_guest`.
+const GUEST_VIA_CONTRACT = env("GUEST_VIA_CONTRACT", "0") === "1";
+const isGuest = (a: string) => isGuestAccount(a, relayerId, gameId);
 // Gas budgets (attached gas, an upper bound on what we pay): per sender and for everyone, per hour.
 const senderGas = new Budget(BigInt(env("GAS_PER_SENDER_PER_HOUR_TGAS", "3000")) * TGAS, 3_600_000);
 const globalGas = new Budget(BigInt(env("GAS_GLOBAL_PER_HOUR_TGAS", "200000")) * TGAS, 3_600_000);
@@ -85,6 +91,7 @@ const social = createSocial({
   publicUrl: process.env.PUBLIC_URL,
   gameUrl: process.env.GAME_URL,
   guestParent: relayerId,
+  gameContract: gameId,
   verifyOwner: (a, k) => owners.owns(a, k),
 });
 
@@ -186,6 +193,16 @@ const server = http.createServer(async (req, res) => {
       if (!/^ed25519:[1-9A-HJ-NP-Za-km-z]{32,64}$/.test(publicKey)) return send(res, 400, { error: "bad public key" }, origin);
       const shut = budget.closed("guest", RESERVE.guest);
       if (shut) return send(res, 503, closedReply(shut), origin);
+      if (GUEST_VIA_CONTRACT) {
+        const hex = crypto.randomBytes(5).toString("hex");
+        if (!isGuestId(hex)) throw new Error("guest id");
+        const g = await chain.createGuestViaContract(hex, publicKey, GUEST_FUNDING, GUEST_STORAGE);
+        // the funding comes back if the account couldn't be created (the contract refunds it); the storage doesn't
+        budget.spend(g.burnt + yoctoOf(GUEST_STORAGE) + (g.created ? nearToYocto(GUEST_FUNDING.replace(/\s*NEAR$/i, "")) : 0n), "guest");
+        if (!g.created || g.failure) return send(res, 500, { error: `guest: ${g.failure ?? "not created"}` }, origin);
+        owners.add(g.accountId, publicKey);
+        return send(res, 200, { accountId: g.accountId, tx: g.tx, storageTx: g.tx, ms: Math.round(performance.now() - t0) }, origin);
+      }
       const id = `${GUEST_PREFIX}${crypto.randomBytes(5).toString("hex")}.${relayerId}`;
       const r = await chain.createGuest(id, publicKey, GUEST_METHODS, GUEST_FUNDING, GUEST_ALLOWANCE);
       owners.add(id, publicKey);
@@ -214,7 +231,7 @@ const server = http.createServer(async (req, res) => {
       const shutRelay = budget.closed("relay", RESERVE.relay);
       if (shutRelay) {
         // real accounts keep playing: their client signs the same call itself (its key's allowance pays)
-        return send(res, 503, isGuestAccount(d.senderId, relayerId) ? closedReply(shutRelay) : { error: "relayer closed: sign it yourself", code: "relay_closed", reason: shutRelay }, origin);
+        return send(res, 503, isGuest(d.senderId) ? closedReply(shutRelay) : { error: "relayer closed: sign it yourself", code: "relay_closed", reason: shutRelay }, origin);
       }
       if (!senderGas.take(d.senderId, check.gas)) return send(res, 429, { error: "you've played a lot this hour: rest a little" }, origin);
       if (!globalGas.take("all", check.gas)) return send(res, 503, { error: "the island is crowded: try again soon" }, origin);
@@ -228,7 +245,7 @@ const server = http.createServer(async (req, res) => {
       }
       budget.spend(r.burnt);
       if (r.failure) return send(res, 409, { tx: r.tx, error: r.failure, ms: Math.round(performance.now() - t0) }, origin);
-      return send(res, 200, { tx: r.tx, value: r.value, guest: isGuestAccount(d.senderId, relayerId), ms: Math.round(performance.now() - t0) }, origin);
+      return send(res, 200, { tx: r.tx, value: r.value, guest: isGuest(d.senderId), ms: Math.round(performance.now() - t0) }, origin);
     }
     if (req.method === "POST" && req.url === "/api/register") {
       // a real NEAR account that signed in (its wallet added our function-call key): the relayer
@@ -237,7 +254,7 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       const accountId = String(body.accountId ?? "");
       const publicKey = String(body.publicKey ?? "");
-      if (!/^[a-z0-9._-]{2,64}$/.test(accountId) || isGuestAccount(accountId, relayerId)) return send(res, 400, { error: "bad account", code: "bad_request" }, origin);
+      if (!/^[a-z0-9._-]{2,64}$/.test(accountId) || isGuest(accountId)) return send(res, 400, { error: "bad account", code: "bad_request" }, origin);
       if (!settleSignatureOk(registerMessage(accountId), publicKey, String(body.signature ?? ""))) return send(res, 401, { error: "bad signature", code: "bad_signature" }, origin);
       if (!(await owners.owns(accountId, publicKey))) return send(res, 401, { error: "this key is not on the account yet", code: "unknown_key" }, origin);
       const sb = await chain.view<unknown>("storage_balance_of", { account_id: accountId });
