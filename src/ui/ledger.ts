@@ -166,8 +166,8 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
     // animated money flow above the rows: pot -> winner / House treasury / burn (only amounts the settle tx reported)
     if (prize || house || burn) {
       const legs: { label: string; sub: string; amount: number; cls: string }[] = [];
-      if (prize) legs.push({ label: prize.reason === "house" ? "THE HOUSE" : prize.name === "You" || w === 0 ? "YOU" : prize.name.toUpperCase(), sub: prize.reason === "house" ? "guest win → treasury" : "winner", amount: prize.amount, cls: "win" });
-      if (house) legs.push({ label: "HOUSE", sub: "treasury", amount: house.amount, cls: "house" });
+      if (prize) legs.push({ label: prize.reason === "house" ? "TREASURY" : prize.name === "You" || w === 0 ? "YOU" : isChainAcct(L.accounts[w ?? -1]) ? prize.name : prize.name.toUpperCase(), sub: prize.reason === "house" ? "guest win" : "winner", amount: prize.amount, cls: "win" });
+      if (house) legs.push({ label: "HOUSE CUT", sub: "to the treasury", amount: house.amount, cls: "house" });
       if (burn) legs.push({ label: "BURNED", sub: "gone forever", amount: burn.amount, cls: "burn" });
       const pot = Math.round(legs.reduce((a, l) => a + l.amount, 0) * 100) / 100;
       el.appendChild(moneyFlow(pot, legs, L.onCoin));
