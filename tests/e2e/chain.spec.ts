@@ -1,5 +1,5 @@
 // Live testnet loop (opt-in: RUN_CHAIN=1, needs the match server on :8788):
-// lobby says "live wallets" → an autoplay match with a chain seed plays to the end → the ledger shows
+// lobby says "Live" → an autoplay match with a chain seed plays to the end → the ledger shows
 // "Verified" (the server replayed it and settled on NEAR) → the browser's record replays in Node too.
 import { expect, test } from "@playwright/test";
 import type { MatchRecord } from "../../src/sim/types";
@@ -34,7 +34,7 @@ test("chain: live wallets → autoplay match → Verified → record replays in 
   // 1. lobby: live wallets
   await page.goto("/?e2e");
   await requireHook(page);
-  await expect(page.locator("#net-mode")).toContainText("live wallets", { timeout: 30_000 });
+  await expect(page.locator("#net-mode")).toContainText("Live", { timeout: 30_000 });
 
   // 2. autoplay without ?seed → the seed comes from the chain (start_match); autoplay starts by itself
   await page.goto("/?e2e&autoplay");

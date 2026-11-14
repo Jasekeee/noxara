@@ -8,8 +8,8 @@ export type Mode = "standard" | "training" | "big";
 const KEY = "noxara.mode";
 const DESC: Record<Mode, string> = {
   standard: "10 fighters. 3 minutes. Last one standing wins the pot.",
-  training: "Easy bots. Nothing recorded. Learn the island.",
-  big: "3x map. Dense cover. About 7 minutes. Offline.",
+  training: "Easy bots. Practice. Learn the island.",
+  big: "3x map. Dense cover. About 7 minutes. Practice.",
 };
 
 let mode: Mode = "standard";

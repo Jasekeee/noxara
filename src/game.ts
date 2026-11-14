@@ -228,11 +228,32 @@ function setNet(el: HTMLElement, text: string, full: string) {
   el.title = full;
 }
 
+/** "Ranked unavailable · Try again": shown next to the pill only when the server could not be reached. */
+function setNetRetry(show: boolean) {
+  let b = document.getElementById("net-retry");
+  if (!show) {
+    b?.remove();
+    return;
+  }
+  if (b) return;
+  const btn = document.createElement("button");
+  b = btn;
+  b.id = "net-retry";
+  btn.type = "button";
+  b.className = "btn-ghost small net-retry";
+  b.textContent = "Ranked unavailable · Try again";
+  b.title = "Ranked play is unavailable right now. Practice is open.";
+  b.addEventListener("click", () => location.reload());
+  $("net-mode").insertAdjacentElement("afterend", b);
+}
+
 async function refreshLobby() {
-  const c = await clientP;
   const mode = $("net-mode");
+  if (!mode.classList.contains("chain")) setNet(mode, "Connecting…", "Connecting to the island…");
+  const c = await clientP;
   if (!c) {
-    setNet(mode, "offline · not recorded", "Offline practice. Results aren't recorded.");
+    setNetRetry(false);
+    setNet(mode, "Practice · not ranked", "Practice match: results aren't ranked.");
     if (!fighters.length) fighters = localFighters();
     if (portraits.length) renderLobby($("roster"), fighters, portraits, null);
     await refreshAccount();
@@ -249,8 +270,9 @@ async function refreshLobby() {
     guests_closed: "free guest spots are used up. PLAY opens the free Training Island. Sign in with NEAR for real matches",
   };
   const r = c.offlineReason ? why[c.offlineReason] ?? "" : "";
-  if (c.mode === "chain") setNet(mode, `live wallets · NEAR ${NEAR_NETWORK}`, `Live wallets on NEAR ${NEAR_NETWORK}`);
-  else setNet(mode, "offline · not recorded", `Offline practice. Results aren't recorded${r ? ` (${r})` : ""}.`);
+  if (c.mode === "chain") setNet(mode, `Live · NEAR ${NEAR_NETWORK}`, `Live on NEAR ${NEAR_NETWORK}`);
+  else setNet(mode, "Practice · not ranked", `Ranked play is unavailable right now. Practice is open${r ? ` (${r})` : ""}.`);
+  setNetRetry(c.mode !== "chain" && c.offlineReason !== "guests_closed");
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
@@ -645,9 +667,9 @@ async function startMatch() {
   countShown = -1;
   myKillTimes = [];
   lastAmmo = -1;
-  if (fellBack) toast("Couldn't reach the NEAR island — playing offline practice (not recorded)");
-  if (inTraining) toast("Training island: the bots go easy on you. Nothing is recorded.");
-  if (inBig) toast("Big Island: a 3x map, dense cover, a slow storm. Offline — nothing is staked.");
+  if (fellBack) toast("Ranked play is unavailable right now. Practice match · not ranked");
+  if (inTraining) toast("Training island: the bots go easy on you. Not ranked.");
+  if (inBig) toast("Big Island: a 3x map, dense cover, a slow storm. Practice — nothing is staked.");
   coach.startMatch(!AUTOPLAY);
   gotChest = false;
   meBushSeen = false;

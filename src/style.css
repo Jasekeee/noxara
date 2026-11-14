@@ -973,3 +973,5 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
   .cup { width: 232px; }
 }
 @media (prefers-reduced-motion: reduce) { #play.btn-primary { animation: none; } }
+.net-retry { position: absolute; top: calc(44px + var(--safe-t)); left: 16px; z-index: 2; }
+@media (max-width: 600px) { .net-retry { top: calc(34px + var(--safe-t)); left: 8px; font-size: 10px; } }

@@ -35,7 +35,7 @@ export function renderDaily(body: HTMLElement, v: DailyView): HTMLElement | null
     const retry = h("button", "btn-ghost small", "TRY AGAIN");
     retry.addEventListener("click", v.onRetry);
     body.appendChild(retry);
-    body.appendChild(h("p", "sc-note", "You can still play a normal practice match offline."));
+    body.appendChild(h("p", "sc-note", "Practice is open while the island reconnects."));
     return null;
   }
   let timer: HTMLElement | null = null;
