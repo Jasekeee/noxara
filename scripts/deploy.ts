@@ -39,7 +39,9 @@ const beneficiary = arg("beneficiary", owner);
 if (onRoot && owner === root) throw new Error("--contract-on-root needs --owner <another account you control> (it alone can teardown once the root's keys are gone)");
 const fund = Number(arg("fund", "4.5"));
 const serverFund = Number(arg("server-fund", "1"));
-const relayFund = Number(arg("relay-fund", onRoot ? "1.5" : "4"));
+// on the root (mainnet): 0.25 guest budget + 0.25 real-account budget + 0.25 settlement gas (docs/COST.md)
+const relayFund = Number(arg("relay-fund", onRoot ? "0.75" : "4"));
+const headroom = Number(arg("headroom", "0.3")); // contract state growth: measured ~0.6 KB per match paid by the contract (docs/COST.md)
 const dryRun = has("dry-run");
 const repo = path.join(import.meta.dirname, "..");
 const wasmPath = arg("wasm", path.join(repo, "contracts/royale/target/near/royale.wasm"));
@@ -60,7 +62,7 @@ const GENESIS_STATE_BYTES = 6_000; // genesis state, rounded up (see docs/CHAIN.
 const codeNear = +(wasm.length * STORAGE_PER_BYTE).toFixed(4);
 const stateNear = +(GENESIS_STATE_BYTES * STORAGE_PER_BYTE).toFixed(4);
 const npcTotal = +(npcs.length * NPC_NEAR).toFixed(4);
-const contractNeed = +(codeNear + stateNear + npcTotal + 0.5).toFixed(3); // + 0.5 headroom (recent matches, retirements)
+const contractNeed = +(codeNear + stateNear + npcTotal + headroom).toFixed(3); // + headroom (recent matches, retirements)
 const plan = {
   network,
   topology: onRoot ? "contract on the root; relayer = match server" : "contract on a sub-account; separate server account",
@@ -87,12 +89,12 @@ const plan = {
     contract_code_storage: codeNear,
     contract_genesis_state: stateNear,
     npc_accounts_not_refundable: npcTotal,
-    contract_headroom: 0.5,
+    contract_headroom: headroom,
     contract_total: onRoot ? contractNeed : fund,
     relayer_account: relayFund,
     server_account: onRoot ? 0 : serverFund,
-    per_guest: "~0.02 (0.003 account funding + 0.01514 storage + gas; measured 0.027 per guest incl. its first relayed start), capped by RELAYER_BUDGET_NEAR (default 1)",
-    per_match_gas: "~0.0015 start (relayer) + ~0.001 settle",
+    per_guest: "0.0275 measured (0.01514 storage -> contract, refundable at teardown; 0.003 funding + ~0.0094 gas spent), capped by GUEST_BUDGET_NEAR (0.25) and DAILY_GUEST_CAP (8)",
+    per_match_gas: "0.00153 start (relayed) + 0.00274 settle, measured on testnet",
     gas_upper_bound_deploy: 0.05,
     total_from_root: +((onRoot ? contractNeed : fund) + relayFund + (onRoot ? 0 : serverFund) + 0.05).toFixed(3),
     refundable_at_teardown: onRoot ? "everything on the root (code + state + leftover) via the owner's teardown(); the NPC sub-accounts' NEAR stays" : "the contract account's balance via teardown()",
