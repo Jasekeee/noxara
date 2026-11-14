@@ -1062,3 +1062,9 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 
 /* F-19: cached Mercenary Board while the live one loads */
 .roster.updating .fcard { animation: skel 1.2s ease-in-out infinite alternate; }
+
+/* F-19b: persistent "THE MARK" pill */
+.mark-pill { font: 900 12px/1 var(--display); letter-spacing: .08em; color: #2a1a00; background: var(--gold); padding: 6px 12px; border-radius: 999px; max-width: min(86vw, 420px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; box-shadow: 0 2px 0 rgba(0,0,0,.35); }
+.mark-pill.taken { background: rgba(255,255,255,.9); color: #333; }
+.mark-pill.hidden { display: none; }
+@media (max-width: 720px) { .mark-pill { font-size: 10px; padding: 5px 9px; } }

@@ -1497,6 +1497,7 @@ function frame(now: number) {
     placeTags();
     // off-screen bounty marker
     updateBountyArrow(st.fighters.find((f) => f.bounty && f.alive && f.idx !== watch) ?? null);
+    updateMarkPill(st.fighters.find((f) => f.bounty && f.alive) ?? null, phase === "playing" && !starting && introT <= 0, time);
     // local player in bush: semi-transparent self too
     meBush.x = views[0].pos.x; meBush.z = views[0].pos.z; meBush.inBush = me.inBush;
     world.update(dt, time, me.alive ? meBush : null, rustlers);
@@ -1605,6 +1606,28 @@ function frame(now: number) {
 const bountyEl = $("bounty-arrow");
 const bountyTip = bountyEl.querySelector<HTMLElement>(".tip")!;
 let bountyShown = false;
+const markPill = $("mark-pill");
+let markPillIdx = -1, markTakenUntil = 0, markPillText = "";
+/** persistent pill while the Mark (bounty carrier) is alive; "BOUNTY TAKEN" for a few seconds when it falls */
+function updateMarkPill(f: { idx: number } | null, on: boolean, now: number) {
+  let text = "", taken = false;
+  if (on && f) {
+    markPillIdx = f.idx;
+    const bv = current?.bountyValue ?? 0;
+    text = `THE MARK: ${nameOf(f.idx)}${bv > 0 ? ` · +${fmt(bv)} NOX` : ""}`;
+  } else if (on && markPillIdx >= 0) {
+    markPillIdx = -1;
+    markTakenUntil = now + 3.5;
+  }
+  if (!text && on && now < markTakenUntil) { text = "BOUNTY TAKEN"; taken = true; }
+  if (!on) markPillIdx = -1;
+  if (text !== markPillText) {
+    markPillText = text;
+    markPill.textContent = text;
+    markPill.classList.toggle("hidden", !text);
+    markPill.classList.toggle("taken", taken);
+  }
+}
 function updateBountyArrow(f: { idx: number } | null) {
   let show = false;
   if (f && phase === "playing") {
