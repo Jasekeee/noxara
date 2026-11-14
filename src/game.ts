@@ -1,6 +1,6 @@
 // NOXARA client: fixed-step simulation (TICK_HZ) + interpolated Three.js rendering + juice.
 import * as THREE from "three";
-import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
+import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent, type WeaponKind } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
 import { acctLabel, displayId, isChainAcct, shortAcct } from "./ui/acct";
@@ -171,6 +171,7 @@ let spectating = false;
 let matchStartT = 0;
 let stormTickT = 0;
 let stormBannerPhase = 0;
+let pendingHints = false;
 let introT = 0;
 const INTRO = 1.0;
 let countShown = -1;
@@ -181,6 +182,8 @@ let myKillTimes: number[] = [];
 const humanInput: Input = { mx: 0, my: 0, aim: 0, fire: false };
 const inputs = new Map<number, Input>();
 const killerOf = new Map<number, number | null>();
+/** weapon that killed the local player + what they held (for the death card) */
+let myDeath: { weapon: WeaponKind | "storm"; held: WeaponKind } | null = null;
 
 // camera rig
 const camTarget = new THREE.Vector3();
@@ -614,6 +617,7 @@ function buildMatch(cfg: MatchConfig, lazy = false) {
   recorder = new Recorder();
   record = null;
   killerOf.clear();
+  myDeath = null;
   watch = 0;
   meDeadAt = -1;
   endShown = false;
@@ -697,7 +701,7 @@ async function startMatch() {
   $("pot-chip").title = current.entries !== undefined ? `Pot: entries ${fmt(current.entries)} + House top-up ${fmt(Math.max(0, current.pot - current.entries))} = ${fmt(current.pot)} NOX, paid to the winner. ${PLAY_MONEY_NOTE}` : `Prize pot, paid to the winner. ${PLAY_MONEY_NOTE}`;
   hud.reset();
   controls.setEnabled(true);
-  if (!AUTOPLAY) hud.showHints(touchy());
+  pendingHints = !AUTOPLAY; // shown after GO so the countdown, banner and chips never stack
   canvas.focus();
 }
 
@@ -816,6 +820,7 @@ function onEvents(evs: SimEvent[]) {
       }
       case "kill": {
         killerOf.set(e.who, e.by);
+        if (e.who === 0) myDeath = { weapon: e.weapon, held: st.fighters[0].weapon };
         const v = views[e.who];
         const f = st.fighters[e.who];
         v.die();
@@ -1083,9 +1088,11 @@ function renderKillerCard(won: boolean, killer: number | null | undefined) {
   const body = mk("div", "ek-body");
   body.appendChild(mk("small", "ek-k", "TAKEN OUT BY"));
   body.appendChild(acctLabel(acct, kf.name, "acct-label ek-name"));
+  if (myDeath && myDeath.weapon !== "storm") body.appendChild(mk("span", "ek-wp", `with a ${WEAPON_LABEL[myDeath.weapon].toLowerCase().replace(/^./, (c) => c.toUpperCase())}`));
   if (live && info && Number.isFinite(info.balance)) body.appendChild(mk("span", "ek-bal", `Wallet ${fmt(info.balance)} NOX`));
   box.appendChild(face);
   box.appendChild(body);
+  if (myDeath && myDeath.held === "popper") box.appendChild(mk("div", "ek-tip", "Tip: grab a gold-beam crate first. Crate guns outgun the Popper."));
   if (wanted) {
     const tag = mk("div", "ek-wanted");
     tag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg><span>WANTED</span>';
@@ -1390,7 +1397,7 @@ function frame(now: number) {
             if (bi > 0 && !seenBountyHint()) {
               const bv = current?.bountyValue ?? 0;
               const paid = !!current && current.playerPaid > 0 && !inTraining;
-              setTimeout(() => coach.show(bv > 0 && paid ? `${nameOf(bi)} is the richest. Take them out for +${fmt(bv)} NOX.` : `${nameOf(bi)} is the richest — the crown. Take them out for the bounty.`, 5200), 1500);
+              setTimeout(() => coach.show(bv > 0 && paid ? `${nameOf(bi)} is the richest. Take them out for +${fmt(bv)} NOX.` : `${nameOf(bi)} is the richest — the crown. Take them out for the bounty.`, 5200), 3200);
             }
             const r = match.cfg.rival;
             if (r !== undefined && st.fighters[r]) setTimeout(() => hud.banner(`${nameOf(r)} REMEMBERS YOU`, "hot"), 900);
@@ -1398,6 +1405,10 @@ function frame(now: number) {
         }
         countShown = n;
       }
+    }
+    if (pendingHints && phase === "playing" && !starting && introT <= 0) {
+      pendingHints = false;
+      hud.showHints(touchy());
     }
     // "this is you": arrow + label for the first 10 s of the match
     views[0].setYouMarker(phase === "playing" && !starting && introT <= 0 && time - matchStartT < 10);

@@ -1005,6 +1005,9 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
 .ek-k { font: 800 10px/1 var(--font); letter-spacing: .16em; opacity: .65; }
 .ek-name { font: 700 14px/1.1 var(--font); overflow-wrap: anywhere; }
 .ek-name b { font: 900 22px/1.1 var(--display); letter-spacing: .02em; }
+.end-killer { flex-wrap: wrap; }
+.ek-wp { display: block; font: 800 13px/1.2 var(--font); color: #fff; margin-top: 3px; }
+.ek-tip { flex: 1 0 100%; font: 700 12px/1.3 var(--font); color: var(--gold); padding-top: 6px; border-top: 1px solid rgba(255,255,255,.15); }
 .ek-bal { font: 800 12px/1 var(--font); color: var(--gold); }
 .ek-wanted { position: absolute; top: -10px; right: 12px; display: flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 999px; background: var(--gold); color: var(--ink); font: 900 11px/1 var(--display); letter-spacing: .1em; box-shadow: 0 2px 0 #b85c00; }
 .ek-wanted svg { width: 14px; height: 14px; fill: var(--ink); }
