@@ -2,7 +2,7 @@
 // the sim (plus the constants/math in types.ts and fixed.ts, which have no imports), so this file loads
 // both under Vitest and under plain Node.
 import type { FighterSpec, Input, Match, MatchConfig, MatchRecord, Personality } from "../src/sim/types.ts";
-import { MATCH_TICKS } from "../src/sim/types.ts";
+import { BIG_MATCH_TICKS, MATCH_TICKS } from "../src/sim/types.ts";
 import { icos, isin } from "../src/sim/fixed.ts";
 
 /** The documented cross-agent API (docs/OWNERSHIP.md). */
@@ -65,7 +65,7 @@ export interface MatchRun {
 
 /** Steps a match to the end (or the tick cap). Pure: same match + same options → same result. */
 export function runMatch(m: Match, opts: RunOptions = {}): MatchRun {
-  const maxTicks = opts.maxTicks ?? MATCH_TICKS;
+  const maxTicks = opts.maxTicks ?? (m.cfg.map === "big" ? BIG_MATCH_TICKS : MATCH_TICKS);
   const humans = opts.humans ?? m.cfg.fighters.flatMap((f, i) => (f.human ? [i] : []));
   const human = opts.human ?? scriptedInput;
   const kills = new Array<number>(m.cfg.fighters.length).fill(0);

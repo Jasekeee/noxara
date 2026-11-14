@@ -1,7 +1,7 @@
 // Game-rule constants for the deterministic simulation (owned by agent B / sim).
 // All distances are fixed point (FP = 1000 per world unit), times are ticks (20 per second).
 // Renderer/UI may import these read-only (e.g. weapon range for an aim line, magazine size for the HUD).
-import type { Storm, WeaponKind } from "./types";
+import { BIG_MATCH_TICKS, MATCH_TICKS, type MatchConfig, type Storm, type WeaponKind } from "./types";
 import { FP } from "./fixed";
 
 export const ISLAND_R = 32 * FP;
@@ -131,3 +131,41 @@ export const IDLE_RELOAD = 24;
 
 /** The sim's storm object carries the target centre too (tx, ty) so the renderer/AI can draw/plan it. */
 export type StormX = Storm & { tx: number; ty: number };
+
+// ------------------------------------------------------------------ Big Island (cfg.map === "big")
+// An offline / server-replayable mode (no stakes, never on chain): a ~3.3x larger island with dense
+// cover (forests, tall grass, rocks, walled ruins), more chests + heals, a slower 7-phase storm and a
+// 10-minute clock. Everything below only applies when cfg.map === "big"; standard matches are untouched.
+
+export const BIG_ISLAND_R = 58 * FP;
+/** spawns on a ring at 40 u (±1.5 u): neighbours start ~25 u apart */
+export const BIG_SPAWN_RING = 40 * FP;
+export { BIG_MATCH_SECONDS, BIG_MATCH_TICKS } from "./types";
+/** 1 central + 1 near each spawn + the rest in ruins / scattered */
+export const BIG_N_CHESTS = 30;
+export const BIG_N_HEALS = 18;
+export const BIG_FORESTS = 7;
+export const BIG_RUINS = 5;
+export const BIG_ROCKS = 34;
+export const BIG_CRATES = 16;
+export const BIG_BUSHES = 56;
+
+export const BIG_STORM_PHASES: StormPhase[] = [
+  { announce: 1, shrinkStart: 60 * S, shrinkEnd: 115 * S, r: 42 * FP, dps: 2 },
+  { announce: 115 * S, shrinkStart: 175 * S, shrinkEnd: 235 * S, r: 30 * FP, dps: 3 },
+  { announce: 235 * S, shrinkStart: 290 * S, shrinkEnd: 345 * S, r: 20 * FP, dps: 5 },
+  { announce: 345 * S, shrinkStart: 395 * S, shrinkEnd: 445 * S, r: 12 * FP, dps: 8 },
+  { announce: 445 * S, shrinkStart: 480 * S, shrinkEnd: 515 * S, r: 6500, dps: 11 },
+  { announce: 515 * S, shrinkStart: 535 * S, shrinkEnd: 560 * S, r: 2800, dps: 15 },
+  { announce: 560 * S, shrinkStart: 570 * S, shrinkEnd: 588 * S, r: 0, dps: 22 },
+];
+
+export const isBig = (cfg: MatchConfig): boolean => cfg.map === "big";
+/** The storm schedule of this match. */
+export function stormPhasesFor(cfg: MatchConfig): StormPhase[] {
+  return isBig(cfg) ? BIG_STORM_PHASES : STORM_PHASES;
+}
+/** The match clock (ticks) of this match: replays/verifiers must loop to this, not MATCH_TICKS. */
+export function matchTicksFor(cfg: MatchConfig): number {
+  return isBig(cfg) ? BIG_MATCH_TICKS : MATCH_TICKS;
+}

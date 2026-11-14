@@ -21,9 +21,10 @@
 // discipline is imperfect on purpose (per-bot reaction delay, keep fighting in a weak storm, flee
 // through it) — that is where storm deaths come from. An idle, never-shooting human is ignored for
 // the first 10 s (onboarding). Bots lob grenades with aimDist = predicted target distance.
-import type { FighterState, Input, Match, Personality } from "./types";
+import type { FighterState, Input, Match, Obstacle, Personality } from "./types";
 import { FP, Rng, angDiff, dist2, iatan2, icos, isin, isqrt, mixSeed } from "./fixed";
-import { BULLET_R, FIGHTER_R, SPAWN_PROTECT, SPEED, STORM_PHASES, WEAPONS, type StormX } from "./rules";
+import { BULLET_R, FIGHTER_R, SPAWN_PROTECT, SPEED, WEAPONS, isBig, stormPhasesFor, type StormX } from "./rules";
+import { obstaclesNear } from "./grid";
 import { segHit } from "./geom";
 
 interface Params {
@@ -200,14 +201,17 @@ export function botMode(match: Match, idx: number): string {
   return minds.get(match)?.brains[idx]?.mode ?? "";
 }
 
+const lineBuf: Obstacle[] = [];
+const blockBuf: Obstacle[] = [];
+
 function lineClear(match: Match, x0: number, y0: number, x1: number, y1: number): boolean {
   const dx = x1 - x0, dy = y1 - y0;
-  for (const o of match.map.obstacles) if (segHit(x0, y0, dx, dy, o.x, o.y, o.r + BULLET_R + 50) >= 0) return false;
+  for (const o of obstaclesNear(match.map, x0, y0, x1, y1, BULLET_R + 50, lineBuf)) if (segHit(x0, y0, dx, dy, o.x, o.y, o.r + BULLET_R + 50) >= 0) return false;
   return true;
 }
 
 function blockedAt(match: Match, x: number, y: number, pad: number): boolean {
-  for (const o of match.map.obstacles) if (dist2(o.x, o.y, x, y) < sq(o.r + FIGHTER_R + pad)) return true;
+  for (const o of obstaclesNear(match.map, x, y, x, y, FIGHTER_R + pad, blockBuf)) if (dist2(o.x, o.y, x, y) < sq(o.r + FIGHTER_R + pad)) return true;
   return false;
 }
 
@@ -256,6 +260,7 @@ export function botInput(match: Match, idx: number): Input {
   const t = s.tick;
   if (!me.alive || s.over) return { mx: 0, my: 0, aim: me.aim, fire: false };
   const P = PERSONALITY[me.personality] ?? PERSONALITY.balanced;
+  const big = isBig(match.cfg);
   const w = WEAPONS[me.weapon];
   const st = s.storm as StormX;
   const armed = me.weapon !== "popper";
@@ -321,7 +326,7 @@ export function botInput(match: Match, idx: number): Input {
   let mode = "roam";
   const dStorm = isqrt(dist2(me.x, me.y, st.cx, st.cy));
   const dTarget = isqrt(dist2(me.x, me.y, st.tx, st.ty));
-  const phase = STORM_PHASES[Math.max(0, st.phase - 1)];
+  const phase = stormPhasesFor(match.cfg)[Math.max(0, st.phase - 1)];
   const toShrink = phase ? phase.shrinkEnd - t : 9999;
   const needT = dTarget - Math.max(0, st.targetR - 1500);
   const ticksToWalk = Math.trunc(Math.max(0, needT) / SPEED);
@@ -611,6 +616,8 @@ export function botInput(match: Match, idx: number): Input {
       b.detourUntil = t + b.rng.range(15, 30);
       b.detourSide = b.rng.chance(50) ? 1 : -1;
       b.strafe = -b.strafe;
+      // Big Island: a roam goal behind a ruin wall can't be walked to directly — pick another one
+      if (big && mode === "roam") b.wanderUntil = t;
     }
     b.checkTick = t;
     b.checkX = me.x;
