@@ -2,8 +2,9 @@
 // shaders) is a separate chunk loaded after the first paint, when the browser is idle — so a cold first
 // visit shows the logo and PLAY at once, and pressing PLAY early simply starts the match when ready.
 const play = document.getElementById("play");
+// PLAY is clickable from the first paint: pressed while the 3D still loads, the match starts as soon as it's ready.
 play?.addEventListener("click", () => {
-  if (play.getAttribute("aria-disabled") !== "true") return;
+  if (play.dataset.loading !== "1") return;
   (window as unknown as { __brWantPlay?: boolean }).__brWantPlay = true;
   play.textContent = "STARTING…";
 });
@@ -11,8 +12,7 @@ play?.addEventListener("click", () => {
 // three.js evaluates in its own task first, then the game code in the next one (two shorter tasks).
 const load = () =>
   void import("three").then(() => new Promise<void>((r) => setTimeout(r, 0))).then(() => import("./game"));
-const whenIdle = (cb: () => void) =>
-  "requestIdleCallback" in window ? requestIdleCallback(cb, { timeout: 600 }) : setTimeout(cb, 60);
-requestAnimationFrame(() => setTimeout(() => whenIdle(load), 0));
+// start right after the first paint (no idle wait: the title is already on screen and interactive)
+requestAnimationFrame(() => setTimeout(load, 0));
 
 export {};

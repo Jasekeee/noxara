@@ -9,6 +9,7 @@ export const MAINNET: { contract: string | null; deployTx: string | null; explor
   explorer: "https://nearblocks.io",
 };
 export const GITHUB_URL = "https://github.com/Jasekeee/noxara";
+export const GAME_URL = "https://playnoxara.vercel.app";
 /** The launch post on X; null until it is published (no fake link). */
 export const X_POST_URL: string | null = null;
 
@@ -77,6 +78,7 @@ export function renderAbout(body: HTMLElement, d: AboutDeps) {
   );
 
   const lk = h("div", "lg-links ab-links");
+  lk.appendChild(ext("Play: playnoxara.vercel.app", GAME_URL));
   lk.appendChild(ext("GitHub: Jasekeee/noxara", GITHUB_URL));
   if (X_POST_URL) lk.appendChild(ext("The X post", X_POST_URL));
   sec("Links", lk, ...(X_POST_URL ? [] : [h("p", "sc-note", "X post: coming soon")]));

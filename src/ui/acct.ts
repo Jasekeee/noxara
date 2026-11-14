@@ -25,3 +25,22 @@ export function acctTag(a: string | null | undefined, href?: string, cls = "acct
   s.title = a;
   return s;
 }
+
+/** Phone width: middle-truncate long ids (the suffix always stays); desktop shows the full id. */
+const narrow = () => typeof innerWidth === "number" && innerWidth <= 480;
+
+/** What to call a fighter or player: the real NEAR account id when it has one (full on desktop), else its name. */
+export function displayId(account: string | null | undefined, name: string): string {
+  return isChainAcct(account) ? (narrow() ? truncAcct(account, 24) : account) : name;
+}
+
+/** A headline-sized account label: "zinnia" bold + ".noxara.near" small, reading as one id; plain name offline. */
+export function acctLabel(account: string | null | undefined, name: string, cls = "acct-label"): HTMLElement {
+  if (!isChainAcct(account)) return h("span", cls, name);
+  const shown = narrow() ? truncAcct(account, 24) : account;
+  const dot = shown.indexOf(".");
+  const el = h("span", cls, undefined, h("b", "", dot > 0 ? shown.slice(0, dot) : shown), dot > 0 ? h("small", "", shown.slice(dot)) : null);
+  el.title = account;
+  el.setAttribute("aria-label", account);
+  return el;
+}

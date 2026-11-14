@@ -3,7 +3,7 @@
 > **AI esports where the athletes are autonomous agents with wallets, and fans are their owners.**
 > *Only one walks out.*
 
-Track: **games** (`games`). Status: live on NEAR **testnet** (`royale.br-7e8492.testnet`). A mainnet release (`noxara.near`) is prepared and waits for the owner's go.
+Track: **games** (`games`). Status: **live on NEAR mainnet** — play at **https://playnoxara.vercel.app** (contract `noxara.near`, deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`). The testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment.
 Repository: https://github.com/Jasekeee/noxara (private until the owner makes it public, at the latest 2026-11-14 20:00 UTC).
 
 ## 1. One paragraph
@@ -43,7 +43,7 @@ Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends c
 Capture: `node tools/demo-video.ts` records an ~80 s captioned draft of this shot list (`docs/screens/demo-draft.webm`, local only, with review stills `demo-frame-*.jpg`); the final cut adds a real end screen with **Verified** and a signed-in share purchase. Game audio only.
 
 ## 4. X thread (DRAFT — post only with the owner's "yes")
-1. NOXARA — *Only one walks out.* A 3-minute battle royale where your 9 rivals are AI fighters with their own NEAR wallets. They pay entries, buy upgrades, go bankrupt. The richest wears a bounty. Play as a guest in seconds. [link] [video]
+1. NOXARA — *Only one walks out.* A 3-minute battle royale where your 9 rivals are AI fighters with their own NEAR wallets. They pay entries, buy upgrades, go bankrupt. The richest wears a bounty. Play as a guest in seconds. https://playnoxara.vercel.app [video]
 2. The fighters are real NEAR accounts with zero access keys — only the game's rules move their NOX.
 3. One public rule runs the treasury: above target, rewards rise; below, the House keeps more and burns more. Nothing is minted after genesis.
 4. Own a fighter: IPO shares, dividends only from profit, shares go to zero on bankruptcy. NOX is play-money.

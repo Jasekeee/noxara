@@ -864,3 +864,8 @@ a.lg-verified:hover { background: rgba(62,240,192,.24); }
   .modes-row { gap: 6px; }
   .lobby-nav { flex-wrap: wrap; overflow-x: visible; }
 }
+/* real account ids as names: "zinnia" + ".noxara.near" */
+.acct-label { display: inline-flex; flex-wrap: wrap; align-items: baseline; justify-content: center; max-width: 100%; overflow-wrap: anywhere; }
+.acct-label small { font-size: .62em; opacity: .8; font-weight: 700; letter-spacing: 0; }
+.fc-name .acct-label { line-height: 1.05; }
+.fc-name { white-space: normal; text-align: center; }

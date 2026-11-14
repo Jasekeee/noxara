@@ -1,7 +1,7 @@
 // Full-screen pages over the title: FIGHTERS (+ profile with story + sponsoring), LEADERBOARD, MY SPONSORSHIPS.
 // Uses the T3 client API only when present (`"signIn" in client`), otherwise shows what the T2 data allows.
 import type { BotMarket, FighterEvent, FighterInfo, GameClient, GameClientT3, LeaderRow, Sponsorship } from "../net/api";
-import { acctTag, isChainAcct } from "./acct";
+import { acctLabel, acctTag, displayId, isChainAcct } from "./acct";
 import { h, icon, ICON, PERSONALITY_COLOR, PERSONALITY_ICON, fmt } from "./dom";
 import { hasEcon, renderEconomy, renderNear } from "./econ";
 
@@ -207,7 +207,7 @@ export class Pages {
         "span",
         "mc-meta",
         undefined,
-        h("b", "", f.name),
+        h("b", "", undefined, acctLabel(f.account, f.name)),
         acctTag(f.account, undefined, "acct mc-acct"),
         h("span", "mc-pers", undefined, icon(PERSONALITY_ICON[f.personality] ?? PERSONALITY_ICON.balanced), h("span", "", f.personality)),
         h("span", "mc-bal", undefined, icon(ICON.coin, "ic coin"), h("b", "", f.status === "retired" ? "broke" : fmt(f.balance))),
@@ -226,7 +226,7 @@ export class Pages {
   // ---------------------------------------------------------------- PROFILE
   profile(f: FighterInfo) {
     const render = () => {
-      $("page-title").textContent = f.name.toUpperCase();
+      $("page-title").textContent = displayId(f.account, f.name);
       const body = $("page-body");
       body.textContent = "";
       const c = this.d.client();
@@ -244,7 +244,7 @@ export class Pages {
           "div",
           "pf-id",
           undefined,
-          h("div", "pf-name", fresh.name, fresh.generation > 0 && (fresh.record.matches < 5 || fresh.status === "retired") ? h("span", "fc-rookie inline", fresh.status === "retired" ? "RETIRED" : "ROOKIE") : fresh.status === "retired" ? h("span", "fc-rookie inline gone", "RETIRED") : null),
+          h("div", "pf-name", undefined, acctLabel(fresh.account, fresh.name), fresh.generation > 0 && (fresh.record.matches < 5 || fresh.status === "retired") ? h("span", "fc-rookie inline", fresh.status === "retired" ? "RETIRED" : "ROOKIE") : fresh.status === "retired" ? h("span", "fc-rookie inline gone", "RETIRED") : null),
           acctTag(fresh.account, this.d.client()?.mode === "chain" ? this.d.client()!.explorerAccount(fresh.account) : undefined, "acct pf-acct", true),
           h("div", "fc-pers big", undefined, icon(PERSONALITY_ICON[fresh.personality] ?? PERSONALITY_ICON.balanced), h("span", "", fresh.personality)),
           h("p", "pf-story", backstory(fresh)),
@@ -337,7 +337,7 @@ export class Pages {
       }
     };
     void this.loadMarket().then(() => this.open && this.stack[this.stack.length - 1] === render && render());
-    this.show(f.name.toUpperCase(), render);
+    this.show(displayId(f.account, f.name), render);
   }
 
   // ---------------------------------------------------------------- SPONSOR MODAL
@@ -483,7 +483,6 @@ export class Pages {
       const tbody = h("tbody");
       table.append(thead, tbody);
       body.appendChild(table);
-      const c0 = this.d.client();
       const fill = (rows: LeaderRow[]) => {
         tbody.textContent = "";
         if (!rows.length) {
@@ -499,7 +498,7 @@ export class Pages {
           img.alt = "";
           if (f) img.src = this.d.portrait(f);
           const tr = h("tr", i < 3 ? `top${i + 1}` : "");
-          tr.append(h("td", "rank", String(i + 1)), h("td", "", undefined, f ? img : h("span", "lb-dot")), h("td", "nm", r.bot || r.name === "You" || !isChainAcct(r.account) ? r.name : "", acctTag(r.account, c0?.explorerAccount(r.account)) ?? false), h("td", "", String(r.wins)), h("td", "", String(r.kills)), h("td", "", String(r.matches)), h("td", "gold", fmt(r.earnings)));
+          tr.append(h("td", "rank", String(i + 1)), h("td", "", undefined, f ? img : h("span", "lb-dot")), h("td", "nm", undefined, r.name === "You" ? h("span", "", "You") : acctLabel(r.account, r.name)), h("td", "", String(r.wins)), h("td", "", String(r.kills)), h("td", "", String(r.matches)), h("td", "gold", fmt(r.earnings)));
           if (f) {
             tr.tabIndex = 0;
             tr.classList.add("link");

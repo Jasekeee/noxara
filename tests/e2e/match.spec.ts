@@ -29,6 +29,13 @@ test("guest opens → plays a full match", async ({ page }) => {
   expect(result.placement!).toBeLessThanOrEqual(10);
   expect(result.hasRecord, "window.__br.record() exposed on match end").toBe(true);
   expect(await hasHorizontalScroll(page), "no horizontal scroll on the end screen").toBe(false);
+  // the end screen always has a way out: MAIN MENU returns to the title
+  const menuBtn = page.locator("#to-lobby");
+  await expect(menuBtn).toBeVisible({ timeout: 15_000 });
+  await expect(menuBtn).toHaveText(/MAIN MENU/);
+  await page.waitForTimeout(1200); // the end screen ignores pointer clicks for a moment (anti mis-click guard)
+  await menuBtn.click();
+  await expect.poll(() => phase(page), { timeout: 10_000 }).toBe("title");
   expect(errors, "zero console errors / page errors").toEqual([]);
   expect(chainCalls, "offline match made no relayer/RPC calls").toEqual([]);
 });

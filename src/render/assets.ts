@@ -80,6 +80,10 @@ const RECOLOR: Record<string, number> = {
   woodBarkDark: 0x8a5638,
 };
 
+// Every Kenney character GLB references the same external Textures/colormap.png: without the cache the loader
+// fetched (and on Vercel re-validated) it once per model, one after another — ~4 s of a cold first load.
+THREE.Cache.enabled = true;
+
 const yieldTask = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /**

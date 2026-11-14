@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
-import { isChainAcct, shortAcct } from "./ui/acct";
+import { displayId, isChainAcct, shortAcct } from "./ui/acct";
 import { PauseMenu } from "./ui/menu";
 import { AimLine } from "./render/aimline";
 import { Recorder } from "./sim/record";
@@ -316,12 +316,12 @@ function settleLines(r: SettleResult): string[] {
 export function worldLines(list: FighterInfo[], ipo: Map<string, { left: number; price: number }>): string[] {
   const out: string[] = [];
   const mark = list.find((f) => f.status === "active" && f.bounty);
-  if (mark) out.push(`THE MARK: ${mark.name} — ${mark.bountyValue > 0 ? `${fmt(mark.bountyValue)} NOX bounty` : "bounty on its head"}`);
+  if (mark) out.push(`THE MARK: ${displayId(mark.account, mark.name)} — ${mark.bountyValue > 0 ? `${fmt(mark.bountyValue)} NOX bounty` : "bounty on its head"}`);
   for (const f of list.filter((x) => x.status === "active" && x.generation > 0 && x.record.matches < 10)) {
     const i = ipo.get(f.account);
-    out.push(i ? `Rookie ${f.name}: IPO open, ${i.left} shares at ${fmt(i.price)} NOX` : `Rookie ${f.name} joined the board`);
+    out.push(i ? `Rookie ${displayId(f.account, f.name)}: IPO open, ${i.left} shares at ${fmt(i.price)} NOX` : `Rookie ${displayId(f.account, f.name)} joined the board`);
   }
-  for (const f of list.filter((x) => x.status === "retired").slice(-3).reverse()) out.push(`${f.name} went broke after ${f.record.matches} matches`);
+  for (const f of list.filter((x) => x.status === "retired").slice(-3).reverse()) out.push(`${displayId(f.account, f.name)} went broke after ${f.record.matches} matches`);
   return out;
 }
 function renderTicker() {
@@ -561,6 +561,9 @@ function buildMatch(cfg: MatchConfig, lazy = false) {
   const bv = current?.bountyValue ?? 0;
   views = match.state.fighters.map((f, i) => {
     const v = new FighterView(i, f, tags, cfg.fighters[i].upgrades.skin);
+    // name tag over the head: the real NEAR account id (full on desktop), the name only offline
+    const nm = v.tag.querySelector<HTMLElement>(".nm");
+    if (nm && i > 0) nm.textContent = displayId(cfg.fighters[i].id, f.name);
     if (f.bounty) v.setBountyValue(bv);
     scene.add(v.root);
     return v;
@@ -641,7 +644,7 @@ async function startMatch() {
   gotChest = false;
   meBushSeen = false;
   const st = current;
-  if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${current.cfg.fighters[st.bountyIdx].name.toUpperCase()}`, "gold");
+  if (st.bountyIdx !== null && st.bountyValue > 0) hud.banner(`BOUNTY: ${fmt(st.bountyValue)} NOX ON ${displayId(current.cfg.fighters[st.bountyIdx].id, current.cfg.fighters[st.bountyIdx].name)}`, "gold");
   else hud.banner(inTraining ? "TRAINING ISLAND" : inBig ? "BIG ISLAND" : "READY…", "gold");
   $("title").classList.add("hidden");
   $("hud").classList.remove("hidden");
@@ -688,7 +691,7 @@ function shake(a: number) {
 }
 function nameOf(i: number | null) {
   if (i === null || !match) return null;
-  return i === 0 ? "You" : match.state.fighters[i].name;
+  return i === 0 ? "You" : displayId(match.cfg.fighters[i].id, match.state.fighters[i].name);
 }
 
 /** The bot's real chain sub-account (undefined offline and for the player). */
@@ -700,7 +703,24 @@ function acctOf(i: number | null): string | undefined {
 
 // ------------------------------------------------------------------ events
 const _v3 = new THREE.Vector3();
+/** true while the rest of a match is simulated instantly (the player left after dying): no sounds, banners or feed */
+let silent = false;
+/**
+ * The player is out and leaves before the match ends: simulate the rest right now (bots only, deterministic,
+ * the human input is idle), so a chain match still ends, records and settles instead of being abandoned.
+ */
+function finishInBackground() {
+  if (!match || match.state.over || match.state.fighters[0].alive) return;
+  silent = true;
+  try {
+    for (let n = 0; n < 20_000 && match && !match.state.over; n++) stepSim();
+  } finally {
+    silent = false;
+  }
+}
+
 function onEvents(evs: SimEvent[]) {
+  if (silent) return;
   if (!match) return;
   const st = match.state;
   for (const e of evs) {
@@ -764,7 +784,7 @@ function onEvents(evs: SimEvent[]) {
           myKillTimes.push(time);
           const streak = myKillTimes.filter((t) => time - t < 5).length;
           const tag = streak >= 3 ? "TRIPLE! " : streak === 2 ? "DOUBLE! " : "";
-          hud.banner(`${tag}ELIMINATED ${f.name.toUpperCase()}`, streak >= 2 ? "gold" : "hot");
+          hud.banner(`${tag}ELIMINATED ${nameOf(e.who)!}`, streak >= 2 ? "gold" : "hot");
           const p = project(v.pos.x, 1.2, v.pos.z);
           if (p) hud.hitMark(p.x, p.y, true);
           slow(0.35, 0.5);
@@ -789,7 +809,7 @@ function onEvents(evs: SimEvent[]) {
       case "bounty": {
         if (e.by === 0) iClaimedBounty = true;
         const val = current && current.bountyValue > 0 ? `THE ${fmt(current.bountyValue)} NOX BOUNTY` : "THE BOUNTY";
-        hud.banner(`${nameOf(e.by)!.toUpperCase()} CLAIMED ${val} ON ${nameOf(e.who)!.toUpperCase()}!`, "gold");
+        hud.banner(`${nameOf(e.by)!} CLAIMED ${val} ON ${nameOf(e.who)!}!`, "gold");
         {
           const bvNow = current?.bountyValue ?? 0;
           // only a wallet-paid player really collects; guests and offline runs earn 0 (say so, never fake a payout)
@@ -966,7 +986,7 @@ function drawLedger() {
     return;
   }
   renderLedger(el, {
-    names: st.fighters.map((f) => (f.idx === 0 ? "You" : f.name)),
+    names: st.fighters.map((f) => (f.idx === 0 ? "You" : displayId(match!.cfg.fighters[f.idx].id, f.name))),
     accounts: match.cfg.fighters.map((f) => f.id),
     placements: st.fighters.map((f) => f.placement),
     kills: st.fighters.map((f) => f.kills),
@@ -1013,7 +1033,7 @@ function showEnd(force: boolean) {
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
   $("spectate").classList.toggle("hidden", st.over);
-  $("to-lobby").classList.toggle("hidden", !st.over);
+  $("to-lobby").classList.remove("hidden"); // MAIN MENU is always a way out (an unfinished match is finished in the background)
   social.endShown(st.over);
   drawLedger();
   const xb = $("xp-box");
@@ -1048,9 +1068,17 @@ const guarded = (fn: () => void) => (e: Event) => {
 
 $("again").addEventListener("click", guarded(() => {
   if (inBig) wantBig = true; // big island: "again" stays on the big map
+  finishInBackground(); // the previous match still ends and settles
   void startMatch();
 }));
-$("to-lobby").addEventListener("click", guarded(toLobby));
+const toMainMenu = () => {
+  spectating = false;
+  $("spec").classList.add("hidden");
+  finishInBackground();
+  toLobby();
+};
+$("to-lobby").addEventListener("click", guarded(toMainMenu));
+$("spec-menu").addEventListener("click", toMainMenu);
 $("spectate").addEventListener("click", guarded(() => {
   sfx.ui();
   spectating = true;
@@ -1246,7 +1274,7 @@ function frame(now: number) {
             hud.popup("GO!");
             sfx.countTick(true);
             const r = match.cfg.rival;
-            if (r !== undefined && st.fighters[r]) setTimeout(() => hud.banner(`${st.fighters[r].name.toUpperCase()} REMEMBERS YOU`, "hot"), 900);
+            if (r !== undefined && st.fighters[r]) setTimeout(() => hud.banner(`${nameOf(r)} REMEMBERS YOU`, "hot"), 900);
           }
         }
         countShown = n;
@@ -1410,26 +1438,32 @@ function updateBountyArrow(f: { idx: number } | null) {
 // ------------------------------------------------------------------ boot
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 let sceneReady = false;
+const mark = (n: string) => performance.mark(`br:${n}`);
 async function boot() {
+  mark("boot");
   lobbySkeleton($("roster"));
   void clientP.then(() => refreshLobby());
   const fill = $("loadfill");
   await loadAll((p) => (fill.style.width = `${Math.round(p * 100)}%`));
+  mark("assets");
   await nextFrame();
   buildMatch(localStart().cfg, true);
   await nextFrame();
   await world?.finish();
+  mark("world");
   await nextFrame();
   // compile shaders without blocking the main thread (KHR_parallel_shader_compile when available)
   if (renderer.extensions.has("KHR_parallel_shader_compile")) await renderer.compileAsync(scene, camera).catch(() => undefined);
   else renderer.compile(scene, camera);
   sceneReady = true;
+  mark("compiled");
   await nextFrame();
   const play = $("play") as HTMLButtonElement;
-  play.removeAttribute("aria-disabled");
+  delete play.dataset.loading;
   play.textContent = "PLAY";
   $("loadfill").parentElement!.classList.add("done");
   bootDone = true;
+  mark("ready");
   wantPlay ||= (window as unknown as { __brWantPlay?: boolean }).__brWantPlay === true;
   if (SKIP_TITLE || AUTOPLAY || wantPlay) void startMatch();
   // (no autofocus: Tab from the top of the page reaches PLAY first)

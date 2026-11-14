@@ -12,7 +12,8 @@
     <meta property="og:site_name" content="NOXARA" />
     <meta property="og:title" content="NOXARA — Only one walks out." />
     <meta property="og:description" content="A 3-minute, 10-fighter island battle royale against AI fighters with their own NEAR wallets. Play instantly in your browser — no wallet needed." />
-    <meta property="og:image" content="/og.png" />
+    <meta property="og:image" content="https://playnoxara.vercel.app/og.png" />
+    <meta property="og:url" content="https://playnoxara.vercel.app/" />
     <meta property="og:image:width" content="1200" />
     <meta property="og:image:height" content="630" />
     <meta property="og:image:alt" content="NOXARA wordmark over a low-poly island with ten fighters and loot beacons" />
@@ -55,7 +56,7 @@
             <span class="storm-dot"></span><span id="storm-text">STORM 1</span><b id="match-time">3:00</b>
           </div>
           <div id="storm-warn" class="storm-warn hidden">OUTSIDE THE SAFE ZONE</div>
-          <div id="spec" class="spec hidden"><span id="spec-text"></span><button id="spec-exit" class="spec-exit" aria-label="Leave spectating (Esc)">RESULTS <kbd>Esc</kbd></button></div>
+          <div id="spec" class="spec hidden"><span id="spec-text"></span><button id="spec-exit" class="spec-exit" aria-label="Leave spectating (Esc)">RESULTS <kbd>Esc</kbd></button><button id="spec-menu" class="spec-exit">MAIN MENU</button></div>
         </div>
         <div class="hud-tr">
           <ol id="feed" aria-live="polite"></ol>
@@ -102,7 +103,7 @@
         <div class="title-inner">
           <h1 id="logo" class="logo"><span class="l1">NOXARA</span> <span class="l2">Only one walks out.</span></h1>
           <p class="tag core-line">9 AI mercenaries. Real wallets. One bounty.</p>
-          <button id="play" class="btn-primary" aria-disabled="true">LOADING…</button>
+          <button id="play" class="btn-primary" data-loading="1">PLAY</button>
           <div class="modes-row">
             <button id="training" class="btn-ghost small train-btn" title="Easy bots, nothing recorded: learn to move, aim and hide">TRAINING ISLAND <small>easy bots · not recorded</small></button>
             <div id="big-island-entry" class="mode-entry"><button id="big-island" class="btn-ghost small train-btn big-btn" title="A 3x larger island with forests, tall grass and walled ruins, more chests and a slow storm: 7-minute matches, offline">BIG ISLAND <small>3x map · dense cover · ~7 min · offline</small></button></div>
@@ -171,7 +172,7 @@
             <button id="again" class="btn-primary">PLAY AGAIN</button>
             <button id="again-training" class="btn-ghost hidden">TRY THE TRAINING ISLAND</button>
             <button id="spectate" class="btn-ghost">SPECTATE</button>
-            <button id="to-lobby" class="btn-ghost">FIGHTERS</button>
+            <button id="to-lobby" class="btn-ghost">MAIN MENU</button>
           </div>
         </div>
       </section>

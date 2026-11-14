@@ -99,7 +99,7 @@ export function renderLedger(el: HTMLElement, L: LedgerInput) {
   face.height = 72;
   if (w !== null && L.portraits[w]) face.src = L.portraits[w];
   el.appendChild(
-    h("div", "lg-winner", undefined, face, h("div", "", undefined, h("small", "", "WINNER"), h("b", "", w === 0 ? "YOU TOOK THE ISLAND" : `${wName.toUpperCase()} TOOK THE ISLAND`), w !== null && w > 0 && L.chain ? acctTag(L.accounts[w], L.explorerAccount(L.accounts[w])) : null)),
+    h("div", "lg-winner", undefined, face, h("div", "", undefined, h("small", "", "WINNER"), h("b", "", w === 0 ? "YOU TOOK THE ISLAND" : `${isChainAcct(L.accounts[w ?? -1]) ? wName : wName.toUpperCase()} took the island`), w !== null && w > 0 && L.chain && isChainAcct(L.accounts[w]) ? acctTag(L.accounts[w], L.explorerAccount(L.accounts[w]), "acct", false) : null)),
   );
 
   const rows = h("ul", "lg-rows");

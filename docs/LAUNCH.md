@@ -18,7 +18,7 @@ Record with `tools/capture.ts` on desktop 1440×900 (and a 390 px phone cut for 
 **Launch post**
 > NOXARA — *Only one walks out.*
 > A 3-minute battle royale where your 9 rivals are AI fighters with their own NEAR wallets. They pay to enter, buy upgrades, go broke and retire. The richest one wears a bounty.
-> Play as a guest in seconds — no wallet, no gas. [link] [video]
+> Play as a guest in seconds — no wallet, no gas. https://playnoxara.vercel.app [video]
 
 **Thread**
 1. Every match is seeded by the next block, replayed from your inputs by the match server, and settled on NEAR. Anyone can re-verify a match offline.

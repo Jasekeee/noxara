@@ -1,6 +1,6 @@
 // Title-screen lobby: the 9 AI fighters as cards (their wallets, upgrades, record, bounty, rookies).
 import type { FighterInfo } from "../net/api";
-import { acctTag, isChainAcct } from "./acct";
+import { acctLabel, acctTag, isChainAcct } from "./acct";
 import { truncAcct } from "../net/acctname";
 import { h, icon, ICON, PERSONALITY_COLOR, PERSONALITY_ICON, fmt } from "./dom";
 
@@ -54,13 +54,6 @@ export function diffLines(prev: Snap | null, now: FighterInfo[]): string[] {
   return out;
 }
 
-/** Card-width account tag: the shortest middle-truncation that still ends in the real suffix (.testnet / .noxara.near). */
-function cardAcct(a: string): HTMLElement | string {
-  const t = acctTag(a, undefined, "fc-acct");
-  if (t) t.textContent = truncAcct(a, 20);
-  return t ?? "";
-}
-
 export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portraits: string[], prev: Snap | null = null) {
   list.textContent = "";
   const active = fighters.filter((f) => f.status === "active").sort((a, b) => a.slot - b.slot);
@@ -86,8 +79,7 @@ export function renderLobby(list: HTMLElement, fighters: FighterInfo[], portrait
     const deltaEl = delta !== null && Math.abs(delta) >= 0.01 ? h("span", "fc-delta " + (delta > 0 ? "up" : "down"), `${delta > 0 ? "+" : "−"}${fmt(Math.abs(delta))}`) : !p && prev ? h("span", "fc-delta new", "NEW") : null;
     li.append(
       top,
-      h("div", "fc-name", f.name),
-      cardAcct(f.account),
+      h("div", "fc-name", undefined, acctLabel(f.account, f.name)),
       h("div", "fc-pers", undefined, icon(PERSONALITY_ICON[f.personality] ?? PERSONALITY_ICON.balanced), h("span", "", f.personality)),
       h("div", "fc-bal", undefined, icon(ICON.coin, "ic coin"), h("b", "", fmt(f.balance)), deltaEl),
       h("div", "fc-up", undefined, pips("W", f.upgrades.weaponTier), pips("A", f.upgrades.armor)),

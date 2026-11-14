@@ -18,12 +18,13 @@ Keys never leave Railway's variables screen: you paste them there yourself from 
    | `GUEST_VIA_CONTRACT` | `1` (guests become `g-<id>.noxara.near`) |
    | `GUEST_BUDGET_NEAR` / `DAILY_GUEST_CAP` | `0.5` / `18` (≈ 18 new guests until the budget is topped up; then guests get the free Training Island) |
    | `RELAYER_BUDGET_NEAR` | `0.25` (real accounts' registrations + gas; when it runs out they sign their own transactions) |
-   | `CORS_ORIGINS` | `https://<your-vercel-domain>` |
-   | `PUBLIC_URL` / `GAME_URL` | `https://<your-vercel-domain>` |
+   | `CORS_ORIGINS` | `https://playnoxara.vercel.app,https://noxara-eight-gamma.vercel.app` |
+   | `PUBLIC_URL` | `https://noxara-production.up.railway.app` (the server itself: it serves the challenge preview pages) |
+   | `GAME_URL` | `https://playnoxara.vercel.app/` (where challenge links send players) |
    | `RECORDS_DIR` | `/data/records` |
    | `TRUST_PROXY` | `1` |
 4. Add a Volume mounted at `/data` (match records + daily tournament survive restarts).
-5. Settings → Networking → Generate Domain → copy `https://<app>.up.railway.app`. Check `https://<app>.up.railway.app/api/health` shows `mainnet`.
+5. Settings → Networking → Generate Domain → copy `https://noxara-production.up.railway.app`. Check `https://<app>.up.railway.app/api/health` shows `mainnet`.
 
 ## Vercel — the game
 1. vercel.com → Add New Project → import `Jasekeee/noxara`. `vercel.json` sets the build (`npm run build`, output `dist`).
@@ -31,7 +32,9 @@ Keys never leave Railway's variables screen: you paste them there yourself from 
    | Variable | Value |
    |---|---|
    | `VITE_NEAR_NETWORK` | `mainnet` (switches contract/RPC/explorer/wallet to `noxara.near` + mainnet) |
-   | `VITE_RELAYER_URL` | `https://<app>.up.railway.app` |
+   | `VITE_RELAYER_URL` | `https://noxara-production.up.railway.app` |
 3. Deploy. Then put the Vercel domain into Railway's `CORS_ORIGINS`, `PUBLIC_URL`, `GAME_URL` and redeploy Railway.
 
 Cost: Vercel Hobby $0; Railway ≈ $5/month [assumed]. Teardown: delete both projects; contract teardown per docs/MAINNET.md §4.
+
+**Live (2026-11-14):** game https://playnoxara.vercel.app (also https://noxara-eight-gamma.vercel.app) · server https://noxara-production.up.railway.app · contract `noxara.near` (deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`).
