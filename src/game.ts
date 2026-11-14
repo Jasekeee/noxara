@@ -1,6 +1,6 @@
 // NOXARA client: fixed-step simulation (TICK_HZ) + interpolated Three.js rendering + juice.
 import * as THREE from "three";
-import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent } from "./sim/types";
+import { FIGHTERS, TICK_HZ, type Input, type Match, type MatchRecord, type SimEvent, type WeaponKind } from "./sim/types";
 import { createMatch } from "./sim/match";
 import { botInput } from "./sim/ai";
 import { acctLabel, displayId, isChainAcct, shortAcct } from "./ui/acct";
@@ -8,7 +8,7 @@ import { PauseMenu } from "./ui/menu";
 import { AimLine } from "./render/aimline";
 import { Recorder } from "./sim/record";
 import { t1Roster } from "./sim/roster";
-import { SPAWN_PROTECT, WEAPONS } from "./sim/rules";
+import { SPAWN_PROTECT, WEAPONS, stormPhasesFor } from "./sim/rules";
 import { HUMAN_SKIN_IDS, charFor, loadAll, loadSkins } from "./render/assets";
 import { makeWater, World } from "./render/world";
 import { FighterView } from "./render/fighters";
@@ -170,6 +170,10 @@ let endShown = false;
 let spectating = false;
 let matchStartT = 0;
 let stormTickT = 0;
+let stormBannerPhase = 0;
+let pendingHints = false;
+/** dead player chose WATCH THE PAYOUT: the spectated match runs at 4x */
+let spectateFF = false;
 let introT = 0;
 const INTRO = 1.0;
 let countShown = -1;
@@ -180,6 +184,8 @@ let myKillTimes: number[] = [];
 const humanInput: Input = { mx: 0, my: 0, aim: 0, fire: false };
 const inputs = new Map<number, Input>();
 const killerOf = new Map<number, number | null>();
+/** weapon that killed the local player + what they held (for the death card) */
+let myDeath: { weapon: WeaponKind | "storm"; held: WeaponKind } | null = null;
 
 // camera rig
 const camTarget = new THREE.Vector3();
@@ -247,6 +253,26 @@ function setNetRetry(show: boolean) {
   $("net-mode").insertAdjacentElement("afterend", b);
 }
 
+/** F-19: paint the last known Mercenary Board instantly (cached from the previous visit) while the live one loads. */
+function showCachedRoster() {
+  try {
+    const raw = localStorage.getItem("noxara.roster.v1");
+    const v = raw ? (JSON.parse(raw) as FighterInfo[]) : null;
+    if (!Array.isArray(v) || v.length < 2 || !v.every((f) => f && f.upgrades && f.record && typeof f.account === "string")) return;
+    const list = $("roster");
+    renderLobby(list, v, portraits, null);
+    list.classList.add("updating");
+    list.title = "Updating…";
+  } catch {
+    /* no cache: the skeleton stays */
+  }
+}
+const rosterFresh = () => {
+  const l = $("roster");
+  l.classList.remove("updating");
+  l.removeAttribute("title");
+};
+
 async function refreshLobby() {
   const mode = $("net-mode");
   if (!mode.classList.contains("chain")) setNet(mode, "Connecting…", "Connecting to the island…");
@@ -255,7 +281,7 @@ async function refreshLobby() {
     setNetRetry(false);
     setNet(mode, "Practice · not ranked", "Practice match: results aren't ranked.");
     if (!fighters.length) fighters = localFighters();
-    if (portraits.length) renderLobby($("roster"), fighters, portraits, null);
+    if (portraits.length) { renderLobby($("roster"), fighters, portraits, null); rosterFresh(); }
     await refreshAccount();
     return;
   }
@@ -276,6 +302,7 @@ async function refreshLobby() {
   mode.classList.toggle("chain", c.mode === "chain");
   if (fighters.length && portraits.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
+    rosterFresh();
     void loadSparks(c);
   }
   renderTicker();
@@ -613,6 +640,7 @@ function buildMatch(cfg: MatchConfig, lazy = false) {
   recorder = new Recorder();
   record = null;
   killerOf.clear();
+  myDeath = null;
   watch = 0;
   meDeadAt = -1;
   endShown = false;
@@ -676,6 +704,8 @@ async function startMatch() {
   phase = "playing";
   matchStartT = time;
   introT = INTRO;
+  stormBannerPhase = 0;
+  spectateFF = false;
   countShown = -1;
   myKillTimes = [];
   lastAmmo = -1;
@@ -695,7 +725,7 @@ async function startMatch() {
   $("pot-chip").title = current.entries !== undefined ? `Pot: entries ${fmt(current.entries)} + House top-up ${fmt(Math.max(0, current.pot - current.entries))} = ${fmt(current.pot)} NOX, paid to the winner. ${PLAY_MONEY_NOTE}` : `Prize pot, paid to the winner. ${PLAY_MONEY_NOTE}`;
   hud.reset();
   controls.setEnabled(true);
-  if (!AUTOPLAY) hud.showHints(touchy());
+  pendingHints = !AUTOPLAY; // shown after GO so the countdown, banner and chips never stack
   canvas.focus();
 }
 
@@ -814,6 +844,7 @@ function onEvents(evs: SimEvent[]) {
       }
       case "kill": {
         killerOf.set(e.who, e.by);
+        if (e.who === 0) myDeath = { weapon: e.weapon, held: st.fighters[0].weapon };
         const v = views[e.who];
         const f = st.fighters[e.who];
         v.die();
@@ -892,8 +923,7 @@ function onEvents(evs: SimEvent[]) {
         break;
       }
       case "storm":
-        hud.banner("THE STORM IS CLOSING IN", "storm");
-        sfx.stormWarn();
+        // phase announced (tick 1 for the first one): the banner fires when the circle actually starts to shrink (frame loop)
         break;
       case "win": {
         if (e.who === 0) sfx.victory();
@@ -1025,6 +1055,23 @@ function drawLedger() {
     n.className = "lg-note";
     n.textContent = inTraining ? `${st.alive} still fighting. Training Island: nothing is paid or recorded.` : "The pot pays out when the last one stands.";
     el.appendChild(n);
+    // where the pot goes: only amounts known from the match start (the exact split is reported when the match settles)
+    if (!inTraining && current && current.pot > 0) {
+      const pp = document.createElement("div");
+      pp.className = "pot-preview";
+      const line = (html: string, cls = "") => {
+        const d = document.createElement("div");
+        if (cls) d.className = cls;
+        d.innerHTML = html;
+        pp.appendChild(d);
+      };
+      line("WHERE THE POT GOES", "pp-h");
+      line(`Pot <b>${fmt(current.pot)} NOX</b> goes to the last one standing, minus a small burn and the House cut.`);
+      const bi = current.bountyIdx;
+      if (bi !== null && current.bountyValue > 0) line(`Bounty <b>${fmt(current.bountyValue)} NOX</b> goes to whoever eliminates ${displayId(current.cfg.fighters[bi].id, current.cfg.fighters[bi].name)}.`);
+      line("XP is added when the match ends.", "pp-xp");
+      el.appendChild(pp);
+    }
     return;
   }
   renderLedger(el, {
@@ -1082,9 +1129,11 @@ function renderKillerCard(won: boolean, killer: number | null | undefined) {
   const body = mk("div", "ek-body");
   body.appendChild(mk("small", "ek-k", "TAKEN OUT BY"));
   body.appendChild(acctLabel(acct, kf.name, "acct-label ek-name"));
+  if (myDeath && myDeath.weapon !== "storm") body.appendChild(mk("span", "ek-wp", `with a ${WEAPON_LABEL[myDeath.weapon].toLowerCase().replace(/^./, (c) => c.toUpperCase())}`));
   if (live && info && Number.isFinite(info.balance)) body.appendChild(mk("span", "ek-bal", `Wallet ${fmt(info.balance)} NOX`));
   box.appendChild(face);
   box.appendChild(body);
+  if (myDeath && myDeath.held === "popper") box.appendChild(mk("div", "ek-tip", "Tip: grab a gold-beam crate first. Crate guns outgun the Popper."));
   if (wanted) {
     const tag = mk("div", "ek-wanted");
     tag.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/></svg><span>WANTED</span>';
@@ -1128,6 +1177,7 @@ function showEnd(force: boolean) {
   const surv = Math.round((me.alive ? st.tick : lastTickAlive) / TICK_HZ);
   $("end-time").textContent = `${Math.floor(surv / 60)}:${String(surv % 60).padStart(2, "0")}`;
   $("spectate").classList.toggle("hidden", st.over);
+  $("watch-payout").classList.toggle("hidden", st.over || inTraining || !(current && current.pot > 0));
   $("to-lobby").classList.remove("hidden"); // MAIN MENU is always a way out (an unfinished match is finished in the background)
   social.endShown(st.over);
   drawLedger();
@@ -1174,12 +1224,18 @@ const toMainMenu = () => {
 };
 $("to-lobby").addEventListener("click", guarded(toMainMenu));
 $("spec-menu").addEventListener("click", toMainMenu);
-$("spectate").addEventListener("click", guarded(() => {
+const startSpectate = (ff: boolean) => {
   sfx.ui();
+  spectateFF = ff;
   spectating = true;
   endOpen = false;
   $("end").classList.add("hidden");
   $("hud").classList.remove("hidden");
+};
+$("spectate").addEventListener("click", guarded(() => startSpectate(false)));
+$("watch-payout").addEventListener("click", guarded(() => {
+  toast("Fast-forward x4 until the payout");
+  startSpectate(true);
 }));
 $("spec-exit").addEventListener("click", () => showEnd(true));
 addEventListener("keydown", (e) => {
@@ -1353,14 +1409,15 @@ function frame(now: number) {
     if (introT <= 0) matchStartT = time;
   }
   if (match && (phase === "playing" || phase === "over") && introT <= 0 && !starting) {
-    acc += dt * SPEED;
+    const ff = spectating && spectateFF ? 4 : 1;
+    acc += dt * SPEED * ff;
     let n = 0;
-    while (acc >= DT && n < 8 * SPEED) {
+    while (acc >= DT && n < 8 * SPEED * ff) {
       stepSim();
       acc -= DT;
       n++;
     }
-    if (n >= 8 * SPEED) acc = 0;
+    if (n >= 8 * SPEED * ff) acc = 0;
   }
   const alpha = Math.min(1, acc / DT);
 
@@ -1389,7 +1446,7 @@ function frame(now: number) {
             if (bi > 0 && !seenBountyHint()) {
               const bv = current?.bountyValue ?? 0;
               const paid = !!current && current.playerPaid > 0 && !inTraining;
-              setTimeout(() => coach.show(bv > 0 && paid ? `${nameOf(bi)} is the richest. Take them out for +${fmt(bv)} NOX.` : `${nameOf(bi)} is the richest — the crown. Take them out for the bounty.`, 5200), 1500);
+              setTimeout(() => coach.show(bv > 0 && paid ? `${nameOf(bi)} is the richest. Take them out for +${fmt(bv)} NOX.` : `${nameOf(bi)} is the richest — the crown. Take them out for the bounty.`, 5200), 3200);
             }
             const r = match.cfg.rival;
             if (r !== undefined && st.fighters[r]) setTimeout(() => hud.banner(`${nameOf(r)} REMEMBERS YOU`, "hot"), 900);
@@ -1397,6 +1454,10 @@ function frame(now: number) {
         }
         countShown = n;
       }
+    }
+    if (pendingHints && phase === "playing" && !starting && introT <= 0 && st.tick > SPAWN_PROTECT) {
+      pendingHints = false;
+      hud.showHints(touchy());
     }
     // "this is you": arrow + label for the first 10 s of the match
     views[0].setYouMarker(phase === "playing" && !starting && introT <= 0 && time - matchStartT < 10);
@@ -1436,6 +1497,7 @@ function frame(now: number) {
     placeTags();
     // off-screen bounty marker
     updateBountyArrow(st.fighters.find((f) => f.bounty && f.alive && f.idx !== watch) ?? null);
+    updateMarkPill(st.fighters.find((f) => f.bounty && f.alive) ?? null, phase === "playing" && !starting && introT <= 0 && st.tick > SPAWN_PROTECT, time);
     // local player in bush: semi-transparent self too
     meBush.x = views[0].pos.x; meBush.z = views[0].pos.z; meBush.inBush = me.inBush;
     world.update(dt, time, me.alive ? meBush : null, rustlers);
@@ -1443,9 +1505,29 @@ function frame(now: number) {
     // storm effects for the local player
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
     const outside = me.alive && phase === "playing" && dx * dx + dy * dy > st.storm.r * st.storm.r;
-    safeArrow.visible = outside && watch === 0;
+    // banner only when a shrink really starts (never during the countdown)
+    if (phase === "playing" && !starting && introT <= 0 && st.storm.phase > stormBannerPhase) {
+      const sp = stormPhasesFor(match.cfg)[st.storm.phase - 1];
+      if (sp && st.tick >= sp.shrinkStart) {
+        stormBannerPhase = st.storm.phase;
+        hud.banner(st.storm.phase === 1 ? "THE SAFE ZONE IS SHRINKING" : "THE STORM IS MOVING", "storm");
+        sfx.stormWarn();
+      }
+    }
+    const nx = me.x - st.storm.tx, ny = me.y - st.storm.ty;
+    const outNext = me.alive && phase === "playing" && !outside && st.storm.targetR < st.storm.r - 1 && nx * nx + ny * ny > st.storm.targetR * st.storm.targetR;
+    safeArrow.visible = (outside || outNext) && watch === 0;
     if (safeArrow.visible) {
-      const ax = st.storm.cx * U - views[0].pos.x, az = st.storm.cy * U - views[0].pos.z;
+      const gx = outside ? st.storm.cx : st.storm.tx, gy = outside ? st.storm.cy : st.storm.ty;
+      const ax = gx * U - views[0].pos.x, az = gy * U - views[0].pos.z;
+      {
+        // screen-space glyph for the HUD warning ("MOVE ↗")
+        const p0 = new THREE.Vector3(views[0].pos.x, 0, views[0].pos.z).project(camera);
+        const p1 = new THREE.Vector3(gx * U, 0, gy * U).project(camera);
+        const a = Math.atan2(p1.y - p0.y, p1.x - p0.x); // screen: +x right, +y up
+        const glyphs = ["→", "↗", "↑", "↖", "←", "↙", "↓", "↘"];
+        hud.zoneDir = glyphs[(Math.round(a / (Math.PI / 4)) + 8) % 8];
+      }
       const yaw = Math.atan2(-ax, -az);
       safeArrow.rotation.y = yaw;
       const k = 2.2 + Math.sin(time * 8) * 0.25;
@@ -1478,7 +1560,7 @@ function frame(now: number) {
         const show = phase === "playing" && me.alive && controls.enabled && !controls.blocked && pv.active && !AUTOPLAY && introT <= 0;
         aimLine.update(show, views[0].pos.x, views[0].pos.z, pv.ang, pv.dist, me.weapon, rdt);
       }
-      hud.updateHints(controls.used, time - matchStartT, touchy());
+      if (!pendingHints && st.tick > SPAWN_PROTECT) hud.updateHints(controls.used, time - matchStartT - 3, touchy());
       miniT -= rdt;
       if (miniT <= 0) { hud.minimap(match, 0, visibleNow); miniT = 0.05; }
     }
@@ -1524,6 +1606,28 @@ function frame(now: number) {
 const bountyEl = $("bounty-arrow");
 const bountyTip = bountyEl.querySelector<HTMLElement>(".tip")!;
 let bountyShown = false;
+const markPill = $("mark-pill");
+let markPillIdx = -1, markTakenUntil = 0, markPillText = "";
+/** persistent pill while the Mark (bounty carrier) is alive; "BOUNTY TAKEN" for a few seconds when it falls */
+function updateMarkPill(f: { idx: number } | null, on: boolean, now: number) {
+  let text = "", taken = false;
+  if (on && f) {
+    markPillIdx = f.idx;
+    const bv = current?.bountyValue ?? 0;
+    text = `THE MARK: ${nameOf(f.idx)}${bv > 0 ? ` · +${fmt(bv)} NOX` : ""}`;
+  } else if (on && markPillIdx >= 0) {
+    markPillIdx = -1;
+    markTakenUntil = now + 3.5;
+  }
+  if (!text && on && now < markTakenUntil) { text = "BOUNTY TAKEN"; taken = true; }
+  if (!on) markPillIdx = -1;
+  if (text !== markPillText) {
+    markPillText = text;
+    markPill.textContent = text;
+    markPill.classList.toggle("hidden", !text);
+    markPill.classList.toggle("taken", taken);
+  }
+}
 function updateBountyArrow(f: { idx: number } | null) {
   let show = false;
   if (f && phase === "playing") {
@@ -1562,6 +1666,7 @@ const mark = (n: string) => performance.mark(`br:${n}`);
 async function boot() {
   mark("boot");
   lobbySkeleton($("roster"));
+  showCachedRoster();
   void clientP.then(() => refreshLobby());
   const fill = $("loadfill");
   await loadAll((p) => (fill.style.width = `${Math.round(p * 100)}%`));
@@ -1593,6 +1698,7 @@ async function boot() {
   await nextFrame();
   portraits = await makePortraits(renderer);
   hud.portraits = portraits;
+  if (!fighters.length && $("roster").classList.contains("updating")) showCachedRoster(); // re-paint with portraits
   if (fighters.length) {
     renderLobby($("roster"), fighters, portraits, prevSnap);
     fillSparks($("roster"), sparks);

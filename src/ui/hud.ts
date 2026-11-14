@@ -1,7 +1,7 @@
 // DOM HUD: top chips, storm, kill feed, weapon card, hp, popups, damage numbers, minimap, hints.
 import type { FighterState, Match, WeaponKind } from "../sim/types";
 import { TICK_HZ } from "../sim/types";
-import { matchTicksFor } from "../sim/rules";
+import { stormPhasesFor } from "../sim/rules";
 import { WEAPON_LABEL } from "../render/palette";
 import { IDLE_RELOAD, WEAPONS } from "../sim/rules";
 import { shortAcct } from "./acct";
@@ -62,8 +62,6 @@ export class Hud {
   private reloadTipShown = false;
   private dirEls: HTMLElement[] = [];
   private dirI = 0;
-  private lastR = Infinity;
-  private shrinkTick = -99;
 
   constructor() {
     const box = $("floaters");
@@ -83,8 +81,6 @@ export class Hud {
   }
 
   reset() {
-    this.lastR = Infinity;
-    this.shrinkTick = -99;
     this.feed.textContent = "";
     this.cache.clear();
     this.maxAmmo.clear();
@@ -115,30 +111,50 @@ export class Hud {
     }
   }
 
+  /** screen-space arrow glyph toward the safe circle (set by game.ts from the camera projection) */
+  zoneDir = "";
   update(m: Match, me: FighterState, watching: FighterState) {
     const st = m.state;
     this.set("alive", st.alive, () => (this.alive.textContent = String(st.alive)));
     this.set("kills", me.kills, () => {
       this.kills.textContent = String(me.kills);
     });
-    const left = Math.max(0, matchTicksFor(m.cfg) - st.tick);
-    const secs = Math.ceil(left / TICK_HZ);
-    this.set("time", secs, () => (this.matchTime.textContent = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`));
-    if (st.storm.r < this.lastR) this.shrinkTick = st.tick;
-    this.lastR = st.storm.r;
-    const closing = st.tick - this.shrinkTick < 3;
-    const soon = !closing && st.storm.targetR < st.storm.r - 1;
-    this.set("storm", `${st.storm.phase}${closing}${soon}`, () => {
-      this.stormText.textContent = closing ? "STORM CLOSING" : soon ? "STORM INCOMING" : st.storm.phase > 0 ? `STORM ${st.storm.phase}` : "SAFE ZONE";
-      this.stormChip.classList.toggle("closing", closing);
+    // the chip shows the REAL storm state (UI only, read from the sim's phase table), not the match clock
+    const phases = stormPhasesFor(m.cfg);
+    const cur = st.storm.phase > 0 ? phases[st.storm.phase - 1] : undefined;
+    const mmss = (ticks: number) => {
+      const s = Math.max(0, Math.ceil(ticks / TICK_HZ));
+      return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    };
+    let label = "SAFE ZONE", clock = "", moving = false;
+    if (cur && st.tick < cur.shrinkStart) {
+      label = st.storm.phase === 1 ? "SAFE ZONE SHRINKS IN" : "NEXT SHRINK";
+      clock = mmss(cur.shrinkStart - st.tick);
+    } else if (cur && st.tick < cur.shrinkEnd) {
+      label = "STORM MOVING";
+      clock = mmss(cur.shrinkEnd - st.tick);
+      moving = true;
+    } else if (cur && st.storm.phase >= phases.length) {
+      label = "FINAL ZONE";
+    }
+    this.set("storm", `${label}${clock}${moving}`, () => {
+      const short = innerWidth <= 720 ? ({ "SAFE ZONE SHRINKS IN": "SHRINK", "NEXT SHRINK": "SHRINK", "STORM MOVING": "MOVING" } as Record<string, string>)[label] : undefined;
+      this.stormText.textContent = short ?? label;
+      this.matchTime.textContent = clock;
+      this.matchTime.classList.toggle("hidden", !clock);
+      this.stormChip.classList.toggle("closing", moving);
     });
     const dx = me.x - st.storm.cx, dy = me.y - st.storm.cy;
     const outside = me.alive && dx * dx + dy * dy > st.storm.r * st.storm.r;
+    // not hurting yet, but outside the NEXT safe circle: tell the player before the storm moves
+    const ndx = me.x - st.storm.tx, ndy = me.y - st.storm.ty;
+    const outNext = me.alive && !outside && st.storm.targetR < st.storm.r - 1 && ndx * ndx + ndy * ndy > st.storm.targetR * st.storm.targetR;
     const low = me.alive && me.hp / Math.max(1, me.maxHp) < 0.3;
-    this.set("out", (outside ? 1 : 0) + (low ? 2 : 0) + st.storm.dps * 4, () => {
-      this.stormWarn.classList.toggle("hidden", !outside);
+    this.set("out", `${outside ? 1 : 0}${outNext ? 1 : 0}${low ? 1 : 0}${st.storm.dps}${this.zoneDir}`, () => {
+      this.stormWarn.classList.toggle("hidden", !(outside || outNext));
+      this.stormWarn.classList.toggle("soft", !outside && outNext);
       // say how much it hurts and what to do (cold judge #4: storm deaths were confusing)
-      this.stormWarn.textContent = `OUTSIDE THE ZONE · −${st.storm.dps} HP/s · GET TO THE CIRCLE`;
+      this.stormWarn.textContent = outside ? `OUTSIDE THE ZONE · −${st.storm.dps} HP/s · MOVE ${this.zoneDir || "↗"}` : `OUTSIDE THE NEXT ZONE · MOVE ${this.zoneDir || "↗"}`;
       this.vignette.className = outside ? "on" : low ? "low" : "";
     });
 
