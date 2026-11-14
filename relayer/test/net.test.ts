@@ -142,10 +142,10 @@ import { sha256 } from "../../src/net/near.ts";
 
 test("T3: history entries become ready-to-show lines", () => {
   const e = (kind: string, amount: string, detail: string) => histEvent({ match_id: "42", at_ms: "1000", kind, amount, detail });
-  assert.equal(e("win", "70420000000000000000", "1:3").text, "Won match #42 and took 70.42 $NOX (3 kills)");
+  assert.equal(e("win", "70420000000000000000", "1:3").text, "Won match #42 and took 70.42 NOX (3 kills)");
   assert.equal(e("death", "0", "4:1").kind, "kill");
   assert.equal(e("death", "0", "9:0").text, "Finished #9 in match #42");
-  assert.equal(e("upgrade", "120000000000000000000", "weapon 2").text, "Bought weapon tier 2 for 120 $NOX");
+  assert.equal(e("upgrade", "120000000000000000000", "weapon 2").text, "Bought weapon tier 2 for 120 NOX");
   assert.equal(e("bounty", "15000000000000000000", "lost").kind, "bounty");
   assert.equal(e("retired", "0", "broke").kind, "retired");
   assert.equal(e("dividend", "7040000000000000000", "").kind, "sponsored");
