@@ -14,8 +14,9 @@ const TESTNET = process.argv.includes("--testnet");
 const NET = TESTNET ? "testnet" : "mainnet";
 const RPC = process.env.BR_RPC ?? (TESTNET ? "https://test.rpc.fastnear.com" : "https://free.rpc.fastnear.com");
 const CONTRACT = process.env.BR_CONTRACT ?? (TESTNET ? "royale.br-7e8492.testnet" : "noxara.near");
-/** sha256 of the audited release wasm deployed on mainnet (docs/MAINNET.md; rebuild: node scripts/build-contract.ts) */
-const MAINNET_WASM_SHA256 = "d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472";
+/** sha256 of the audited release wasm live on mainnet (season-extension upgrade 2026-11-14, tx BRLkqYPr…; the first
+ *  release was d734724f…). docs/MAINNET.md §6; rebuild: node scripts/build-contract.ts */
+const MAINNET_WASM_SHA256 = "2c85142b3afd34b40a52fe68864bb3fb3fd4c1cf6387edc69c69d869330f7db9";
 /** mainnet: nothing was ever minted beyond genesis (9 × 100 to the bots + 2,000 to the House) */
 const GENESIS = 2900n * 10n ** 18n;
 const BALANCE_N = 300;

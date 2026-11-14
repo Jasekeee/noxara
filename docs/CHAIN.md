@@ -231,10 +231,10 @@ The owner decides before submission whether to remove it (lock: no more upgrades
 through the owner account).
 
 **Season end and teardown:**
-- from **2026-11-20 00:00 UTC** no new matches start; players can `storage_unregister` and get their
+- from **2026-12-15 00:00 UTC** no new matches start; players can `storage_unregister` and get their
   OWN storage deposits back (open sponsorships are closed at their wallet value; never blocked by
   other people's matches);
-- from **2026-11-25 00:00 UTC** the owner calls `teardown()` (no argument): it closes anything still
+- from **2026-12-20 00:00 UTC** the owner calls `teardown()` (no argument): it closes anything still
   in flight (max 60 per call, call again if more) and deletes the contract's own account, sending all
   its NEAR (code + state + leftover, incl. deposits the relayer paid) to the **teardown beneficiary
   fixed at `new()`**. Works without any full-access key. All NOX disappears with it (play-money). The
@@ -248,7 +248,7 @@ through the owner account).
 
 | Step | Tx |
 |---|---|
-| deploy + `new()` in ONE tx on the root itself (owner `br-7e8492.testnet`, server = guest parent = `relay.nx-4ba5bb.testnet`, beneficiary = owner; `teardown-override` build with the lock 15 min ahead — mainnet uses the release build, locked to 2026-11-25) | `8sN695wi7ZZ4hdJ3joFMjc58crHXNBbCFJ3gKYSnZAKF` |
+| deploy + `new()` in ONE tx on the root itself (owner `br-7e8492.testnet`, server = guest parent = `relay.nx-4ba5bb.testnet`, beneficiary = owner; `teardown-override` build with the lock 15 min ahead — mainnet uses the release build, locked to 2026-11-25 at deploy, moved to 2026-12-20 by the season-extension upgrade) | `8sN695wi7ZZ4hdJ3joFMjc58crHXNBbCFJ3gKYSnZAKF` |
 | create the relayer (also the match server) | `HPpAKJDirDkXqFKuynM8jHjVhgwbJ2gpqtcTbeSUh27j` |
 | guest match #2: relayed start / settle signed by the relayer (12.7 Tgas), played in real time (the server refused an instant record #1 as `too_fast`) | `GuazvDYPTDZ4XTUn4Ctj45fdFKxY6t8a5L72v3KwEkoc` / `G1oS32CTS1YXmDDmsStjJRBaWtpjpVbYXAbWYTDE6eKy` |
 | the root's ONLY full-access key deleted (0 keys left) | `46JS52ouTGZvBYfxMJFb1iX796d7iy4wAyHHYEYcfYR6` |
@@ -293,9 +293,9 @@ kept `z`); `lto`, `codegen-units = 1`, `panic = "abort"` were already set; `over
 | `set_max_free` | owner | size the free-match pool (≤ 96) | affect paid matches |
 | `house_grant` | owner | give ≤ 100 NOX from the house to a registered real player (testing / on-ramp), never below the house floor | mint; touch any player's or bot's NOX |
 | `set_teardown_beneficiary` | owner, only if never set | set the payee once (older deployments) | change it |
-| `teardown_clear` | owner, from 2026-11-25 00:00 UTC | close pending matches (8/call) and delete state in bounded batches | run before the lock (release builds can't move it) |
-| `teardown` | owner, from 2026-11-25 00:00 UTC | delete the contract account, all its NEAR to the fixed beneficiary | run earlier; choose another payee |
-| `withdraw_excess` | owner, from 2026-11-25 00:00 UTC | send NEAR above the storage cost (+0.05) to the fixed beneficiary | touch storage-backing NEAR |
+| `teardown_clear` | owner, from 2026-12-20 00:00 UTC | close pending matches (8/call) and delete state in bounded batches | run before the lock (release builds can't move it) |
+| `teardown` | owner, from 2026-12-20 00:00 UTC | delete the contract account, all its NEAR to the fixed beneficiary | run earlier; choose another payee |
+| `withdraw_excess` | owner, from 2026-12-20 00:00 UTC | send NEAR above the storage cost (+0.05) to the fixed beneficiary | touch storage-backing NEAR |
 | `create_guest` | only the relayer account (`guest_parent`) | create `g-<8–32 hex>.<contract>` with a fixed function-call key (this contract, `start_match,sweep_match`, 0.05 NEAR allowance), funded by its own attached deposit (≤ 0.01 NEAR); failure refunds the deposit to the relayer | add a full-access key; create any other name; overwrite an existing account; spend the contract's NEAR beyond a refund of what was attached |
 | `close_retired`, `sweep_match` | anyone | settle a retired bot (sponsors get its wallet by share, rest to the house) / refund an expired match | anything else |
 
@@ -303,7 +303,7 @@ No method lets the owner or the server move a player's NOX: transfers out of a p
 happen when that player calls `ft_transfer`/`sponsor`/`start_match` (entry) or by the fixed match
 rules. Game wallets (the contract, the house, every bot and rookie) refuse NEP-141 transfers.
 
-**Teardown steps (after 2026-11-25 00:00 UTC):** NEAR refuses to delete an account whose state is
+**Teardown steps (after 2026-12-20 00:00 UTC):** NEAR refuses to delete an account whose state is
 large (`DeleteAccountWithLargeState`; the testnet contract has ~56 KB). So: (1) `teardown_clear` in
 batches until `done` (`scripts/teardown.ts` lists every registered player from the chain's
 `storage_deposit` history and loops); (2) then EITHER the owner calls `teardown()` (works without

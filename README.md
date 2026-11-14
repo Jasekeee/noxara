@@ -19,11 +19,11 @@
 
 A 3-minute top-down battle royale on a tiny island at dusk: you against **9 AI fighters that are persistent characters with their own NEAR wallets**. They pay to enter, keep what they win, buy upgrades that change how they fight, and retire when they go broke; a rookie takes the empty slot. The richest one carries a bounty. Fans can own shares of a fighter and earn from its profit. No dev patch needed: the economy moves on its own.
 
-Track: **Games** (NEAR HACKATHON). Status: **live on NEAR mainnet since 2026-11-14**: contract [`noxara.near`](https://nearblocks.io/address/noxara.near), deploy tx [`BmMiB9cc…`](https://nearblocks.io/txns/BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6), code sha256 `d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472`. The testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment. Every match is seeded on chain, re-verified by replaying its inputs, and settled on chain. Token: **Nox (NOX)**, play-money only.
+Track: **Games** (NEAR HACKATHON). Status: **live on NEAR mainnet since 2026-11-14**: contract [`noxara.near`](https://nearblocks.io/address/noxara.near), deploy tx [`BmMiB9cc…`](https://nearblocks.io/txns/BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6), current code sha256 `2c85142b3afd34b40a52fe68864bb3fb3fd4c1cf6387edc69c69d869330f7db9` (season-extension upgrade; first release `d734724f07c8…`). The testnet build (`royale.br-7e8492.testnet`) stays up as the rehearsal environment. Every match is seeded on chain, re-verified by replaying its inputs, and settled on chain. Token: **Nox (NOX)**, play-money only.
 
-Ranked (on-chain) play: until 2026-11-20 00:00 UTC (an extension to 2026-12-15 is pending a contract upgrade)
+Ranked (on-chain) play: until **2026-12-15 00:00 UTC** (extended by a reviewed contract upgrade on 2026-11-14, tx [`BRLkqYPr…`](https://nearblocks.io/txns/BRLkqYPrbmXUQbwzhaUPC5AmM7SWa9ybd31z8UbQp63k); code sha256 `2c85142b…`).
 
-Practice modes (Training Island, `?offline`) are always available. After the ranked window there is an exit window (players reclaim deposits); the owner can tear the contract down from 2026-11-25 (time-locked in the contract; see [`docs/MAINNET.md`](docs/MAINNET.md)).
+Practice modes (Training Island, `?offline`) are always available. After the ranked window there is an exit window (players reclaim deposits); the owner can tear the contract down from 2026-12-20 (time-locked in the contract; see [`docs/MAINNET.md`](docs/MAINNET.md)).
 
 ## 60-second judge path
 1. Open **https://playnoxara.vercel.app** and press **PLAY** as a guest (WASD to move, click to fire; on a phone: left stick moves, drag the right stick to aim).
@@ -90,7 +90,7 @@ Guests play everything but earn **zero** NOX; only signed-in NEAR accounts can e
 | `house_grant(account, amount)` | Move NOX from the House treasury to a registered real player (capped per call, never to guests, House floor respected; nothing minted) |
 | `set_max_free(n)` | Size of the free-match pool; paid matches are unaffected |
 | `propose_owner` / `accept_owner`, `set_teardown_beneficiary` | Hand over ownership; set the teardown beneficiary once |
-| `teardown()`, `teardown_clear(...)`, `withdraw_excess(amount)` | Only from 2026-11-25 00:00 UTC (time-locked): close in-flight matches, clear state, delete the contract and send its NEAR balance to the fixed beneficiary |
+| `teardown()`, `teardown_clear(...)`, `withdraw_excess(amount)` | Only from 2026-12-20 00:00 UTC (time-locked): close in-flight matches, clear state, delete the contract and send its NEAR balance to the fixed beneficiary |
 
 Not possible by any method: minting NOX, moving a player's or fighter's NOX.
 </details>

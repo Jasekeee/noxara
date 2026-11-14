@@ -59,11 +59,11 @@ Up to 4 agents, each in its own git worktree/branch, strict file ownership (see 
   - One contract on the root (game + token); bots = keyless sub-accounts with minimum balance; only root, relay, bots.
   - Guest gas budget 1 NEAR on the relayer, daily guest cap, per-IP limit, clean stop → guests play offline, real accounts still work.
   - Before any mainnet step: fresh security audit; all HIGH/MEDIUM fixed; second audit GO.
-  - Season ends 2026-11-25; teardown returns refundable storage to the owner's wallet.
+  - Ranked season ends 2026-12-15 (extended on mainnet 2026-11-14, tx BRLkqYPrbmXUQbwzhaUPC5AmM7SWa9ybd31z8UbQp63k); teardown from 2026-12-20 returns refundable storage to the owner's wallet.
 - Welcome stake = a one-time, non-transferable **entry credit** (30) per real account that registers itself or via the relayer; never guests.
 
 ## Owner decisions (2026-11-14 ~00:45 UTC)
 - **Fallback:** if mainnet is not live and stable by **2026-11-14 15:00 UTC**, submit the testnet version; add mainnet later only if time allows.
-- **Contract keys stay** (not removed): bug fixes during judging + account deletion after 2026-11-25 to refund storage. README must disclose: the developer holds the key for fixes during judging; no method in the deployed code can move players' tokens; list every admin method with what it can and cannot do; and say plainly that the key holder could deploy new code (the honest limit of that promise).
+- **Contract keys stay** (not removed): bug fixes during judging + account deletion after 2026-12-20 to refund storage. README must disclose: the developer holds the key for fixes during judging; no method in the deployed code can move players' tokens; list every admin method with what it can and cannot do; and say plainly that the key holder could deploy new code (the honest limit of that promise).
 - Next feature after current tasks are green (≤3 h, ≤1 helper, no sim-core changes): Challenge a friend (shared seed + roster, server-verified replay, X preview), daily tournament (one seed per UTC day, free, play-money NOX prizes, guests earn 0), README roadmap "Live PvP lobbies (humans + AI fighters in one match)". No real-money wagering anywhere.
 

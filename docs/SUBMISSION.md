@@ -19,7 +19,7 @@ Repository: https://github.com/Jasekeee/noxara (private until the owner makes it
 | Repository | https://github.com/Jasekeee/noxara |
 | Video | trailer: posted on X by the owner (link added after posting) |
 | X post | added after posting |
-| Mainnet contract | `noxara.near` — https://nearblocks.io/address/noxara.near (deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`; code sha256 `d734724f07c8c0a4de5461d2e72fef86f20ba8c2e0a7960e74c3da8d19057472`) |
+| Mainnet contract | `noxara.near` — https://nearblocks.io/address/noxara.near (deploy tx `BmMiB9ccNQcWkGnFZxCLMG8VQRn7GDBGT1EHXK2r26H6`; current code sha256 `2c85142b3afd34b40a52fe68864bb3fb3fd4c1cf6387edc69c69d869330f7db9` after the 2026-11-14 season-extension upgrade (tx `BRLkqYPrbmXUQbwzhaUPC5AmM7SWa9ybd31z8UbQp63k`); first release `d734724f07c8…`) |
 | Proof in one command | `npm run verify` → 11/11 PASS on mainnet (code hash = audited build, 9 keyless bots, settled match input-log hash, minted = genesis 2,900) |
 | Traction (live, 2026-11-14 15:54 UTC, `get_config` via the match server) | 11 matches started, 7 settled on mainnet; 2,900 NOX minted (genesis only), 162.48 burned |
 | AI disclosure | Built by the owner directing Claude Code (Anthropic); all code, tests and docs were generated with AI assistance and reviewed by tests, independent AI security reviews and the owner. Art: Kenney CC0. |
@@ -33,7 +33,7 @@ NOXARA is a 3-minute top-down battle royale: you against 9 AI fighters on an isl
 Fans can own **shares** of a fighter (NEP-245 in the same contract). Dividends come only from the fighter's profit; when a fighter goes bankrupt, its shares go to zero. One public rule (`get_economy`) steers the treasury, and nothing is minted after genesis. Matches are seeded by the next block, replayed by the match server from your inputs, and settled on chain. Guests play in seconds with no wallet, no gas and no popups.
 
 ## 2. What to try (do X → see Y)
-Judge path: open https://playnoxara.vercel.app, press PLAY as a guest (no wallet), finish a match and look for **Verified**; then FIGHTERS, ECONOMY and the contract `noxara.near` on https://nearblocks.io/address/noxara.near. Mainnet accounts: `noxara.near` (game + NOX), `relay.noxara.near` (relayer + match server), `<fighter>.noxara.near` (keyless fighters), owner `zhasik.near`. Ranked (on-chain) play is open until 2026-11-20 00:00 UTC; practice modes always. The testnet build `royale.br-7e8492.testnet` is the rehearsal environment.
+Judge path: open https://playnoxara.vercel.app, press PLAY as a guest (no wallet), finish a match and look for **Verified**; then FIGHTERS, ECONOMY and the contract `noxara.near` on https://nearblocks.io/address/noxara.near. Mainnet accounts: `noxara.near` (game + NOX), `relay.noxara.near` (relayer + match server), `<fighter>.noxara.near` (keyless fighters), owner `zhasik.near`. Ranked (on-chain) play is open until 2026-12-15 00:00 UTC; practice modes always. The testnet build `royale.br-7e8492.testnet` is the rehearsal environment.
 | Do | See |
 |---|---|
 | **About the game** (title link, in-match menu, or `/?about`) | The pitch, how to play, the economy in plain words, links to the contract and live transactions |
@@ -86,7 +86,7 @@ Prerequisites: the audited `main` build; `node scripts/build-contract.ts` prints
 | 5 | Owner | `! cd <repo> && ENV_FILE=.env.mainnet BR_MAINNET_YES=yes node scripts/deploy.ts --network mainnet --root noxara.near --contract-on-root --owner <your-wallet>.near` | ≈ 5.05 code + 0.5 state + 1.5 relayer + 0.01 bots + gas ≈ **7.1 NEAR** (≈ 6.0 refundable) |
 | 6 | Claude (read-only) | `npm run verify` against mainnet: contract metadata Nox/NOX, 10 keyless accounts, one smoke match | 0 |
 | 7 | Owner (hosting) | Step by step in **docs/HOSTING.md**: Railway runs the match server + relayer (`railway.json`; variables incl. `GUEST_VIA_CONTRACT=1`, pasted by you from `.env.mainnet`), Vercel builds the game (`vercel.json`; `VITE_NEAR_NETWORK=mainnet` + `VITE_RELAYER_URL`) | Railway ≈ $5/month [assumed] |
-Teardown after 2026-11-25: docs/MAINNET.md §4.
+Teardown after 2026-12-20: docs/MAINNET.md §4.
 
 ## 6. Tag plan (HACKATHON.md Q-003)
 - `pre-hackathon`: not needed. All code was written inside the window; the first commit `6649b77` is from 2026-11-13. Optional: tag `6649b77` and say so in the README.

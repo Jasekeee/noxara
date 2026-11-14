@@ -97,8 +97,11 @@ pub const WELCOME_SELF_DAILY_CAP: u32 = 10;
 const PENDING_OWNER_KEY: &[u8] = b"pending_owner";
 const CLEAR_MATCH_KEY: &[u8] = b"clear_match_cursor";
 const CLEAR_ROOKIE_KEY: &[u8] = b"clear_rookie_cursor";
-/// The owner may delete the whole contract account (deposits back) only after this: 2026-11-25 00:00 UTC.
-pub const TEARDOWN_AFTER_MS: u64 = 1_795_564_800_000;
+/// The owner may delete the whole contract account (deposits back) only after this: 2026-12-20 00:00 UTC.
+pub const TEARDOWN_AFTER_MS: u64 = 1_797_724_800_000;
+/// The lock the first mainnet release stored at new() (2026-11-25 00:00 UTC). `migrate` moves exactly this
+/// value to TEARDOWN_AFTER_MS (ranked play extended through judging); any other stored value is kept.
+pub const OLD_TEARDOWN_AFTER_MS: u64 = 1_795_564_800_000;
 const TEARDOWN_KEY: &[u8] = b"teardown_after";
 const BENEFICIARY_KEY: &[u8] = b"teardown_beneficiary";
 const PAID_IDS_KEY: &[u8] = b"pending_paid_ids";
@@ -106,9 +109,9 @@ const PAID_IDS_KEY: &[u8] = b"pending_paid_ids";
 pub const TEARDOWN_SWEEP: usize = 8;
 /// A guest may start a free match at most once per this many blocks (~1 minute).
 pub const FREE_COOLDOWN_BLOCKS: u64 = 100;
-/// From 2026-11-20 00:00 UTC the season is ending: players can leave even with open sponsorships
+/// From 2026-12-15 00:00 UTC the season is ending: players can leave even with open sponsorships
 /// (they are closed at their current value) to take their own deposits back before the teardown.
-pub const SEASON_END_MS: u64 = 1_795_132_800_000;
+pub const SEASON_END_MS: u64 = 1_797_292_800_000;
 
 /// The earliest teardown. Release builds always use TEARDOWN_AFTER_MS; only the unit tests and the
 /// non-default `teardown-override` feature (sandbox tests) may move it.
@@ -658,7 +661,7 @@ impl Contract {
     /// block. The final value of this tx is a `MatchStart`.
     pub fn start_match(&mut self) -> Promise {
         // after the season ends nobody can start (so nobody can keep matches in flight to block teardown)
-        // from the season's end (2026-11-20, before the teardown) no new matches: escrow drains and
+        // from the season's end (2026-12-15, before the teardown) no new matches: escrow drains and
         // players can take their deposits back; nobody can keep matches in flight to block teardown
         require!(env::block_timestamp_ms() < SEASON_END_MS.min(self.teardown_after()), "the season is over: thanks for playing");
         let id = env::predecessor_account_id();
@@ -1068,14 +1071,14 @@ impl Contract {
         self.owner = who;
     }
 
-    /// Owner, after the time lock (2026-11-25 00:00 UTC), with no match in flight: delete this
+    /// Owner, after the time lock (2026-12-20 00:00 UTC), with no match in flight: delete this
     /// contract's own account and send its whole NEAR balance to the beneficiary fixed at `new()`.
     /// Works without any full-access key on the account. Keyless bot / house / rookie sub-accounts
     /// can't be deleted: their ~0.001 NEAR each stays. Storage deposits the relayer paid go back to
     /// the operator with the rest; players can take their own deposits back from the season's end.
     pub fn teardown(&mut self) -> near_sdk::PromiseOrValue<bool> {
         require!(env::predecessor_account_id() == self.owner, "owner only");
-        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-11-25 00:00 UTC");
+        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-12-20 00:00 UTC");
         let beneficiary = self.teardown_beneficiary().unwrap_or_else(|| env::panic_str("no teardown beneficiary set"));
         // close what is still in flight first (no new matches can start now): bots get their entries
         // back, players' entries follow the abandon rules (credit-paid ones back to the house)
@@ -1102,7 +1105,7 @@ impl Contract {
     /// lists them from the chain's storage_deposit history). Call again until `done`.
     pub fn teardown_clear(&mut self, players: Vec<AccountId>, max_matches: Option<u32>, max_rookies: Option<u32>) -> ClearProgress {
         require!(env::predecessor_account_id() == self.owner, "owner only");
-        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-11-25 00:00 UTC");
+        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-12-20 00:00 UTC");
         require!(players.len() <= 40, "at most 40 players per call");
         // 1. anything still in flight
         let mut todo: Vec<u64> = self.pending_free.clone();
@@ -1179,7 +1182,7 @@ impl Contract {
     /// fixed beneficiary — a fallback if the account can't be deleted.
     pub fn withdraw_excess(&mut self, amount: U128) -> Promise {
         require!(env::predecessor_account_id() == self.owner, "owner only");
-        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-11-25 00:00 UTC");
+        require!(env::block_timestamp_ms() >= self.teardown_after(), "teardown is locked until 2026-12-20 00:00 UTC");
         let beneficiary = self.teardown_beneficiary().unwrap_or_else(|| env::panic_str("no teardown beneficiary set"));
         let locked = env::storage_byte_cost().as_yoctonear() * env::storage_usage() as u128 + NearToken::from_millinear(50).as_yoctonear();
         let free = env::account_balance().as_yoctonear().saturating_sub(locked);
@@ -1199,7 +1202,7 @@ impl Contract {
         self.teardown_beneficiary()
     }
 
-    /// True from 2026-11-20 00:00 UTC: players may leave with open sponsorships (closed at value).
+    /// True from 2026-12-15 00:00 UTC: players may leave with open sponsorships (closed at value).
     pub fn is_season_ending(&self) -> bool {
         env::block_timestamp_ms() >= SEASON_END_MS
     }
@@ -1216,6 +1219,11 @@ impl Contract {
     #[private]
     #[init(ignore_state)]
     pub fn migrate() -> Self {
+        // ranked play extended through judging: the release lock stored at new() (2026-11-25) moves to
+        // TEARDOWN_AFTER_MS (2026-12-20); any other stored value (test builds) is left as it is
+        if env::storage_read(TEARDOWN_KEY).is_some_and(|v| v.len() == 8 && u64::from_le_bytes(v[0..8].try_into().unwrap()) == OLD_TEARDOWN_AFTER_MS) {
+            env::storage_write(TEARDOWN_KEY, &TEARDOWN_AFTER_MS.to_le_bytes());
+        }
         // V2 state is a superset of V1: try V2 first (code-only upgrade), else convert V1
         // `version` is the first field of every layout: peek at it before choosing one
         let raw = env::storage_read(b"STATE").expect("no state");

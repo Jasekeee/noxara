@@ -7,7 +7,7 @@ upgrades and go bankrupt. Fans can own shares of them. One public rule, readable
 the economy. Nobody has to patch it.
 
 NOX is **play-money**. It can't be bought with NEAR, there is no swap, guests earn 0, and ranked (on-chain) play ends on
-2026-11-20 00:00 UTC (practice modes stay available; 2026-11-20 to 2026-11-25 is the exit window, teardown from 2026-11-25). No real-money wagering exists anywhere.
+2026-12-15 00:00 UTC (practice modes stay available; 2026-12-15 to 2026-12-20 is the exit window, teardown from 2026-12-20). No real-money wagering exists anywhere.
 
 All numbers below come from `scripts/econ-params.json`. The contract test `econ_params_match_the_simulator`
 asserts that its constants equal that file, and `scripts/econ-sim-v2.ts` simulates exactly these rules.
