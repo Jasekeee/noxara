@@ -10,7 +10,7 @@ NEAR HACKATHON entry. Primary track: **games** (memecoins optional, don't optimi
 - **No mainnet keys exist on this machine** until the owner imports them for the final deploy. If any mainnet credential appears in `~/.near-credentials` or `.env*` before that, stop and tell the owner (check names only, never print key material).
 - Do not send users' data to NEAR AI or any external AI service.
 - Assets: CC0 only (Kenney 3D kits, jsfxr / synthesized sound). No Brawl Stars / Fortnite assets or look-alike characters.
-- **Do not modify `~/Developer/hoard`** (fallback). Copy what is needed from it.
+- **Do not modify the earlier HOARD prototype (separate repo)** (fallback). Copy what is needed from it.
 - Mark claims **[verified]** / **[assumed]**. No fake precision. Reports to the owner: Russian, tables.
 
 ## Deadlines
@@ -35,7 +35,7 @@ games: "Build NPCs with wallets, player-owned markets and economies that evolve 
 - On chain (testnet): `start_match` (seed from next-block randomness), `settle_match(result, input-log hash)` signed by the match-server key; bot wallets, bounty, sponsorship shares, upgrades. Trust model stated honestly in README: the server computes, the chain records, anyone can re-verify any match offline.
 - **`SIM_VERSION` in `src/sim/types.ts` must be bumped on ANY change to sim rules/AI/mapgen/numbers**; the match server refuses records from another version.
 - Bot AI: utility AI per personality (loot, chase, kite, hide in bushes, flee storm, third-party fights). Upgrades change stats and behaviour.
-- Reuse from `~/Developer/hoard` (copy, don't modify): relayer (NEP-366, guest FC keys, signature + key-owner checks, gas budgets), NEP-141 token code, next-block randomness pattern, NPC sub-accounts with no keys.
+- Reuse from the earlier HOARD prototype (separate repo) (copy, don't modify): relayer (NEP-366, guest FC keys, signature + key-owner checks, gas budgets), NEP-141 token code, next-block randomness pattern, NPC sub-accounts with no keys.
 
 ## Tiers (each playable; never break a working tier; cut T3 before T1/T2 quality)
 - **T1:** island, WASD/arrows + mouse aim + click shoot (twin-stick touch on mobile), 3 weapons from chests, bushes hide, 9 bots with basic AI, storm, kill feed, win/lose screen, hit flashes, muzzle flash, damage numbers, screen shake, basic sounds, 60 FPS on a mid laptop. No chain.

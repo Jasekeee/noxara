@@ -1,9 +1,9 @@
 # C — Fresh judge + AI screener audit: NOXARA
 
 Auditor: fresh judge subagent (no prior context). Date: 2026-11-14, ~13:45–14:25 UTC.
-Clone: `git clone ~/Developer/bounty-royale` → `scratchpad/audit/clone` at `31d694a` (257 commits, first commit `6649b77` 2026-11-13). Node v24.21.0.
+Clone: a fresh local clone at `31d694a` (257 commits, first commit `6649b77` 2026-11-13). Node v24.21.0.
 Live: https://playnoxara.vercel.app (headless Chromium, desktop 1440×900 + 390×844). **0 live ranked matches played** (Training Island / `?offline` only; no wallet sign-in; no chain writes). Mainnet facts below come from read-only RPC views (`rpc.mainnet.fastnear.com`).
-Screenshots: `scratchpad/audit/C-shots/` (live-desk-*, live-m390-*). Logs: `scratchpad/audit/*.log`.
+Screenshots: a local scratch folder (live-desk-*, live-m390-*). Logs: local logs.
 
 ## Stage 1 — AI screener checklist
 
